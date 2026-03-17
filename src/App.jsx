@@ -1706,7 +1706,7 @@ export default function App() {
                   </div>
                   <button
                     onClick={submitProjectRequest}
-                    disabled={!projectValues.clientId || !projectValues.title}
+                    disabled={!projectValues.title}
                     className="w-full bg-black text-white p-5 rounded-2xl font-black text-lg shadow-xl active:scale-95 transition-all disabled:opacity-30 mt-4"
                   >
                     {projectSubmitting ? 'Submitting...' : 'Submit Request'}
