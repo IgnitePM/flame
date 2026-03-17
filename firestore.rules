@@ -26,7 +26,9 @@ service cloud.firestore {
     }
 
     function isCycleLocked(clientId, cycleStart) {
-      return clientDoc(clientId).data.cycleLocks[string(cycleStart)].locked == true;
+      return (clientDoc(clientId).data.cycleLocks is map) &&
+        (clientDoc(clientId).data.cycleLocks[string(cycleStart)] is map) &&
+        (clientDoc(clientId).data.cycleLocks[string(cycleStart)].locked == true);
     }
 
     // Default: require auth to read; deny unknown writes.

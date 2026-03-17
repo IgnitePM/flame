@@ -1582,41 +1582,52 @@ export default function App() {
                 </>
               ) : (
                 <>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
-                      Client
-                    </label>
-                    <select
-                      value={projectValues.clientId}
-                      onChange={(e) => {
-                        const id = e.target.value;
-                        const client = clients.find((c) => c.id === id);
-                        setProjectValues((prev) => ({
-                          ...prev,
-                          clientId: id,
-                          clientName: client?.name || '',
-                        }));
-                        if (!projectBudgetOverride) {
-                          const hours = Number(projectValues.estimatedHours) || 0;
-                          const rate = Number(client?.hourlyRate) || 0;
-                          if (hours > 0 && rate > 0) {
-                            setProjectValues((prev) => ({
-                              ...prev,
-                              estimatedBudget: (hours * rate).toFixed(2),
-                            }));
+                  {projectModal?.lockClient ? (
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
+                        Client
+                      </label>
+                      <div className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-black text-slate-800">
+                        {projectValues.clientName || projectModal?.name || 'Selected client'}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
+                        Client
+                      </label>
+                      <select
+                        value={projectValues.clientId}
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          const client = clients.find((c) => c.id === id);
+                          setProjectValues((prev) => ({
+                            ...prev,
+                            clientId: id,
+                            clientName: client?.name || '',
+                          }));
+                          if (!projectBudgetOverride) {
+                            const hours = Number(projectValues.estimatedHours) || 0;
+                            const rate = Number(client?.hourlyRate) || 0;
+                            if (hours > 0 && rate > 0) {
+                              setProjectValues((prev) => ({
+                                ...prev,
+                                estimatedBudget: (hours * rate).toFixed(2),
+                              }));
+                            }
                           }
-                        }
-                      }}
-                      className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-black outline-none focus:ring-2 focus:ring-[#fd7414]"
-                    >
-                      <option value="">Select client...</option>
-                      {clients.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                        }}
+                        className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-black outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      >
+                        <option value="">Select client...</option>
+                        {clients.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   <div className="space-y-1">
                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Project Title</label>

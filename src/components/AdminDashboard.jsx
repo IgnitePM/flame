@@ -1033,7 +1033,7 @@ const AdminDashboard = ({
                     >
                       <button
                         onClick={() => {
-                          setProjectModal(c);
+                          setProjectModal({ ...c, lockClient: true });
                           setProjectValues({
                             clientId: c.id,
                             clientName: c.name,
@@ -1529,7 +1529,7 @@ const AdminDashboard = ({
                           </h5>
                           <button
                             onClick={() => {
-                              setProjectModal(c);
+                              setProjectModal({ ...c, lockClient: true });
                               setProjectValues({
                                 clientId: c.id,
                                 clientName: c.name,
