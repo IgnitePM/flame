@@ -132,6 +132,8 @@ export default function App() {
     estimatedHours: '',
   });
   const [projectBudgetOverride, setProjectBudgetOverride] = useState(false);
+  const [projectSubmitting, setProjectSubmitting] = useState(false);
+  const [projectSubmitError, setProjectSubmitError] = useState('');
 
   // Employee Form states
   const [selectedClient, setSelectedClient] = useState('');
@@ -501,28 +503,63 @@ export default function App() {
     const clientId = projectValues.clientId || (projectModal && projectModal.id);
     const clientName = projectValues.clientName || (projectModal && projectModal.name);
 
-    if (view === 'client_portal') {
-      if (!projectValues.category || !projectValues.requestDescription || !clientId)
+    if (projectSubmitting) return;
+    setProjectSubmitError('');
+    setProjectSubmitting(true);
+    try {
+      if (view === 'client_portal') {
+        if (!projectValues.category || !projectValues.requestDescription || !clientId)
+          return;
+
+        await addDoc(collection(db, 'projects'), {
+          clientId,
+          clientName,
+          category: projectValues.category,
+          requestDescription: projectValues.requestDescription,
+          status: 'requested',
+          invoiced: false,
+          createdAt: Date.now(),
+          estimate: null,
+          clientDecision: null,
+          notificationState: {
+            adminNeedsReview: true,
+            clientVisible: true,
+          },
+        });
+
+        setProjectModal(null);
+        setProjectBudgetOverride(false);
+        setProjectValues({
+          clientId: '',
+          clientName: '',
+          title: '',
+          description: '',
+          category: '',
+          requestDescription: '',
+          estimatedBudget: '',
+          estimatedHours: '',
+        });
         return;
+      }
+
+      if (!projectValues.title || !clientId) return;
 
       await addDoc(collection(db, 'projects'), {
         clientId,
         clientName,
-        category: projectValues.category,
-        requestDescription: projectValues.requestDescription,
+        title: projectValues.title,
+        description: projectValues.description,
+        category: projectValues.category || null,
+        requestDescription: projectValues.requestDescription || null,
+        estimatedBudget: Number(projectValues.estimatedBudget) || 0,
+        estimatedHours: Number(projectValues.estimatedHours) || 0,
         status: 'requested',
         invoiced: false,
         createdAt: Date.now(),
-        estimate: null,
-        clientDecision: null,
-        notificationState: {
-          adminNeedsReview: true,
-          clientVisible: true,
-        },
       });
 
-    setProjectModal(null);
-    setProjectBudgetOverride(false);
+      setProjectModal(null);
+      setProjectBudgetOverride(false);
       setProjectValues({
         clientId: '',
         clientName: '',
@@ -533,37 +570,11 @@ export default function App() {
         estimatedBudget: '',
         estimatedHours: '',
       });
-      return;
+    } catch (err) {
+      setProjectSubmitError(err?.message || String(err));
+    } finally {
+      setProjectSubmitting(false);
     }
-
-    if (!projectValues.title || !clientId) return;
-
-    await addDoc(collection(db, 'projects'), {
-      clientId,
-      clientName,
-      title: projectValues.title,
-      description: projectValues.description,
-      category: projectValues.category || null,
-      requestDescription: projectValues.requestDescription || null,
-      estimatedBudget: Number(projectValues.estimatedBudget) || 0,
-      estimatedHours: Number(projectValues.estimatedHours) || 0,
-      status: 'requested',
-      invoiced: false,
-      createdAt: Date.now()
-    });
-
-    setProjectModal(null);
-    setProjectBudgetOverride(false);
-    setProjectValues({
-      clientId: '',
-      clientName: '',
-      title: '',
-      description: '',
-      category: '',
-      requestDescription: '',
-      estimatedBudget: '',
-      estimatedHours: '',
-    });
   };
 
   // Helpers
@@ -1507,6 +1518,8 @@ export default function App() {
                 onClick={() => {
                   setProjectModal(null);
                   setProjectBudgetOverride(false);
+                  setProjectSubmitting(false);
+                  setProjectSubmitError('');
                 }}
                 className="p-2 bg-white rounded-full hover:bg-slate-100 border border-slate-200"
               >
@@ -1514,6 +1527,11 @@ export default function App() {
               </button>
             </div>
             <div className="p-8 space-y-5 text-left">
+              {projectSubmitError && (
+                <div className="bg-red-50 text-red-700 border border-red-100 p-3 rounded-2xl text-sm font-bold">
+                  {projectSubmitError}
+                </div>
+              )}
               {view === 'client_portal' ? (
                 <>
                   <div className="space-y-1">
@@ -1559,7 +1577,7 @@ export default function App() {
                     disabled={!projectValues.category || !projectValues.requestDescription}
                     className="w-full bg-black text-white p-5 rounded-2xl font-black text-lg shadow-xl active:scale-95 transition-all disabled:opacity-30 mt-4"
                   >
-                    Submit Request
+                    {projectSubmitting ? 'Submitting...' : 'Submit Request'}
                   </button>
                 </>
               ) : (
@@ -1680,7 +1698,7 @@ export default function App() {
                     disabled={!projectValues.clientId || !projectValues.title}
                     className="w-full bg-black text-white p-5 rounded-2xl font-black text-lg shadow-xl active:scale-95 transition-all disabled:opacity-30 mt-4"
                   >
-                    Submit Request
+                    {projectSubmitting ? 'Submitting...' : 'Submit Request'}
                   </button>
                 </>
               )}

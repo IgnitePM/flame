@@ -2,7 +2,7 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function isSignedIn() { return request.auth != null; }
-    function emailLower() { return request.auth.token.email.toLowerCase(); }
+    function emailLower() { return request.auth.token.email.lower(); }
     function adminDoc() { return get(/databases/$(database)/documents/admins/$(emailLower())); }
     function isAdmin() { return isSignedIn() && adminDoc().data.role == 'admin'; }
     function isBilling() { return isSignedIn() && (adminDoc().data.role in ['admin','billing']); }
@@ -21,7 +21,7 @@ service cloud.firestore {
     }
 
     function isCycleLocked(clientId, cycleStart) {
-      return clientDoc(clientId).data.cycleLocks[String(cycleStart)].locked == true;
+      return clientDoc(clientId).data.cycleLocks[string(cycleStart)].locked == true;
     }
 
     // Default: require auth to read; deny unknown writes.
@@ -92,6 +92,12 @@ service cloud.firestore {
     }
 
     match /taskLogs/{taskId} {
+      allow read: if isSignedIn();
+      allow create, update: if isAnyStaff();
+      allow delete: if isAdmin();
+    }
+
+    match /timesheets/{timesheetId} {
       allow read: if isSignedIn();
       allow create, update: if isAnyStaff();
       allow delete: if isAdmin();
