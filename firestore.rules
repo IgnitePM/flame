@@ -7,7 +7,12 @@ service cloud.firestore {
     function isAdmin() { return isSignedIn() && adminDoc().data.role == 'admin'; }
     function isBilling() { return isSignedIn() && (adminDoc().data.role in ['admin','billing']); }
     function isKiosk() { return isSignedIn() && adminDoc().data.role == 'kiosk'; }
-    function isAnyStaff() { return isSignedIn() && adminDoc().data.role in ['admin','billing','kiosk']; }
+    function isIgniteStaff() {
+      return isSignedIn() && request.auth.token.email.matches('.*@ignitepm\\.com$');
+    }
+    function isAnyStaff() {
+      return isSignedIn() && (isIgniteStaff() || adminDoc().data.role in ['admin','billing','kiosk']);
+    }
 
     function clientDoc(clientId) {
       return get(/databases/$(database)/documents/clients/$(clientId));
