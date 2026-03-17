@@ -60,15 +60,14 @@ service cloud.firestore {
         (request.resource.data.clientId is string && clientAllowsEmail(request.resource.data.clientId))
       );
 
+      // Allow staff to update any project; clients can update their own
       allow update: if isSignedIn() && (
-        // staff can update unless locked cycle is being modified
-        (isAnyStaff() && !(request.resource.data.cycleStart is int && resource.data.clientId is string && isCycleLocked(resource.data.clientId, request.resource.data.cycleStart)) ) ||
-        // clients can only update their own project, and not when locked
-        (resource.data.clientId is string && clientAllowsEmail(resource.data.clientId) &&
-          !(request.resource.data.cycleStart is int && isCycleLocked(resource.data.clientId, request.resource.data.cycleStart)))
+        isAnyStaff() ||
+        (resource.data.clientId is string && clientAllowsEmail(resource.data.clientId))
       );
 
-      allow delete: if isAdmin();
+      // Allow staff to delete projects (admin/billing/kiosk or @ignitepm.com)
+      allow delete: if isSignedIn() && isAnyStaff();
     }
 
     match /addons/{addonId} {
