@@ -1047,7 +1047,7 @@ const AdminDashboard = ({
                         className="p-2 text-slate-700 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors"
                         title="Add Custom Project"
                       >
-                        <FolderGit2 className="w-5 h-5" />
+                        <CheckSquare className="w-5 h-5" />
                       </button>
                       <button
                         onClick={() => {
