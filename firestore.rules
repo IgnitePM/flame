@@ -1,0 +1,107 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() { return request.auth != null; }
+    function emailLower() { return request.auth.token.email.toLowerCase(); }
+    function adminDoc() { return get(/databases/$(database)/documents/admins/$(emailLower())); }
+    function isAdmin() { return isSignedIn() && adminDoc().data.role == 'admin'; }
+    function isBilling() { return isSignedIn() && (adminDoc().data.role in ['admin','billing']); }
+    function isKiosk() { return isSignedIn() && adminDoc().data.role == 'kiosk'; }
+    function isAnyStaff() { return isSignedIn() && adminDoc().data.role in ['admin','billing','kiosk']; }
+
+    function clientDoc(clientId) {
+      return get(/databases/$(database)/documents/clients/$(clientId));
+    }
+
+    function clientAllowsEmail(clientId) {
+      return isSignedIn() &&
+        (isAnyStaff() ||
+         (clientDoc(clientId).data.clientEmails is list &&
+          clientDoc(clientId).data.clientEmails.hasAny([request.auth.token.email])));
+    }
+
+    function isCycleLocked(clientId, cycleStart) {
+      return clientDoc(clientId).data.cycleLocks[String(cycleStart)].locked == true;
+    }
+
+    // Default: require auth to read; deny unknown writes.
+    match /{document=**} {
+      allow read: if isSignedIn();
+    }
+
+    match /admins/{adminId} {
+      allow read: if isSignedIn() && (isAdmin() || adminId == emailLower());
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /clients/{clientId} {
+      allow read: if clientAllowsEmail(clientId);
+      allow create: if isAdmin();
+      // Billing can update billing related fields; keep simple: admin/billing can update.
+      allow update: if isSignedIn() && (isAdmin() || isBilling());
+      allow delete: if isAdmin();
+    }
+
+    match /projects/{projectId} {
+      allow read: if isSignedIn() && (
+        isAnyStaff() ||
+        (resource.data.clientId is string && clientAllowsEmail(resource.data.clientId))
+      );
+
+      allow create: if isSignedIn() && (
+        isAnyStaff() ||
+        (request.resource.data.clientId is string && clientAllowsEmail(request.resource.data.clientId))
+      );
+
+      allow update: if isSignedIn() && (
+        // staff can update unless locked cycle is being modified
+        (isAnyStaff() && !(request.resource.data.cycleStart is int && resource.data.clientId is string && isCycleLocked(resource.data.clientId, request.resource.data.cycleStart)) ) ||
+        // clients can only update their own project, and not when locked
+        (resource.data.clientId is string && clientAllowsEmail(resource.data.clientId) &&
+          !(request.resource.data.cycleStart is int && isCycleLocked(resource.data.clientId, request.resource.data.cycleStart)))
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    match /addons/{addonId} {
+      allow read: if isSignedIn() && (
+        isAnyStaff() ||
+        (resource.data.clientId is string && clientAllowsEmail(resource.data.clientId))
+      );
+
+      allow create: if isSignedIn() && (
+        isAnyStaff() ||
+        (request.resource.data.clientId is string && clientAllowsEmail(request.resource.data.clientId))
+      );
+
+      allow update: if isSignedIn() && (
+        isAnyStaff() ||
+        (resource.data.clientId is string && clientAllowsEmail(resource.data.clientId))
+      ) && (
+        !(resource.data.clientId is string && resource.data.billingCycleStart is int && isCycleLocked(resource.data.clientId, resource.data.billingCycleStart))
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    match /expenses/{expenseId} {
+      allow read: if isSignedIn();
+      allow create, update: if isAnyStaff();
+      allow delete: if isAdmin();
+    }
+
+    match /taskLogs/{taskId} {
+      allow read: if isSignedIn();
+      allow create, update: if isAnyStaff();
+      allow delete: if isAdmin();
+    }
+
+    match /auditLogs/{auditId} {
+      allow read: if isBilling() || isAdmin();
+      allow create: if isSignedIn(); // app writes audit logs; keep permissive
+      allow update, delete: if isAdmin();
+    }
+  }
+}
+
