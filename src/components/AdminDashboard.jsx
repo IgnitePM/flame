@@ -1639,28 +1639,36 @@ const AdminDashboard = ({
                                       {(p.status === 'requested' ||
                                         p.status === 'approved') && (
                                         <button
-                                          onClick={() =>
-                                            isCycleLocked(c, mStart)
-                                              ? window.alert(
-                                                  'This billing cycle is locked. Unlock to start projects.',
-                                                )
-                                              : updateDoc(doc('projects', p.id), {
-                                              status: 'active',
-                                              startedAt: Date.now(),
-                                              notificationState: {
-                                                ...(p.notificationState || {}),
-                                                adminApproved: false,
-                                              },
-                                                })
-                                              .then(() =>
-                                                logAudit?.({
-                                                  type: 'project_started',
-                                                  entityType: 'project',
-                                                  entityId: p.id,
-                                                  clientId: c.id,
-                                                }),
-                                              )
-                                          }
+                                          onClick={async () => {
+                                            if (isCycleLocked(c, mStart)) {
+                                              window.alert(
+                                                'This billing cycle is locked. Unlock to start projects.',
+                                              );
+                                              return;
+                                            }
+                                            try {
+                                              await updateDoc(doc('projects', p.id), {
+                                                status: 'active',
+                                                startedAt: Date.now(),
+                                                notificationState: {
+                                                  ...(p.notificationState || {}),
+                                                  adminApproved: false,
+                                                },
+                                              });
+                                              await logAudit?.({
+                                                type: 'project_started',
+                                                entityType: 'project',
+                                                entityId: p.id,
+                                                clientId: c.id,
+                                              });
+                                            } catch (err) {
+                                              window.alert(
+                                                `Could not start project: ${
+                                                  err?.message || String(err)
+                                                }`,
+                                              );
+                                            }
+                                          }}
                                           className="px-3 py-1 rounded-xl bg-black text-white text-[10px] font-black uppercase tracking-widest hover:bg-slate-900"
                                         >
                                           Start Project
@@ -1681,24 +1689,32 @@ const AdminDashboard = ({
                                       </button>
                                       {p.status !== 'closed' && (
                                         <button
-                                          onClick={() =>
-                                            isCycleLocked(c, mStart)
-                                              ? window.alert(
-                                                  'This billing cycle is locked. Unlock to close projects.',
-                                                )
-                                              : updateDoc(doc('projects', p.id), {
-                                              status: 'closed',
-                                              closedAt: Date.now(),
-                                                })
-                                              .then(() =>
-                                                logAudit?.({
-                                                  type: 'project_closed',
-                                                  entityType: 'project',
-                                                  entityId: p.id,
-                                                  clientId: c.id,
-                                                }),
-                                              )
-                                          }
+                                          onClick={async () => {
+                                            if (isCycleLocked(c, mStart)) {
+                                              window.alert(
+                                                'This billing cycle is locked. Unlock to close projects.',
+                                              );
+                                              return;
+                                            }
+                                            try {
+                                              await updateDoc(doc('projects', p.id), {
+                                                status: 'closed',
+                                                closedAt: Date.now(),
+                                              });
+                                              await logAudit?.({
+                                                type: 'project_closed',
+                                                entityType: 'project',
+                                                entityId: p.id,
+                                                clientId: c.id,
+                                              });
+                                            } catch (err) {
+                                              window.alert(
+                                                `Could not close project: ${
+                                                  err?.message || String(err)
+                                                }`,
+                                              );
+                                            }
+                                          }}
                                           className="px-3 py-1 rounded-xl bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest hover:bg-black"
                                         >
                                           Mark Complete
