@@ -22,12 +22,12 @@ import {
 
 // Centralized Firebase configuration and initialization
 const firebaseConfig = {
-  apiKey: 'AIzaSyBLKSR6rdZ9ouGZCbTtr1Ph8QZz9ZBZSwg',
-  authDomain: 'time-tracker-1f2af.firebaseapp.com',
-  projectId: 'time-tracker-1f2af',
-  storageBucket: 'time-tracker-1f2af.firebasestorage.app',
-  messagingSenderId: '355235558668',
-  appId: '1:355235558668:web:a4e8183fc87ea4206a8529',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
 const app = initializeApp(firebaseConfig);
