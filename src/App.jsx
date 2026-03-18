@@ -733,7 +733,9 @@ export default function App() {
     const currentExps = expenses.filter(e => e.clientName === client.name && e.date >= mStart && e.date <= mEnd && !e.projectId);
     const currentAddons = addons.filter(a => a.clientId === client.id && a.date >= mStart && a.date <= mEnd);
 
-    const currentTaskHours = currentTasks.reduce((acc, t) => acc + getTaskDuration(t), 0) / 3600000;
+    // Exclude in-progress task from totals so the kiosk can add live time once via activeDeltaHours (avoids double-counting).
+    const completedTasksThisCycle = currentTasks.filter((t) => t.status !== 'active');
+    const currentTaskHours = completedTasksThisCycle.reduce((acc, t) => acc + getTaskDuration(t), 0) / 3600000;
     const currentExpHours = currentExps.reduce((acc, e) => acc + (e.equivalentHours || 0), 0);
     const currentAddonHours = currentAddons.reduce((acc, a) => acc + Number(a.hours), 0);
 
@@ -743,8 +745,8 @@ export default function App() {
 
     const categoryBreakdown = {};
 
-    // Hours-based categories (from tasks).
-    currentTasks.reduce((acc, t) => {
+    // Hours-based categories (from completed tasks only; active task live time is added in kiosk via activeDeltaHours).
+    completedTasksThisCycle.reduce((acc, t) => {
       if (t.projectName === GENERAL_LABEL) return acc;
       acc[t.projectName] = (acc[t.projectName] || 0) + (getTaskDuration(t) / 3600000);
       return acc;
