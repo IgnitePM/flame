@@ -63,7 +63,15 @@ import ClientPortal from './components/ClientPortal.jsx';
 import EmployeeKiosk from './components/EmployeeKiosk.jsx';
 import AdminDashboard from './components/AdminDashboard.jsx';
 
-const DEFAULT_PROJECT_CATEGORIES = ['SEO', 'Email Marketing', 'Social Media', 'Content Creation', 'Web Development', 'Consulting'];
+const DEFAULT_PROJECT_CATEGORIES = [
+  'SEO',
+  'Email Marketing',
+  'Social Media',
+  'Content Creation',
+  'Web Development',
+  'Consulting',
+  'Social Ad Budget',
+];
 
 const IgniteLogo = ({ className }) => (
   <img
@@ -1400,7 +1408,12 @@ export default function App() {
               {/* Retainers */}
               <div>
                 <div className="flex justify-between items-center mb-4">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 block">Monthly Base Allocation (Hours)</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 block">
+                    Monthly Base Allocation
+                    <span className="ml-1 text-[9px] font-bold text-slate-400 normal-case">
+                      (hours for most categories; dollars for Social Ad Budget)
+                    </span>
+                  </label>
                   <button 
                     onClick={() => {
                       if(confirm("Are you sure? This will permanently clear any compounded surplus or deficit carryover hours from past months, starting them fresh for this current period.")) {
@@ -1413,20 +1426,50 @@ export default function App() {
                   </button>
                 </div>
                 <div className="space-y-3">
-                  {activeTaskTypes.map(type => (
-                    <div key={type} className="flex justify-between items-center bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                      <span className="font-bold text-slate-700 text-sm">{type}</span>
-                      <div className="flex items-center gap-2">
-                        <input 
-                          type="number" min="0" step="0.5" value={editingClient.retainers?.[type] || ''} 
-                          onChange={e => setEditingClient({ ...editingClient, retainers: { ...editingClient.retainers, [type]: Number(e.target.value) } })}
-                          className="w-20 bg-white border border-slate-200 p-2 text-center rounded-xl font-black outline-none focus:ring-2 focus:ring-[#fd7414]"
-                          placeholder="0"
-                        />
-                        <span className="text-xs font-bold text-slate-400 uppercase">hrs</span>
+                  {activeTaskTypes.map((type) => {
+                    const isSocialAd = type === 'Social Ad Budget';
+                    const unitLabel = isSocialAd ? '$' : 'hrs';
+                    const step = isSocialAd ? 1 : 0.5;
+                    return (
+                      <div
+                        key={type}
+                        className="flex justify-between items-center bg-slate-50 p-4 rounded-2xl border border-slate-100"
+                      >
+                        <div className="flex flex-col">
+                          <span className="font-bold text-slate-700 text-sm">
+                            {type}
+                          </span>
+                          {isSocialAd && (
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                              Per-cycle budget (dollars)
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min="0"
+                            step={step}
+                            value={editingClient.retainers?.[type] || ''}
+                            onChange={(e) =>
+                              setEditingClient({
+                                ...editingClient,
+                                retainers: {
+                                  ...editingClient.retainers,
+                                  [type]: Number(e.target.value),
+                                },
+                              })
+                            }
+                            className="w-24 bg-white border border-slate-200 p-2 text-center rounded-xl font-black outline-none focus:ring-2 focus:ring-[#fd7414]"
+                            placeholder="0"
+                          />
+                          <span className="text-xs font-bold text-slate-400 uppercase">
+                            {unitLabel}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>
