@@ -1003,19 +1003,9 @@ const AdminDashboard = ({
                   key={c.id}
                   className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden flex flex-col"
                 >
-                  <div
-                    className="p-6 border-b border-slate-50 flex justify-between items-start bg-slate-50/50 cursor-pointer select-none hover:bg-slate-50 transition-colors"
-                    onClick={() => toggleClientAccordion(c.id)}
-                  >
+                  <div className="p-6 border-b border-slate-50 flex justify-between items-start bg-slate-50/50">
                     <div>
                       <div className="flex items-center gap-3">
-                        <button className="p-1.5 text-slate-400 hover:text-[#fd7414] hover:bg-orange-50 rounded-full transition-colors">
-                          {isExpanded ? (
-                            <ChevronUp className="w-5 h-5" />
-                          ) : (
-                            <ChevronDown className="w-5 h-5" />
-                          )}
-                        </button>
                         <h4
                           className={`font-black text-xl ${
                             c.status === 'paused'
@@ -1031,7 +1021,7 @@ const AdminDashboard = ({
                           </span>
                         )}
                       </div>
-                      <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1 ml-11">
+                      <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">
                         Rate: ${c.hourlyRate || 0}/hr{' '}
                         <span className="mx-1">•</span> Renews on the{' '}
                         {getOrdinalSuffix(c.billingDay || 1)}
@@ -1571,31 +1561,29 @@ const AdminDashboard = ({
                       )}
                   </div>
 
-                  {isExpanded && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setExpandedProjectsExpenses((prev) => ({
-                            ...prev,
-                            [c.id]: !prev[c.id],
-                          }));
-                        }}
-                        className="w-full flex items-center justify-between gap-2 p-4 border-t border-slate-200 bg-slate-50/80 hover:bg-slate-100/80 transition-colors text-left"
-                      >
-                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                          Custom Projects and Expenses
-                        </span>
-                        <span className="text-slate-400" aria-hidden>
-                          {expandedProjectsExpenses[c.id] ? (
-                            <ChevronUp className="w-5 h-5" />
-                          ) : (
-                            <ChevronDown className="w-5 h-5" />
-                          )}
-                        </span>
-                      </button>
-                      {expandedProjectsExpenses[c.id] && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedProjectsExpenses((prev) => ({
+                          ...prev,
+                          [c.id]: !prev[c.id],
+                        }))
+                      }
+                      className="w-full flex items-center justify-between gap-2 p-4 border-t border-slate-200 bg-slate-50/80 hover:bg-slate-100/80 transition-colors text-left"
+                    >
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                        Custom Projects and Expenses
+                      </span>
+                      <span className="text-slate-400" aria-hidden>
+                        {expandedProjectsExpenses[c.id] ? (
+                          <ChevronUp className="w-5 h-5" />
+                        ) : (
+                          <ChevronDown className="w-5 h-5" />
+                        )}
+                      </span>
+                    </button>
+                    {expandedProjectsExpenses[c.id] && (
                     <div className="bg-slate-50/50 p-6 border-t border-slate-100 animate-in slide-in-from-top-4 duration-300 space-y-6">
                       <div>
                         <div className="flex justify-between items-center mb-3">
@@ -1958,9 +1946,8 @@ const AdminDashboard = ({
                         )}
                       </div>
                     </div>
-                      )}
-                    </>
-                  )}
+                    )}
+                  </>
                 </div>
               );
             })}
