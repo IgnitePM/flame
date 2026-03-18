@@ -312,8 +312,7 @@ const EmployeeKiosk = ({
                                 Client Notes
                               </div>
                               <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
-                                {selectedClientGeneralNote ||
-                                  'No client notes yet.'}
+                                {selectedClientGeneralNote || 'No client notes yet.'}
                               </div>
                             </div>
                             <div>
@@ -321,8 +320,7 @@ const EmployeeKiosk = ({
                                 {selectedRetainerCategory} Note
                               </div>
                               <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
-                                {selectedRetainerNote ||
-                                  'No category note yet.'}
+                                {selectedRetainerNote || 'No category note yet.'}
                               </div>
                             </div>
                           </div>
@@ -360,6 +358,33 @@ const EmployeeKiosk = ({
                           className="w-full p-5 border-orange-200 border rounded-2xl bg-white/70 focus:ring-2 focus:ring-[#fd7414] outline-none text-sm min-h-[120px] font-medium"
                         />
                       </div>
+
+                      {selectedClientObj && selectedRetainerCategory && (
+                        <div className="mt-5 bg-white border border-slate-200 rounded-[24px] p-4">
+                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                            Notes for {selectedClientObj.name} • {selectedRetainerCategory}
+                          </div>
+                          <div className="space-y-3">
+                            <div>
+                              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                                Client Notes
+                              </div>
+                              <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                                {selectedClientGeneralNote || 'No client notes yet.'}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                                {selectedRetainerCategory} Note
+                              </div>
+                              <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                                {selectedRetainerNote || 'No category note yet.'}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       <button
                         onClick={handleStopTask}
                         className="w-full bg-black hover:bg-slate-900 text-white p-5 rounded-2xl font-black text-lg mt-6 shadow-xl flex items-center justify-center gap-3 transition-all active:scale-95"
