@@ -240,6 +240,10 @@ export default function App() {
   }, [isClientUser, isUserAdmin, currentUserRole, view]);
 
   const activeTaskTypes = taskTypes.length > 0 ? taskTypes.map(t => t.name) : DEFAULT_PROJECT_CATEGORIES;
+  // For the client settings Retainers UI, always ensure Social Ad Budget is present
+  const retainerConfigCategories = Array.from(
+    new Set([...activeTaskTypes, 'Social Ad Budget']),
+  );
   const activeShift = timesheets.find(t => t.userId === user?.uid && (t.status === 'active' || t.status === 'break'));
   const activeTask = activeShift ? taskLogs.find(t => t.shiftId === activeShift.id && t.status === 'active') : null;
 
@@ -1426,7 +1430,7 @@ export default function App() {
                   </button>
                 </div>
                 <div className="space-y-3">
-                  {activeTaskTypes.map((type) => {
+                  {retainerConfigCategories.map((type) => {
                     const isSocialAd = type === 'Social Ad Budget';
                     const unitLabel = isSocialAd ? '$' : 'hrs';
                     const step = isSocialAd ? 1 : 0.5;
