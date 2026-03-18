@@ -26,6 +26,8 @@ const EmployeeKiosk = ({
   activeTaskNotes,
   setActiveTaskNotes,
   taskLogs,
+  clientsFull,
+  getBillingPeriod,
   handleClockIn,
   handleEndBreak,
   handleStartTask,
@@ -37,6 +39,29 @@ const EmployeeKiosk = ({
 }) => {
   const [clientSearch, setClientSearch] = React.useState('');
   const [targetSearch, setTargetSearch] = React.useState('');
+
+  const safeCategoryKey = (category) =>
+    String(category)
+      .replace(/[~*[\]/]/g, '_')
+      .replace(/\./g, '_');
+
+  const selectedClientObj = clientsFull?.find((c) => c.name === selectedClient);
+  const cycleStart = selectedClientObj
+    ? getBillingPeriod(selectedClientObj.billingDay || 1, 0).start
+    : null;
+
+  const selectedRetainerCategory = selectedBillingTarget?.startsWith('retainer_')
+    ? selectedBillingTarget.replace('retainer_', '')
+    : null;
+
+  const selectedRetainerNote =
+    selectedClientObj && cycleStart && selectedRetainerCategory
+      ? selectedClientObj.cycleNotes?.[String(cycleStart)]?.[
+          safeCategoryKey(selectedRetainerCategory)
+        ] || ''
+      : '';
+
+  const selectedClientGeneralNote = selectedClientObj?.generalNotes || '';
 
   React.useEffect(() => {
     if (!policy?.idleReminderMinutes || !activeTask) return;
@@ -275,6 +300,34 @@ const EmployeeKiosk = ({
                       >
                         Begin Work Block
                       </button>
+
+                      {selectedClientObj && selectedRetainerCategory && (
+                        <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
+                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                            Notes for {selectedClientObj.name} • {selectedRetainerCategory}
+                          </div>
+                          <div className="space-y-3">
+                            <div>
+                              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                                Client Notes
+                              </div>
+                              <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                                {selectedClientGeneralNote ||
+                                  'No client notes yet.'}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                                {selectedRetainerCategory} Note
+                              </div>
+                              <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                                {selectedRetainerNote ||
+                                  'No category note yet.'}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="bg-orange-50 p-8 rounded-[32px] border border-orange-200 text-left animate-in zoom-in-95 duration-300">

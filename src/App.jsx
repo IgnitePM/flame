@@ -1051,6 +1051,8 @@ export default function App() {
               setSelectedBillingTarget={setSelectedBillingTarget}
               activeTaskNotes={activeTaskNotes}
               setActiveTaskNotes={setActiveTaskNotes}
+              clientsFull={clients}
+              getBillingPeriod={getBillingPeriod}
               taskLogs={taskLogs}
               handleClockIn={handleClockIn}
               handleEndBreak={handleEndBreak}
