@@ -37,9 +37,13 @@ const EmployeeKiosk = ({
   handleClockOut,
   getGlobalRetainerStats,
   formatTime,
+  onLogSocialAdSpend,
 }) => {
   const [clientSearch, setClientSearch] = React.useState('');
   const [targetSearch, setTargetSearch] = React.useState('');
+  const [socialAdAmount, setSocialAdAmount] = React.useState('');
+  const [socialAdDescription, setSocialAdDescription] = React.useState('');
+  const [socialAdSubmitting, setSocialAdSubmitting] = React.useState(false);
 
   const safeCategoryKey = (category) =>
     String(category)
@@ -434,6 +438,74 @@ const EmployeeKiosk = ({
                               days
                             </div>
                           )}
+                        </div>
+                      )}
+
+                      {/* Log Social Ad Spend (kiosk-only when Social Ad Budget selected) */}
+                      {isSocialAdCategory && selectedClientObj && onLogSocialAdSpend && (
+                        <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
+                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
+                            Log Social Ad Spend
+                          </div>
+                          <p className="text-xs text-slate-500 mb-3">
+                            Enter the dollar amount and description (e.g. platform + ad details). This will be applied to this cycle&apos;s Social Ad Budget.
+                          </p>
+                          <div className="space-y-3">
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+                                Amount ($)
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={socialAdAmount}
+                                onChange={(e) => setSocialAdAmount(e.target.value)}
+                                placeholder="0.00"
+                                className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+                                Description (platform + ad details)
+                              </label>
+                              <textarea
+                                value={socialAdDescription}
+                                onChange={(e) => setSocialAdDescription(e.target.value)}
+                                placeholder="e.g. Meta - Brand awareness campaign"
+                                className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[72px]"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const amt = Number(socialAdAmount);
+                                if (!selectedClientObj?.id || !selectedClientObj?.name || !Number.isFinite(amt) || amt <= 0) {
+                                  window.alert('Enter a valid dollar amount.');
+                                  return;
+                                }
+                                setSocialAdSubmitting(true);
+                                try {
+                                  await onLogSocialAdSpend({
+                                    clientId: selectedClientObj.id,
+                                    clientName: selectedClientObj.name,
+                                    amount: amt,
+                                    description: socialAdDescription.trim() || undefined,
+                                  });
+                                  setSocialAdAmount('');
+                                  setSocialAdDescription('');
+                                } catch (err) {
+                                  window.alert(err?.message || 'Failed to log spend.');
+                                } finally {
+                                  setSocialAdSubmitting(false);
+                                }
+                              }}
+                              disabled={socialAdSubmitting || !socialAdAmount || Number(socialAdAmount) <= 0}
+                              className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white p-3 rounded-xl font-black text-sm uppercase tracking-widest transition-all"
+                            >
+                              {socialAdSubmitting ? 'Submitting…' : 'Submit Spend'}
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>

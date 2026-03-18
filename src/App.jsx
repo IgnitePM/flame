@@ -440,14 +440,21 @@ export default function App() {
     if (manualTaskValues.parsedExpense > 0) {
       const clientObj = clients.find(c => c.name === manualTaskValues.clientName);
       const rawAmount = manualTaskValues.parsedExpense;
-      const finalCost = rawAmount * 1.30;
+      const isSocialAd = projName === 'Social Ad Budget';
+      const finalCost = isSocialAd ? rawAmount : rawAmount * 1.30;
       const rate = clientObj?.hourlyRate || 0;
-      const equivalentHours = rate > 0 ? (finalCost / rate) : 0;
+      const equivalentHours = isSocialAd ? 0 : rate > 0 ? (finalCost / rate) : 0;
 
       await addDoc(collection(db, 'expenses'), {
-        clientId: clientObj?.id || 'manual', clientName: manualTaskValues.clientName, 
-        category: projName, projectId: targetId,
-        description: "Auto-extracted from notes", rawAmount, finalCost, equivalentHours, date: startMs
+        clientId: clientObj?.id || 'manual',
+        clientName: manualTaskValues.clientName,
+        category: projName,
+        projectId: targetId,
+        description: 'Auto-extracted from notes',
+        rawAmount,
+        finalCost,
+        equivalentHours,
+        date: startMs,
       });
     }
 
@@ -463,9 +470,10 @@ export default function App() {
     const catName = isProject ? 'Custom Project' : expenseValues.billingTarget.replace('retainer_', '');
 
     const rawAmount = Number(expenseValues.amount);
-    const finalCost = rawAmount * 1.30; 
+    const isSocialAd = catName === 'Social Ad Budget';
+    const finalCost = isSocialAd ? rawAmount : rawAmount * 1.30; 
     const rate = expenseModal.hourlyRate || 0;
-    const equivalentHours = rate > 0 ? (finalCost / rate) : 0;
+    const equivalentHours = isSocialAd ? 0 : rate > 0 ? (finalCost / rate) : 0;
     const expenseDate = expenseValues.date ? new Date(expenseValues.date).getTime() : Date.now();
 
     await addDoc(collection(db, 'expenses'), {
@@ -475,6 +483,24 @@ export default function App() {
     });
     setExpenseModal(null);
     setExpenseValues({ billingTarget: '', description: '', amount: '', date: '' });
+  };
+
+  const logSocialAdSpend = async ({ clientId, clientName, amount, description }) => {
+    const amt = Number(amount);
+    if (!clientId || !clientName || !Number.isFinite(amt) || amt <= 0) return;
+    const finalCost = amt;
+    const rawAmount = amt;
+    await addDoc(collection(db, 'expenses'), {
+      clientId,
+      clientName,
+      category: 'Social Ad Budget',
+      projectId: null,
+      description: description || 'Social ad spend (logged from kiosk)',
+      rawAmount,
+      finalCost,
+      equivalentHours: 0,
+      date: Date.now(),
+    });
   };
 
   const submitAddonRequest = async () => {
@@ -1101,6 +1127,7 @@ export default function App() {
                 getGlobalRetainerStats(client, start, end)
               }
               formatTime={formatTime}
+              onLogSocialAdSpend={logSocialAdSpend}
             />
           ) : (
             <AdminDashboard
