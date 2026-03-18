@@ -94,19 +94,19 @@ service cloud.firestore {
     match /expenses/{expenseId} {
       allow read: if isSignedIn();
       allow create, update: if isAnyStaff();
-      allow delete: if isAdmin();
+      allow delete: if isAnyStaff();
     }
 
     match /taskLogs/{taskId} {
       allow read: if isSignedIn();
       allow create, update: if isAnyStaff();
-      allow delete: if isAdmin();
+      allow delete: if isAnyStaff();
     }
 
     match /timesheets/{timesheetId} {
       allow read: if isSignedIn();
       allow create, update: if isAnyStaff();
-      allow delete: if isAdmin();
+      allow delete: if isAnyStaff();
     }
 
     match /auditLogs/{auditId} {
