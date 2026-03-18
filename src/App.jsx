@@ -328,7 +328,8 @@ export default function App() {
       projectName: projName, projectId: targetId,
       clockInTime: Date.now(), lastResumeTime: Date.now(), totalSavedDuration: 0, status: 'active', notes: '' 
     });
-    setSelectedClient(''); setSelectedBillingTarget(''); setActiveTaskNotes('');
+    // Keep selected client/target so kiosk notes (client + selected retainer category) remain visible
+    setActiveTaskNotes('');
   };
 
   const handleStopTask = async () => {
