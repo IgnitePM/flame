@@ -548,6 +548,14 @@ const AdminDashboard = ({
   const getCycleNoteKey = (clientId, cycleStart, category) =>
     `${clientId}__${cycleStart}__${category}`;
 
+  // Firestore field paths cannot contain characters like `/`.
+  // Retainer categories are user-defined and sometimes include `/` (e.g. "SEO/Web Development"),
+  // so we store notes under a sanitized key but display the original label.
+  const safeCategoryKey = (category) =>
+    String(category)
+      .replace(/[~*[\]/]/g, '_')
+      .replace(/\./g, '_');
+
   const isCycleLocked = (client, cycleStart) =>
     !!client?.cycleLocks?.[String(cycleStart)]?.locked;
 
@@ -1424,9 +1432,10 @@ const AdminDashboard = ({
                           <div className="space-y-2">
                             {Object.entries(c.retainers).map(([cat, base]) => {
                               const cycleStart = mStart;
-                              const noteKey = getCycleNoteKey(c.id, cycleStart, cat);
+                              const catKey = safeCategoryKey(cat);
+                              const noteKey = getCycleNoteKey(c.id, cycleStart, catKey);
                               const existingNote =
-                                c.cycleNotes?.[String(cycleStart)]?.[cat] || '';
+                                c.cycleNotes?.[String(cycleStart)]?.[catKey] || '';
                               const used =
                                 stats.categoryBreakdown[cat] || 0;
                               const baseNum = Number(base) || 0;
@@ -1494,7 +1503,7 @@ const AdminDashboard = ({
                                           }));
                                           try {
                                             await updateDoc(doc('clients', c.id), {
-                                              [`cycleNotes.${cycleStart}.${cat}`]:
+                                              [`cycleNotes.${cycleStart}.${catKey}`]:
                                                 value,
                                             });
                                             logAudit?.({
