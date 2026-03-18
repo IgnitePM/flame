@@ -73,7 +73,7 @@ const EmployeeKiosk = ({
 
   const cycleStartMs = cycleStart;
   const cycleEndMs = cycleStartMs
-    ? getBillingPeriod(selectedClientObj.billingDay || 1, 1).end
+    ? getBillingPeriod(selectedClientObj.billingDay || 1, 0).end
     : null;
 
   const retainerStats = selectedClientObj && cycleStartMs && cycleEndMs
