@@ -1062,6 +1062,9 @@ export default function App() {
               handleResumeTask={handleResumeTask}
               handleTakeBreak={handleTakeBreak}
               handleClockOut={handleClockOut}
+              getGlobalRetainerStats={(client, start, end, ctx) =>
+                getGlobalRetainerStats(client, start, end)
+              }
               formatTime={formatTime}
             />
           ) : (

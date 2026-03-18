@@ -35,6 +35,7 @@ const EmployeeKiosk = ({
   handleResumeTask,
   handleTakeBreak,
   handleClockOut,
+  getGlobalRetainerStats,
   formatTime,
 }) => {
   const [clientSearch, setClientSearch] = React.useState('');
@@ -62,6 +63,24 @@ const EmployeeKiosk = ({
       : '';
 
   const selectedClientGeneralNote = selectedClientObj?.generalNotes || '';
+
+  const cycleStartMs = cycleStart;
+  const cycleEndMs = cycleStartMs
+    ? getBillingPeriod(selectedClientObj.billingDay || 1, 1).end
+    : null;
+
+  const retainerStats = selectedClientObj && cycleStartMs && cycleEndMs
+    ? getGlobalRetainerStats(selectedClientObj, cycleStartMs, cycleEndMs)
+    : null;
+
+  const categoryUsed = retainerStats?.categoryBreakdown
+    ? retainerStats.categoryBreakdown[selectedRetainerCategory] || 0
+    : 0;
+
+  const categoryAllotted =
+    (selectedClientObj?.retainers &&
+      selectedClientObj.retainers[selectedRetainerCategory]) || 0;
+
 
   React.useEffect(() => {
     if (!policy?.idleReminderMinutes || !activeTask) return;
@@ -324,6 +343,63 @@ const EmployeeKiosk = ({
                               </div>
                             </div>
                           </div>
+                        </div>
+                      )}
+
+                      {/* Retainer progress (category + combined) for current cycle */}
+                      {retainerStats && selectedRetainerCategory && (
+                        <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
+                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
+                            Retainer Progress
+                          </div>
+
+                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                            Category: {selectedRetainerCategory}
+                          </div>
+                          <div className="text-xs font-black text-slate-700 mb-2">
+                            {categoryUsed.toFixed(2)}h used /{' '}
+                            {Number(categoryAllotted || 0).toFixed(2)}h available
+                          </div>
+                          <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-3">
+                            <div
+                              className={`h-3 rounded-full transition-all duration-500 ${
+                                  (categoryUsed > Number(categoryAllotted || 0))
+                                  ? 'bg-red-500'
+                                  : 'bg-emerald-500'
+                              }`}
+                              style={{
+                                width: `${Math.min(
+                                  100,
+                                ((categoryUsed || 0) /
+                                    ((Number(categoryAllotted || 0) || 1))) *
+                                    100,
+                                )}%`,
+                              }}
+                            />
+                          </div>
+
+                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                            Combined Pool
+                          </div>
+                          <div className="text-xs font-black text-slate-700 mb-2">
+                            {retainerStats.currentUsed.toFixed(2)}h used /{' '}
+                            {retainerStats.adjustedAllotted.toFixed(2)}h available
+                          </div>
+                          <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-2">
+                            <div
+                              className={`h-3 rounded-full transition-all duration-500 ${
+                                retainerStats.isOver ? 'bg-red-500' : 'bg-emerald-500'
+                              }`}
+                              style={{ width: `${Math.min(100, retainerStats.percent || 0)}%` }}
+                            />
+                          </div>
+
+                          {/* Days left */}
+                          {cycleEndMs && (
+                            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-3">
+                              Days left: {Math.max(0, Math.ceil((cycleEndMs - Date.now()) / 86400000))}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
