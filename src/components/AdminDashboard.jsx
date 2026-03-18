@@ -1321,13 +1321,14 @@ const AdminDashboard = ({
                             <div className="flex justify-end">
                               <button
                                 onClick={async () => {
+                                  setClientNotesSaving((prev) => ({
+                                    ...prev,
+                                    [c.id]: true,
+                                  }));
                                   try {
-                                    setClientNotesSaving((prev) => ({
-                                      ...prev,
-                                      [c.id]: true,
-                                    }));
                                     await updateDoc(doc('clients', c.id), {
-                                      generalNotes: clientNotesDraft[c.id] ?? '',
+                                      generalNotes:
+                                        clientNotesDraft[c.id] ?? '',
                                     });
                                     logAudit?.({
                                       type: 'client_notes_saved',
@@ -1335,6 +1336,12 @@ const AdminDashboard = ({
                                       entityId: c.id,
                                       clientId: c.id,
                                     });
+                                  } catch (err) {
+                                    window.alert(
+                                      `Could not save client notes: ${
+                                        err?.message || String(err)
+                                      }`,
+                                    );
                                   } finally {
                                     setClientNotesSaving((prev) => ({
                                       ...prev,
@@ -1481,11 +1488,11 @@ const AdminDashboard = ({
                                             );
                                             return;
                                           }
+                                          setCycleNotesSaving((prev) => ({
+                                            ...prev,
+                                            [noteKey]: true,
+                                          }));
                                           try {
-                                            setCycleNotesSaving((prev) => ({
-                                              ...prev,
-                                              [noteKey]: true,
-                                            }));
                                             await updateDoc(doc('clients', c.id), {
                                               [`cycleNotes.${cycleStart}.${cat}`]:
                                                 value,
@@ -1498,6 +1505,12 @@ const AdminDashboard = ({
                                               cycleStart,
                                               meta: { category: cat },
                                             });
+                                          } catch (err) {
+                                            window.alert(
+                                              `Could not save cycle note (${cat}): ${
+                                                err?.message || String(err)
+                                              }`,
+                                            );
                                           } finally {
                                             setCycleNotesSaving((prev) => ({
                                               ...prev,
