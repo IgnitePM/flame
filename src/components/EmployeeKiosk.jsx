@@ -77,6 +77,20 @@ const EmployeeKiosk = ({
     ? retainerStats.categoryBreakdown[selectedRetainerCategory] || 0
     : 0;
 
+  // Include running task time so the progress bar updates in real time.
+  const activeDeltaHours =
+    activeTask && liveTaskDuration ? liveTaskDuration / 3600000 : 0;
+
+  const selectedCategoryMatchesActiveTask =
+    activeTask &&
+    activeTask.projectName &&
+    selectedRetainerCategory &&
+    activeTask.projectName === selectedRetainerCategory;
+
+  const categoryUsedWithActive = categoryUsed + (selectedCategoryMatchesActiveTask ? activeDeltaHours : 0);
+
+  const combinedUsedWithActive = (retainerStats?.currentUsed || 0) + activeDeltaHours;
+
   const categoryAllotted =
     (selectedClientObj?.retainers &&
       selectedClientObj.retainers[selectedRetainerCategory]) || 0;
@@ -357,20 +371,20 @@ const EmployeeKiosk = ({
                             Category: {selectedRetainerCategory}
                           </div>
                           <div className="text-xs font-black text-slate-700 mb-2">
-                            {categoryUsed.toFixed(2)}h used /{' '}
+                            {categoryUsedWithActive.toFixed(2)}h used /{' '}
                             {Number(categoryAllotted || 0).toFixed(2)}h available
                           </div>
                           <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-3">
                             <div
                               className={`h-3 rounded-full transition-all duration-500 ${
-                                  (categoryUsed > Number(categoryAllotted || 0))
+                                  (categoryUsedWithActive > Number(categoryAllotted || 0))
                                   ? 'bg-red-500'
                                   : 'bg-emerald-500'
                               }`}
                               style={{
                                 width: `${Math.min(
                                   100,
-                                ((categoryUsed || 0) /
+                                  ((categoryUsedWithActive || 0) /
                                     ((Number(categoryAllotted || 0) || 1))) *
                                     100,
                                 )}%`,
@@ -382,7 +396,7 @@ const EmployeeKiosk = ({
                             Combined Pool
                           </div>
                           <div className="text-xs font-black text-slate-700 mb-2">
-                            {retainerStats.currentUsed.toFixed(2)}h used /{' '}
+                            {combinedUsedWithActive.toFixed(2)}h used /{' '}
                             {retainerStats.adjustedAllotted.toFixed(2)}h available
                           </div>
                           <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-2">
@@ -397,7 +411,14 @@ const EmployeeKiosk = ({
                           {/* Days left */}
                           {cycleEndMs && (
                             <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-3">
-                              Days left: {Math.max(0, Math.ceil((cycleEndMs - Date.now()) / 86400000))}
+                              Days left:{' '}
+                              {Math.max(
+                                0,
+                                Math.ceil(
+                                  (cycleEndMs - Date.now()) / 86400000,
+                                ),
+                              )}{' '}
+                              days
                             </div>
                           )}
                         </div>
@@ -434,6 +455,79 @@ const EmployeeKiosk = ({
                           className="w-full p-5 border-orange-200 border rounded-2xl bg-white/70 focus:ring-2 focus:ring-[#fd7414] outline-none text-sm min-h-[120px] font-medium"
                         />
                       </div>
+
+                      {/* Retainer progress (category + combined) for current cycle (show while actively working) */}
+                      {retainerStats && selectedRetainerCategory && (
+                        <div className="mt-5 bg-white border border-slate-200 rounded-[24px] p-4">
+                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
+                            Retainer Progress
+                          </div>
+
+                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                            Category: {selectedRetainerCategory}
+                          </div>
+                          <div className="text-xs font-black text-slate-700 mb-2">
+                            {categoryUsedWithActive.toFixed(2)}h used /{' '}
+                            {Number(categoryAllotted || 0).toFixed(2)}h available
+                          </div>
+                          <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-3">
+                            <div
+                              className={`h-3 rounded-full transition-all duration-500 ${
+                                categoryUsedWithActive > Number(categoryAllotted || 0)
+                                  ? 'bg-red-500'
+                                  : 'bg-emerald-500'
+                              }`}
+                              style={{
+                                width: `${Math.min(
+                                  100,
+                                  ((categoryUsedWithActive || 0) /
+                                    ((Number(categoryAllotted || 0) || 1))) *
+                                    100,
+                                )}%`,
+                              }}
+                            />
+                          </div>
+
+                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                            Combined Pool
+                          </div>
+                          <div className="text-xs font-black text-slate-700 mb-2">
+                            {combinedUsedWithActive.toFixed(2)}h used /{' '}
+                            {retainerStats.adjustedAllotted.toFixed(2)}h available
+                          </div>
+                          <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-2">
+                            <div
+                              className={`h-3 rounded-full transition-all duration-500 ${
+                                combinedUsedWithActive > retainerStats.adjustedAllotted
+                                  ? 'bg-red-500'
+                                  : 'bg-emerald-500'
+                              }`}
+                              style={{
+                                width: `${Math.min(
+                                  100,
+                                  retainerStats.adjustedAllotted > 0
+                                    ? (combinedUsedWithActive / retainerStats.adjustedAllotted) * 100
+                                    : 0,
+                                )}%`,
+                              }}
+                            />
+                          </div>
+
+                          {/* Days left */}
+                          {cycleEndMs && (
+                            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-3">
+                              Days left:{' '}
+                              {Math.max(
+                                0,
+                                Math.ceil(
+                                  (cycleEndMs - Date.now()) / 86400000,
+                                ),
+                              )}{' '}
+                              days
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       {selectedClientObj && selectedRetainerCategory && (
                         <div className="mt-5 bg-white border border-slate-200 rounded-[24px] p-4">
