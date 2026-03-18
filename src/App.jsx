@@ -649,7 +649,14 @@ export default function App() {
   };
 
   const getGlobalRetainerStats = (client, mStart, mEnd) => {
-    const baseRetainer = Object.values(client.retainers || {}).reduce((a, b) => a + (Number(b) || 0), 0);
+    const SOCIAL_AD_CATEGORY = 'Social Ad Budget';
+
+    // Retainers pool math is in hours (task/expense equivalent hours). We exclude
+    // dollar-only categories from the combined pool so the existing progress bars remain consistent.
+    const hourRetainerBase = Object.entries(client.retainers || {}).reduce(
+      (sum, [cat, val]) => (cat === SOCIAL_AD_CATEGORY ? sum : sum + (Number(val) || 0)),
+      0,
+    );
     
     let pastTasks = taskLogs.filter(t => t.clientName === client.name && t.clockInTime < mStart && !t.projectId);
     let pastExps = expenses.filter(e => e.clientName === client.name && e.date < mStart && !e.projectId);
@@ -676,7 +683,7 @@ export default function App() {
     let carryover = 0;
     if (firstDateMs) {
         const periodsPassed = getPeriodsPassed(firstDateMs, mStart, client.billingDay || 1);
-        const totalAllottedPast = periodsPassed * baseRetainer;
+        const totalAllottedPast = periodsPassed * hourRetainerBase;
         const pastTaskHours = pastTasks.reduce((acc, t) => acc + getTaskDuration(t), 0) / 3600000;
         const pastExpHours = pastExps.reduce((acc, e) => acc + (e.equivalentHours || 0), 0);
         const pastAddonHours = pastAddons.reduce((acc, a) => acc + Number(a.hours), 0);
@@ -693,8 +700,28 @@ export default function App() {
     const currentAddonHours = currentAddons.reduce((acc, a) => acc + Number(a.hours), 0);
 
     const currentUsed = currentTaskHours + currentExpHours;
-    const activeBase = client.status === 'paused' ? 0 : baseRetainer;
+    const activeBase = client.status === 'paused' ? 0 : hourRetainerBase;
     const adjustedAllotted = activeBase + carryover + currentAddonHours;
+
+    const categoryBreakdown = {};
+
+    // Hours-based categories (from tasks).
+    currentTasks.reduce((acc, t) => {
+      if (t.projectName === GENERAL_LABEL) return acc;
+      acc[t.projectName] = (acc[t.projectName] || 0) + (getTaskDuration(t) / 3600000);
+      return acc;
+    }, categoryBreakdown);
+
+    // Social Ad Budget is dollar-based (from expenses).
+    // Other retainer categories are hour-based (from expenses' equivalentHours).
+    currentExps.forEach((e) => {
+      if (!e.category || !client.retainers) return;
+      if (e.category === SOCIAL_AD_CATEGORY) {
+        categoryBreakdown[e.category] = (categoryBreakdown[e.category] || 0) + (Number(e.finalCost) || 0);
+      } else {
+        categoryBreakdown[e.category] = (categoryBreakdown[e.category] || 0) + (Number(e.equivalentHours) || 0);
+      }
+    });
 
     return {
         base: activeBase,
@@ -704,11 +731,7 @@ export default function App() {
         currentUsed,
         isOver: currentUsed > adjustedAllotted,
         percent: adjustedAllotted > 0 ? Math.min(Math.max((currentUsed / adjustedAllotted) * 100, 0), 100) : (currentUsed > 0 ? 100 : 0),
-        categoryBreakdown: currentTasks.reduce((acc, t) => {
-          if (t.projectName === GENERAL_LABEL) return acc;
-          acc[t.projectName] = (acc[t.projectName] || 0) + (getTaskDuration(t) / 3600000);
-          return acc;
-        }, {})
+        categoryBreakdown,
     };
   };
 

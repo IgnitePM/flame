@@ -64,6 +64,9 @@ const EmployeeKiosk = ({
 
   const selectedClientGeneralNote = selectedClientObj?.generalNotes || '';
 
+  const SOCIAL_AD_CATEGORY = 'Social Ad Budget';
+  const isSocialAdCategory = selectedRetainerCategory === SOCIAL_AD_CATEGORY;
+
   const cycleStartMs = cycleStart;
   const cycleEndMs = cycleStartMs
     ? getBillingPeriod(selectedClientObj.billingDay || 1, 1).end
@@ -88,12 +91,20 @@ const EmployeeKiosk = ({
     activeTask.projectName === selectedRetainerCategory;
 
   const categoryUsedWithActive = categoryUsed + (selectedCategoryMatchesActiveTask ? activeDeltaHours : 0);
+  const categoryUsedWithActiveNormalized = isSocialAdCategory
+    ? Number(categoryUsed || 0)
+    : categoryUsedWithActive;
 
   const combinedUsedWithActive = (retainerStats?.currentUsed || 0) + activeDeltaHours;
 
   const categoryAllotted =
     (selectedClientObj?.retainers &&
       selectedClientObj.retainers[selectedRetainerCategory]) || 0;
+
+  // Used/Allotted units:
+  // - Hours categories: hours
+  // - Social Ad Budget: dollars
+  const categoryUnitLabel = isSocialAdCategory ? '$' : '';
 
 
   React.useEffect(() => {
@@ -371,20 +382,22 @@ const EmployeeKiosk = ({
                             Category: {selectedRetainerCategory}
                           </div>
                           <div className="text-xs font-black text-slate-700 mb-2">
-                            {categoryUsedWithActive.toFixed(2)}h used /{' '}
-                            {Number(categoryAllotted || 0).toFixed(2)}h available
+                            {isSocialAdCategory
+                              ? `$${Number(categoryUsedWithActiveNormalized || 0).toFixed(2)} used / $${Number(categoryAllotted || 0).toFixed(2)} available`
+                              : `${Number(categoryUsedWithActiveNormalized || 0).toFixed(2)}h used / ${Number(categoryAllotted || 0).toFixed(2)}h available`}
                           </div>
                           <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-3">
                             <div
                               className={`h-3 rounded-full transition-all duration-500 ${
-                                  (categoryUsedWithActive > Number(categoryAllotted || 0))
-                                  ? 'bg-red-500'
-                                  : 'bg-emerald-500'
+                                  (categoryUsedWithActiveNormalized >
+                                  Number(categoryAllotted || 0))
+                                    ? 'bg-red-500'
+                                    : 'bg-emerald-500'
                               }`}
                               style={{
                                 width: `${Math.min(
                                   100,
-                                  ((categoryUsedWithActive || 0) /
+                                  ((categoryUsedWithActiveNormalized || 0) /
                                     ((Number(categoryAllotted || 0) || 1))) *
                                     100,
                                 )}%`,
@@ -467,8 +480,9 @@ const EmployeeKiosk = ({
                             Category: {selectedRetainerCategory}
                           </div>
                           <div className="text-xs font-black text-slate-700 mb-2">
-                            {categoryUsedWithActive.toFixed(2)}h used /{' '}
-                            {Number(categoryAllotted || 0).toFixed(2)}h available
+                            {isSocialAdCategory
+                              ? `$${Number(categoryUsedWithActiveNormalized || 0).toFixed(2)} used / $${Number(categoryAllotted || 0).toFixed(2)} available`
+                              : `${Number(categoryUsedWithActiveNormalized || 0).toFixed(2)}h used / ${Number(categoryAllotted || 0).toFixed(2)}h available`}
                           </div>
                           <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-3">
                             <div

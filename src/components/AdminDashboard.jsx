@@ -108,6 +108,7 @@ const AdminDashboard = ({
   const [clientNotesSaving, setClientNotesSaving] = useState({});
   const [cycleNotesDraft, setCycleNotesDraft] = useState({});
   const [cycleNotesSaving, setCycleNotesSaving] = useState({});
+  const [retainerCategoryOpen, setRetainerCategoryOpen] = useState({});
   const [estimateModal, setEstimateModal] = useState(null);
   const [estimateValues, setEstimateValues] = useState({
     hours: '',
@@ -1439,11 +1440,15 @@ const AdminDashboard = ({
                               const used =
                                 stats.categoryBreakdown[cat] || 0;
                               const baseNum = Number(base) || 0;
+                              const isSocialAdCategory =
+                                cat === 'Social Ad Budget';
+                              const usedDisplay = Number(used || 0).toFixed(2);
+                              const baseDisplay = Number(baseNum || 0).toFixed(2);
                               const pct =
                                 baseNum > 0
                                   ? Math.min(
                                       100,
-                                      (used / baseNum) * 100,
+                                      (Number(used || 0) / baseNum) * 100,
                                     )
                                   : 0;
                               const over =
@@ -1451,13 +1456,31 @@ const AdminDashboard = ({
 
                               return (
                                 <div key={cat}>
-                                  <div className="flex justify-between text-[10px] font-bold text-slate-500 mb-1">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setRetainerCategoryOpen((prev) => ({
+                                        ...prev,
+                                        [`${c.id}__${cycleStart}__${catKey}`]:
+                                          !prev[`${c.id}__${cycleStart}__${catKey}`],
+                                      }))
+                                    }
+                                    className="flex justify-between items-center w-full text-left text-[10px] font-bold text-slate-500 mb-1"
+                                  >
                                     <span>{cat}</span>
-                                    <span>
-                                      {used.toFixed(2)}h /{' '}
-                                      {baseNum.toFixed(2)}h
+                                    <span className="flex items-center gap-2">
+                                      <span>
+                                        {isSocialAdCategory
+                                          ? `$${usedDisplay} / $${baseDisplay}`
+                                          : `${usedDisplay}h / ${baseDisplay}h`}
+                                      </span>
+                                      <span aria-hidden>
+                                        {retainerCategoryOpen[`${c.id}__${cycleStart}__${catKey}`]
+                                          ? '▲'
+                                          : '▼'}
+                                      </span>
                                     </span>
-                                  </div>
+                                  </button>
                                   <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
                                     <div
                                       className={`h-2 rounded-full ${
@@ -1469,71 +1492,76 @@ const AdminDashboard = ({
                                     />
                                   </div>
 
-                                  <div className="mt-2">
-                                    <textarea
-                                      value={
-                                        cycleNotesDraft[noteKey] ??
-                                        (existingNote || '')
-                                      }
-                                      onChange={(e) =>
-                                        setCycleNotesDraft((prev) => ({
-                                          ...prev,
-                                          [noteKey]: e.target.value,
-                                        }))
-                                      }
-                                      className="w-full bg-white border border-slate-200 p-3 rounded-xl font-medium text-xs outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[70px]"
-                                      placeholder="Cycle note for this category (manual entry)..."
-                                    />
-                                    <div className="flex justify-end mt-2">
-                                      <button
-                                        onClick={async () => {
-                                          const value =
-                                            cycleNotesDraft[noteKey] ??
-                                            existingNote ??
-                                            '';
-                                          if (isCycleLocked(c, cycleStart)) {
-                                            window.alert(
-                                              'This billing cycle is locked. Unlock to edit cycle notes.',
-                                            );
-                                            return;
-                                          }
-                                          setCycleNotesSaving((prev) => ({
+                                  {retainerCategoryOpen[`${c.id}__${cycleStart}__${catKey}`] && (
+                                    <div className="mt-2">
+                                      <textarea
+                                        value={
+                                          cycleNotesDraft[noteKey] ??
+                                          (existingNote || '')
+                                        }
+                                        onChange={(e) =>
+                                          setCycleNotesDraft((prev) => ({
                                             ...prev,
-                                            [noteKey]: true,
-                                          }));
-                                          try {
-                                            await updateDoc(doc('clients', c.id), {
-                                              [`cycleNotes.${cycleStart}.${catKey}`]:
-                                                value,
-                                            });
-                                            logAudit?.({
-                                              type: 'retainer_cycle_note_saved',
-                                              entityType: 'client',
-                                              entityId: c.id,
-                                              clientId: c.id,
-                                              cycleStart,
-                                              meta: { category: cat },
-                                            });
-                                          } catch (err) {
-                                            window.alert(
-                                              `Could not save cycle note (${cat}): ${
-                                                err?.message || String(err)
-                                              }`,
-                                            );
-                                          } finally {
+                                            [noteKey]: e.target.value,
+                                          }))
+                                        }
+                                        className="w-full bg-white border border-slate-200 p-3 rounded-xl font-medium text-xs outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[70px]"
+                                        placeholder="Cycle note for this category (manual entry)..."
+                                      />
+                                      <div className="flex justify-end mt-2">
+                                        <button
+                                          onClick={async () => {
+                                            const value =
+                                              cycleNotesDraft[noteKey] ??
+                                              existingNote ??
+                                              '';
+                                            if (isCycleLocked(c, cycleStart)) {
+                                              window.alert(
+                                                'This billing cycle is locked. Unlock to edit cycle notes.',
+                                              );
+                                              return;
+                                            }
                                             setCycleNotesSaving((prev) => ({
                                               ...prev,
-                                              [noteKey]: false,
+                                              [noteKey]: true,
                                             }));
-                                          }
-                                        }}
-                                        disabled={!!cycleNotesSaving[noteKey]}
-                                        className="px-3 py-1 rounded-xl bg-slate-100 text-slate-600 text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all disabled:opacity-30"
-                                      >
-                                        Save Note
-                                      </button>
+                                            try {
+                                              await updateDoc(
+                                                doc('clients', c.id),
+                                                {
+                                                  [`cycleNotes.${cycleStart}.${catKey}`]:
+                                                    value,
+                                                },
+                                              );
+                                              logAudit?.({
+                                                type: 'retainer_cycle_note_saved',
+                                                entityType: 'client',
+                                                entityId: c.id,
+                                                clientId: c.id,
+                                                cycleStart,
+                                                meta: { category: cat },
+                                              });
+                                            } catch (err) {
+                                              window.alert(
+                                                `Could not save cycle note (${cat}): ${
+                                                  err?.message || String(err)
+                                                }`,
+                                              );
+                                            } finally {
+                                              setCycleNotesSaving((prev) => ({
+                                                ...prev,
+                                                [noteKey]: false,
+                                              }));
+                                            }
+                                          }}
+                                          disabled={!!cycleNotesSaving[noteKey]}
+                                          className="px-3 py-1 rounded-xl bg-slate-100 text-slate-600 text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all disabled:opacity-30"
+                                        >
+                                          Save Note
+                                        </button>
+                                      </div>
                                     </div>
-                                  </div>
+                                  )}
                                 </div>
                               );
                             })}
