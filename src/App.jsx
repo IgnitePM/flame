@@ -73,6 +73,14 @@ const DEFAULT_PROJECT_CATEGORIES = [
   'Social Ad Budget',
 ];
 
+// Approximate exchange rates to CAD (update as needed). All expense tracking is stored in CAD.
+const FX_TO_CAD = {
+  CAD: 1,
+  USD: 1.36,
+  EUR: 1.47,
+  GBP: 1.72,
+};
+
 const IgniteLogo = ({ className }) => (
   <img
     src="/logo.png"
@@ -123,7 +131,14 @@ export default function App() {
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [editingClient, setEditingClient] = useState(null); 
   const [expenseModal, setExpenseModal] = useState(null);
-  const [expenseValues, setExpenseValues] = useState({ billingTarget: '', description: '', amount: '', date: '' });
+  const [expenseValues, setExpenseValues] = useState({
+    billingTarget: '',
+    description: '',
+    amount: '',
+    date: '',
+    currency: 'CAD',
+    applyMarkup: true,
+  });
   const [manualTaskModal, setManualTaskModal] = useState(false);
   const [manualTaskValues, setManualTaskValues] = useState({ clientName: '', billingTarget: '', date: '', hours: '', minutes: '', notes: '', employeeName: '', parsedExpense: 0 });
   const [addonModal, setAddonModal] = useState(null); 
@@ -469,20 +484,41 @@ export default function App() {
     const targetId = isProject ? expenseValues.billingTarget.replace('project_', '') : null;
     const catName = isProject ? 'Custom Project' : expenseValues.billingTarget.replace('retainer_', '');
 
-    const rawAmount = Number(expenseValues.amount);
+    const currency = expenseValues.currency || 'CAD';
+    const rateToCad = FX_TO_CAD[currency] ?? 1;
+    const amountInOriginalCurrency = Number(expenseValues.amount);
+    const amountCad = amountInOriginalCurrency * rateToCad;
+
     const isSocialAd = catName === 'Social Ad Budget';
-    const finalCost = isSocialAd ? rawAmount : rawAmount * 1.30; 
-    const rate = expenseModal.hourlyRate || 0;
-    const equivalentHours = isSocialAd ? 0 : rate > 0 ? (finalCost / rate) : 0;
+    const applyMarkup = expenseValues.applyMarkup !== false && !isSocialAd;
+    const rawAmount = amountCad;
+    const finalCost = applyMarkup ? amountCad * 1.30 : amountCad;
+    const clientRate = expenseModal.hourlyRate || 0;
+    const equivalentHours = isSocialAd ? 0 : clientRate > 0 ? (finalCost / clientRate) : 0;
     const expenseDate = expenseValues.date ? new Date(expenseValues.date).getTime() : Date.now();
 
     await addDoc(collection(db, 'expenses'), {
-      clientId: expenseModal.id, clientName: expenseModal.name, 
-      category: catName, projectId: targetId,
-      description: expenseValues.description, rawAmount, finalCost, equivalentHours, date: expenseDate
+      clientId: expenseModal.id,
+      clientName: expenseModal.name,
+      category: catName,
+      projectId: targetId,
+      description: expenseValues.description,
+      rawAmount,
+      finalCost,
+      equivalentHours,
+      date: expenseDate,
+      originalCurrency: currency,
+      originalAmount: amountInOriginalCurrency,
     });
     setExpenseModal(null);
-    setExpenseValues({ billingTarget: '', description: '', amount: '', date: '' });
+    setExpenseValues({
+      billingTarget: '',
+      description: '',
+      amount: '',
+      date: '',
+      currency: 'CAD',
+      applyMarkup: true,
+    });
   };
 
   const logSocialAdSpend = async ({ clientId, clientName, amount, description }) => {
@@ -805,26 +841,58 @@ export default function App() {
 
   const startEditing = (type, item) => {
     setEditingItem({ type, id: item.id });
+    const clockInDate = new Date(item.clockInTime).toISOString().slice(0, 16);
+    const clockOutDate = item.clockOutTime ? new Date(item.clockOutTime).toISOString().slice(0, 16) : '';
+    if (type === 'shift') {
+      setEditValues({ ...item, clockInDate, clockOutDate });
+      return;
+    }
+    const billingTarget = item.projectId
+      ? `project_${item.projectId}`
+      : `retainer_${item.projectName || ''}`;
     setEditValues({
       ...item,
-      clockInDate: new Date(item.clockInTime).toISOString().slice(0, 16),
-      clockOutDate: item.clockOutTime ? new Date(item.clockOutTime).toISOString().slice(0, 16) : ''
+      clockInDate,
+      clockOutDate,
+      billingTarget,
+      clientName: item.clientName || '',
     });
   };
 
   const saveEdit = async () => {
+    if (editingItem.type === 'task' && (!editValues.clientName || !editValues.billingTarget)) {
+      window.alert('Please select both Client and Billing Target for the task.');
+      return;
+    }
     const coll = editingItem.type === 'shift' ? 'timesheets' : 'taskLogs';
     const updates = { ...editValues };
     updates.clockInTime = new Date(editValues.clockInDate).getTime();
-    
+
     if (editValues.clockOutDate) {
       updates.clockOutTime = new Date(editValues.clockOutDate).getTime();
       updates.duration = updates.clockOutTime - updates.clockInTime;
       updates.totalSavedDuration = updates.duration;
     }
-    
+
+    if (editingItem.type === 'task') {
+      const clientName = updates.clientName || '';
+      const client = clients.find((c) => c.name === clientName);
+      updates.clientId = client?.id ?? null;
+      updates.clientName = clientName;
+      const bt = updates.billingTarget || '';
+      if (bt.startsWith('project_')) {
+        updates.projectId = bt.replace('project_', '');
+        const proj = projects.find((p) => p.id === updates.projectId);
+        updates.projectName = proj ? proj.title : 'Custom Project';
+      } else {
+        updates.projectId = null;
+        updates.projectName = bt.replace('retainer_', '') || GENERAL_LABEL;
+      }
+    }
+
     delete updates.clockInDate;
     delete updates.clockOutDate;
+    delete updates.billingTarget;
     delete updates.id;
 
     await updateDoc(doc(db, coll, editingItem.id), updates);
@@ -1171,6 +1239,7 @@ export default function App() {
               setProjectModal={setProjectModal}
               setEditingClient={setEditingClient}
               setDeleteConfirm={setDeleteConfirm}
+              startEditing={startEditing}
               activeTaskTypes={activeTaskTypes}
               getBillingPeriod={getBillingPeriod}
               getShiftDuration={getShiftDuration}
@@ -1327,21 +1396,67 @@ export default function App() {
                     <input type="text" value={expenseValues.description} onChange={e => setExpenseValues({...expenseValues, description: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-medium text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g., Backlinks, Software..." />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Raw Cost</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Currency</label>
+                    <select
+                      value={expenseValues.currency || 'CAD'}
+                      onChange={e => setExpenseValues({ ...expenseValues, currency: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="CAD">CAD (Canadian Dollar)</option>
+                      <option value="USD">USD (US Dollar)</option>
+                      <option value="EUR">EUR (Euro)</option>
+                      <option value="GBP">GBP (British Pound)</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Amount ({expenseValues.currency || 'CAD'})</label>
                     <div className="flex items-center bg-slate-50 border border-slate-200 rounded-2xl px-4 focus-within:ring-2 focus-within:ring-blue-500 transition-all">
-                      <span className="font-black text-slate-400 text-xl">$</span>
-                      <input type="number" min="0" placeholder="0.00" value={expenseValues.amount} onChange={e => setExpenseValues({...expenseValues, amount: e.target.value})} className="w-full bg-transparent p-4 pl-2 font-black text-2xl outline-none text-slate-900" />
+                      <span className="font-black text-slate-400 text-xl">
+                        {expenseValues.currency === 'GBP' ? '£' : expenseValues.currency === 'EUR' ? '€' : '$'}
+                      </span>
+                      <input type="number" min="0" step="0.01" placeholder="0.00" value={expenseValues.amount} onChange={e => setExpenseValues({ ...expenseValues, amount: e.target.value })} className="w-full bg-transparent p-4 pl-2 font-black text-2xl outline-none text-slate-900" />
                     </div>
                   </div>
-                  
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={expenseValues.applyMarkup !== false}
+                      onChange={e => setExpenseValues({ ...expenseValues, applyMarkup: e.target.checked })}
+                      className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm font-bold text-slate-700">Add 30% markup (HST)</span>
+                  </label>
                   {expenseValues.amount && (
-                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-2 mt-4">
-                      <div className="flex justify-between text-xs font-bold text-slate-500"><span>Raw Cost:</span><span>${Number(expenseValues.amount).toFixed(2)}</span></div>
-                      <div className="flex justify-between text-xs font-bold text-slate-500"><span>Markup (30%):</span><span className="text-emerald-500">+${(Number(expenseValues.amount) * 0.3).toFixed(2)}</span></div>
-                      <div className="h-px bg-slate-200 my-1"></div>
-                      <div className="flex justify-between font-black text-slate-800"><span>Final Cost:</span><span>${(Number(expenseValues.amount) * 1.3).toFixed(2)}</span></div>
-                      <div className="flex justify-between text-[10px] font-black uppercase text-[#fd7414] pt-2"><span>Retainer Deduction:</span><span>{((Number(expenseValues.amount) * 1.3) / expenseModal.hourlyRate).toFixed(2)} hrs</span></div>
-                    </div>
+                    (() => {
+                      const currency = expenseValues.currency || 'CAD';
+                      const rateToCad = FX_TO_CAD[currency] ?? 1;
+                      const amountOrig = Number(expenseValues.amount);
+                      const amountCad = amountOrig * rateToCad;
+                      const applyMarkup = expenseValues.applyMarkup !== false;
+                      const finalCostCad = applyMarkup ? amountCad * 1.30 : amountCad;
+                      return (
+                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-2 mt-4">
+                          {currency !== 'CAD' && (
+                            <div className="flex justify-between text-xs font-bold text-slate-500">
+                              <span>Converted to CAD (×{rateToCad.toFixed(2)}):</span>
+                              <span>${amountCad.toFixed(2)} CAD</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between text-xs font-bold text-slate-500">
+                            <span>Cost in CAD:</span>
+                            <span>${amountCad.toFixed(2)}</span>
+                          </div>
+                          {applyMarkup && (
+                            <>
+                              <div className="flex justify-between text-xs font-bold text-slate-500"><span>Markup (30%):</span><span className="text-emerald-500">+${(amountCad * 0.3).toFixed(2)}</span></div>
+                              <div className="h-px bg-slate-200 my-1"></div>
+                            </>
+                          )}
+                          <div className="flex justify-between font-black text-slate-800"><span>Final Cost (CAD):</span><span>${finalCostCad.toFixed(2)}</span></div>
+                          <div className="flex justify-between text-[10px] font-black uppercase text-[#fd7414] pt-2"><span>Retainer Deduction:</span><span>{(finalCostCad / expenseModal.hourlyRate).toFixed(2)} hrs</span></div>
+                        </div>
+                      );
+                    })()
                   )}
 
                   <button onClick={saveExpense} disabled={!expenseValues.amount || !expenseValues.billingTarget} className="w-full bg-blue-600 text-white p-5 rounded-2xl font-black text-lg shadow-xl shadow-blue-500/20 active:scale-95 transition-all disabled:opacity-30 mt-4">Log Expense</button>
@@ -1376,8 +1491,54 @@ export default function App() {
               {editingItem.type === 'task' && (
                 <div className="space-y-4 text-left">
                   <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Client</label>
+                    <select
+                      value={editValues.clientName || ''}
+                      onChange={e => setEditValues({ ...editValues, clientName: e.target.value, billingTarget: '' })}
+                      className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                    >
+                      <option value="">Select client...</option>
+                      {clients.filter(c => !c.archived).map(c => (
+                        <option key={c.id} value={c.name}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Retainer / Billing Target</label>
+                    <select
+                      value={editValues.billingTarget || ''}
+                      onChange={e => setEditValues({ ...editValues, billingTarget: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      disabled={!editValues.clientName}
+                    >
+                      <option value="">Select target...</option>
+                      {editValues.clientName && (() => {
+                        const client = clients.find(c => c.name === editValues.clientName);
+                        const retainers = client?.retainers ? Object.keys(client.retainers) : [];
+                        const clientProjs = projects.filter(p => !p.archived && p.clientName === editValues.clientName && (p.status === 'active' || p.status === 'approved'));
+                        return (
+                          <>
+                            <optgroup label="Retainers">
+                              <option value={`retainer_${GENERAL_LABEL}`}>{GENERAL_LABEL}</option>
+                              {retainers.map(name => (
+                                <option key={name} value={`retainer_${name}`}>{name}</option>
+                              ))}
+                            </optgroup>
+                            {clientProjs.length > 0 && (
+                              <optgroup label="Custom Projects">
+                                {clientProjs.map(p => (
+                                  <option key={p.id} value={`project_${p.id}`}>{p.title}</option>
+                                ))}
+                              </optgroup>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Work Description / Notes</label>
-                    <textarea value={editValues.notes || ''} onChange={e => setEditValues({...editValues, notes: e.target.value})} className="w-full bg-slate-50 border-slate-200 border p-4 rounded-2xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[100px]" />
+                    <textarea value={editValues.notes || ''} onChange={e => setEditValues({...editValues, notes: e.target.value})} className="w-full bg-slate-50 border-slate-200 border p-4 rounded-2xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[100px]" placeholder="Task notes..." />
                   </div>
                 </div>
               )}

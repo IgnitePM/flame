@@ -15,6 +15,7 @@ import {
   History,
   List,
   Lock,
+  Pencil,
   Search,
   Settings,
   ShoppingCart,
@@ -63,6 +64,7 @@ const AdminDashboard = ({
   setProjectModal,
   setEditingClient,
   setDeleteConfirm,
+  startEditing,
   activeTaskTypes,
   getBillingPeriod,
   getShiftDuration,
@@ -796,6 +798,13 @@ const AdminDashboard = ({
                         )}
                       </button>
                       <button
+                        onClick={() => startEditing('shift', shift)}
+                        className="p-3 bg-slate-50 text-slate-500 rounded-xl hover:text-[#fd7414] transition-colors"
+                        title="Edit shift times"
+                      >
+                        <Pencil className="w-5 h-5" />
+                      </button>
+                      <button
                         onClick={() =>
                           setDeleteConfirm({
                             collection: 'timesheets',
@@ -867,6 +876,13 @@ const AdminDashboard = ({
                                   {formatTime(getTaskDuration(task))}
                                 </div>
                                 <div className="flex gap-2">
+                                  <button
+                                    onClick={() => startEditing('task', task)}
+                                    className="p-2 text-slate-400 hover:text-[#fd7414]"
+                                    title="Edit task"
+                                  >
+                                    <Pencil className="w-4 h-4" />
+                                  </button>
                                   <button
                                     onClick={() =>
                                       setDeleteConfirm({
