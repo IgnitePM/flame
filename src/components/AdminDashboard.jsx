@@ -86,6 +86,15 @@ const AdminDashboard = ({
   const canBilling = currentUserRole === 'admin' || currentUserRole === 'billing';
   const isAdmin = currentUserRole === 'admin';
 
+  // Keep retainer categories stable in the UI even if Firestore map key ordering changes.
+  const retainerCategoryOrder = Array.from(
+    new Set([...(activeTaskTypes || []), 'Social Ad Budget']),
+  );
+  const getRetainerCategorySortIndex = (cat) => {
+    const idx = retainerCategoryOrder.indexOf(cat);
+    return idx === -1 ? 9999 : idx;
+  };
+
   const adminEmailKey = (e) => String(e || '').trim().toLowerCase();
   const adminGroups = (adminUsers || []).reduce((acc, a) => {
     const key = adminEmailKey(a?.email);
@@ -1466,7 +1475,14 @@ const AdminDashboard = ({
                             Retainer Categories
                           </h5>
                           <div className="space-y-2">
-                            {Object.entries(c.retainers).map(([cat, base]) => {
+                            {Object.entries(c.retainers)
+                              .sort((a, b) => {
+                                const ai = getRetainerCategorySortIndex(a[0]);
+                                const bi = getRetainerCategorySortIndex(b[0]);
+                                if (ai !== bi) return ai - bi;
+                                return String(a[0]).localeCompare(String(b[0]));
+                              })
+                              .map(([cat, base]) => {
                               const cycleStart = mStart;
                               const catKey = safeCategoryKey(cat);
                               const noteKey = getCycleNoteKey(c.id, cycleStart, catKey);
@@ -1836,24 +1852,37 @@ const AdminDashboard = ({
                                                           </button>
                                                         </div>
 
-                                                        {allDone && (
-                                                          <button
-                                                            type="button"
-                                                            onClick={async () => {
-                                                              if (isCycleLocked(c, cycleStart)) return;
-                                                              setTodoSaving(true);
-                                                              try {
-                                                                await updateClientTodo(c, cycleStart, catKey, { ...catTodo, closed: true });
-                                                              } finally {
-                                                                setTodoSaving(false);
-                                                              }
-                                                            }}
-                                                            disabled={todoSaving}
-                                                            className="text-xs font-bold text-emerald-600 hover:underline"
-                                                          >
-                                                            Close category for this cycle
-                                                          </button>
-                                                        )}
+                                                        <button
+                                                          type="button"
+                                                          onClick={async () => {
+                                                            if (isCycleLocked(c, cycleStart)) return;
+                                                            if (!allDone) return;
+                                                            setTodoSaving(true);
+                                                            try {
+                                                              await updateClientTodo(
+                                                                c,
+                                                                cycleStart,
+                                                                catKey,
+                                                                { ...catTodo, closed: true },
+                                                              );
+                                                            } finally {
+                                                              setTodoSaving(false);
+                                                            }
+                                                          }}
+                                                          disabled={todoSaving || !allDone}
+                                                          className={`text-xs font-bold hover:underline ${
+                                                            allDone
+                                                              ? 'text-emerald-600'
+                                                              : 'text-slate-400 cursor-not-allowed'
+                                                          }`}
+                                                          title={
+                                                            allDone
+                                                              ? 'Close category when all items are done'
+                                                              : 'Check off all sub items to close this category'
+                                                          }
+                                                        >
+                                                          Close category for this cycle
+                                                        </button>
                                                       </div>
                                                     </>
                                                   )}

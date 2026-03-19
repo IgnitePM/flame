@@ -379,6 +379,125 @@ const EmployeeKiosk = ({
                         </div>
                       )}
 
+                      {/* To-do list for this category (current cycle) */}
+                      {getTodoStateForCycle && updateClientTodo && selectedClientObj && selectedRetainerCategory && cycleStart && (
+                        (() => {
+                          const catKey = todoCategoryKey ? todoCategoryKey(selectedRetainerCategory) : safeCategoryKey(selectedRetainerCategory);
+                          const todoState = getTodoStateForCycle(selectedClientObj, cycleStart);
+                          const catTodo = todoState[catKey] || { closed: false, items: [] };
+                          const items = catTodo.items || [];
+                          return (
+                            <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
+                              <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                                To-do — {selectedRetainerCategory}
+                                {catTodo.closed && (
+                                  <span className="ml-2 px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[9px] font-bold uppercase">
+                                    Closed
+                                  </span>
+                                )}
+                              </div>
+                              {!catTodo.closed && (
+                                <>
+                                  {items.length === 0 ? (
+                                    <p className="text-xs italic text-slate-400 mb-2">No items yet.</p>
+                                  ) : (
+                                    <ul className="space-y-2 mb-3">
+                                      {items.map((item) => (
+                                        <li
+                                          key={item.id}
+                                          className="flex items-center gap-2 bg-slate-50 rounded-lg p-2"
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={!!item.done}
+                                            onChange={async () => {
+                                              setTodoSaving(true);
+                                              try {
+                                                const next = items.map((i) =>
+                                                  i.id === item.id
+                                                    ? { ...i, done: !i.done, doneAt: !i.done ? Date.now() : null }
+                                                    : i
+                                                );
+                                                await updateClientTodo(selectedClientObj, cycleStart, catKey, { ...catTodo, items: next });
+                                              } finally {
+                                                setTodoSaving(false);
+                                              }
+                                            }}
+                                            disabled={todoSaving}
+                                            className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
+                                          />
+                                          <span className={`text-sm flex-1 ${item.done ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+                                            {item.text || '(no text)'}
+                                          </span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                  <div className="flex gap-2">
+                                    <input
+                                      type="text"
+                                      value={todoNewText}
+                                      onChange={(e) => setTodoNewText(e.target.value)}
+                                      placeholder="New to-do..."
+                                      className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          if (todoNewText.trim()) {
+                                            const newItem = {
+                                              id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                                              text: todoNewText.trim(),
+                                              done: false,
+                                              doneAt: null,
+                                            };
+                                            setTodoSaving(true);
+                                            updateClientTodo(selectedClientObj, cycleStart, catKey, {
+                                              ...catTodo,
+                                              closed: false,
+                                              items: [...items, newItem],
+                                            }).finally(() => {
+                                              setTodoSaving(false);
+                                              setTodoNewText('');
+                                            });
+                                          }
+                                        }
+                                      }}
+                                    />
+                                    <button
+                                      type="button"
+                                      disabled={!todoNewText.trim() || todoSaving}
+                                      onClick={async () => {
+                                        if (!todoNewText.trim()) return;
+                                        const newItem = {
+                                          id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                                          text: todoNewText.trim(),
+                                          done: false,
+                                          doneAt: null,
+                                        };
+                                        setTodoSaving(true);
+                                        try {
+                                          await updateClientTodo(selectedClientObj, cycleStart, catKey, {
+                                            ...catTodo,
+                                            closed: false,
+                                            items: [...items, newItem],
+                                          });
+                                          setTodoNewText('');
+                                        } finally {
+                                          setTodoSaving(false);
+                                        }
+                                      }}
+                                      className="px-4 py-2 rounded-xl bg-[#fd7414] text-white font-bold text-sm disabled:opacity-40"
+                                    >
+                                      Add
+                                    </button>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })()
+                      )}
+
                       {/* Retainer progress (category + combined) for current cycle */}
                       {retainerStats && selectedRetainerCategory && (
                         <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
@@ -401,7 +520,7 @@ const EmployeeKiosk = ({
                                   Number(categoryAllotted || 0))
                                     ? 'bg-red-500'
                                     : 'bg-emerald-500'
-                              }`}
+                                }`}
                               style={{
                                 width: `${Math.min(
                                   100,
@@ -442,6 +561,132 @@ const EmployeeKiosk = ({
                               days
                             </div>
                           )}
+                        </div>
+                      )}
+
+                      {/* Log Social Ad Spend (kiosk-only when Social Ad Budget selected) */}
+                      {isSocialAdCategory && selectedClientObj && onLogSocialAdSpend && (
+                        <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
+                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
+                            Log Social Ad Spend
+                          </div>
+                          <p className="text-xs text-slate-500 mb-3">
+                            Enter the dollar amount and description (e.g. platform + ad details). This will be applied to this cycle&apos;s Social Ad Budget.
+                          </p>
+                          <div className="space-y-3">
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+                                Amount ($)
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={socialAdAmount}
+                                onChange={(e) => setSocialAdAmount(e.target.value)}
+                                placeholder="0.00"
+                                className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+                                Description (platform + ad details)
+                              </label>
+                              <textarea
+                                value={socialAdDescription}
+                                onChange={(e) => setSocialAdDescription(e.target.value)}
+                                placeholder="e.g. Meta - Brand awareness campaign"
+                                className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[72px]"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const amt = Number(socialAdAmount);
+                                if (!selectedClientObj?.id || !selectedClientObj?.name || !Number.isFinite(amt) || amt <= 0) {
+                                  window.alert('Enter a valid dollar amount.');
+                                  return;
+                                }
+                                setSocialAdSubmitting(true);
+                                try {
+                                  await onLogSocialAdSpend({
+                                    clientId: selectedClientObj.id,
+                                    clientName: selectedClientObj.name,
+                                    amount: amt,
+                                    description: socialAdDescription.trim() || undefined,
+                                  });
+                                  setSocialAdAmount('');
+                                  setSocialAdDescription('');
+                                } catch (err) {
+                                  window.alert(err?.message || 'Failed to log spend.');
+                                } finally {
+                                  setSocialAdSubmitting(false);
+                                }
+                              }}
+                              disabled={socialAdSubmitting || !socialAdAmount || Number(socialAdAmount) <= 0}
+                              className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white p-3 rounded-xl font-black text-sm uppercase tracking-widest transition-all"
+                            >
+                              {socialAdSubmitting ? 'Submitting…' : 'Submit Spend'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="bg-orange-50 p-8 rounded-[32px] border border-orange-200 text-left animate-in zoom-in-95 duration-300">
+                      <div className="flex justify-between items-start mb-6">
+                        <div>
+                          <div className="font-black text-2xl text-slate-900">
+                            {activeTask.clientName}
+                          </div>
+                          <div className="text-[#fd7414] font-bold uppercase text-[10px] tracking-widest mt-1">
+                            {activeTask.projectId
+                              ? `Project: ${activeTask.projectName}`
+                              : activeTask.projectName}
+                          </div>
+                        </div>
+                        <div className="bg-white px-3 py-1.5 rounded-full border border-orange-200 text-[10px] font-black text-orange-600 shadow-sm">
+                          IN PROGRESS
+                        </div>
+                      </div>
+                      <div className="text-6xl font-black text-slate-900 text-center mb-8 font-mono tracking-tighter">
+                        {formatTime(liveTaskDuration)}
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
+                          Progress Notes
+                        </label>
+                        <textarea
+                          value={activeTaskNotes}
+                          onChange={(e) => setActiveTaskNotes(e.target.value)}
+                          placeholder="Briefly describe what you've accomplished..."
+                          className="w-full p-5 border-orange-200 border rounded-2xl bg-white/70 focus:ring-2 focus:ring-[#fd7414] outline-none text-sm min-h-[120px] font-medium"
+                        />
+                      </div>
+
+                      {selectedClientObj && selectedRetainerCategory && (
+                        <div className="mt-5 bg-white border border-slate-200 rounded-[24px] p-4">
+                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                            Notes for {selectedClientObj.name} • {selectedRetainerCategory}
+                          </div>
+                          <div className="space-y-3">
+                            <div>
+                              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                                Client Notes
+                              </div>
+                              <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                                {selectedClientGeneralNote || 'No client notes yet.'}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                                {selectedRetainerCategory} Note
+                              </div>
+                              <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                                {selectedRetainerNote || 'No category note yet.'}
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       )}
 
@@ -564,106 +809,6 @@ const EmployeeKiosk = ({
                         })()
                       )}
 
-                      {/* Log Social Ad Spend (kiosk-only when Social Ad Budget selected) */}
-                      {isSocialAdCategory && selectedClientObj && onLogSocialAdSpend && (
-                        <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
-                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
-                            Log Social Ad Spend
-                          </div>
-                          <p className="text-xs text-slate-500 mb-3">
-                            Enter the dollar amount and description (e.g. platform + ad details). This will be applied to this cycle&apos;s Social Ad Budget.
-                          </p>
-                          <div className="space-y-3">
-                            <div>
-                              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
-                                Amount ($)
-                              </label>
-                              <input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={socialAdAmount}
-                                onChange={(e) => setSocialAdAmount(e.target.value)}
-                                placeholder="0.00"
-                                className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
-                                Description (platform + ad details)
-                              </label>
-                              <textarea
-                                value={socialAdDescription}
-                                onChange={(e) => setSocialAdDescription(e.target.value)}
-                                placeholder="e.g. Meta - Brand awareness campaign"
-                                className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[72px]"
-                              />
-                            </div>
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                const amt = Number(socialAdAmount);
-                                if (!selectedClientObj?.id || !selectedClientObj?.name || !Number.isFinite(amt) || amt <= 0) {
-                                  window.alert('Enter a valid dollar amount.');
-                                  return;
-                                }
-                                setSocialAdSubmitting(true);
-                                try {
-                                  await onLogSocialAdSpend({
-                                    clientId: selectedClientObj.id,
-                                    clientName: selectedClientObj.name,
-                                    amount: amt,
-                                    description: socialAdDescription.trim() || undefined,
-                                  });
-                                  setSocialAdAmount('');
-                                  setSocialAdDescription('');
-                                } catch (err) {
-                                  window.alert(err?.message || 'Failed to log spend.');
-                                } finally {
-                                  setSocialAdSubmitting(false);
-                                }
-                              }}
-                              disabled={socialAdSubmitting || !socialAdAmount || Number(socialAdAmount) <= 0}
-                              className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white p-3 rounded-xl font-black text-sm uppercase tracking-widest transition-all"
-                            >
-                              {socialAdSubmitting ? 'Submitting…' : 'Submit Spend'}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="bg-orange-50 p-8 rounded-[32px] border border-orange-200 text-left animate-in zoom-in-95 duration-300">
-                      <div className="flex justify-between items-start mb-6">
-                        <div>
-                          <div className="font-black text-2xl text-slate-900">
-                            {activeTask.clientName}
-                          </div>
-                          <div className="text-[#fd7414] font-bold uppercase text-[10px] tracking-widest mt-1">
-                            {activeTask.projectId
-                              ? `Project: ${activeTask.projectName}`
-                              : activeTask.projectName}
-                          </div>
-                        </div>
-                        <div className="bg-white px-3 py-1.5 rounded-full border border-orange-200 text-[10px] font-black text-orange-600 shadow-sm">
-                          IN PROGRESS
-                        </div>
-                      </div>
-                      <div className="text-6xl font-black text-slate-900 text-center mb-8 font-mono tracking-tighter">
-                        {formatTime(liveTaskDuration)}
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
-                          Progress Notes
-                        </label>
-                        <textarea
-                          value={activeTaskNotes}
-                          onChange={(e) => setActiveTaskNotes(e.target.value)}
-                          placeholder="Briefly describe what you've accomplished..."
-                          className="w-full p-5 border-orange-200 border rounded-2xl bg-white/70 focus:ring-2 focus:ring-[#fd7414] outline-none text-sm min-h-[120px] font-medium"
-                        />
-                      </div>
-
                       {/* Retainer progress (category + combined) for current cycle (show while actively working) */}
                       {retainerStats && selectedRetainerCategory && (
                         <div className="mt-5 bg-white border border-slate-200 rounded-[24px] p-4">
@@ -735,32 +880,6 @@ const EmployeeKiosk = ({
                               days
                             </div>
                           )}
-                        </div>
-                      )}
-
-                      {selectedClientObj && selectedRetainerCategory && (
-                        <div className="mt-5 bg-white border border-slate-200 rounded-[24px] p-4">
-                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
-                            Notes for {selectedClientObj.name} • {selectedRetainerCategory}
-                          </div>
-                          <div className="space-y-3">
-                            <div>
-                              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
-                                Client Notes
-                              </div>
-                              <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
-                                {selectedClientGeneralNote || 'No client notes yet.'}
-                              </div>
-                            </div>
-                            <div>
-                              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
-                                {selectedRetainerCategory} Note
-                              </div>
-                              <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
-                                {selectedRetainerNote || 'No category note yet.'}
-                              </div>
-                            </div>
-                          </div>
                         </div>
                       )}
 
