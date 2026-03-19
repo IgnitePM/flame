@@ -38,12 +38,17 @@ const EmployeeKiosk = ({
   getGlobalRetainerStats,
   formatTime,
   onLogSocialAdSpend,
+  getTodoStateForCycle,
+  updateClientTodo,
+  todoCategoryKey,
 }) => {
   const [clientSearch, setClientSearch] = React.useState('');
   const [targetSearch, setTargetSearch] = React.useState('');
   const [socialAdAmount, setSocialAdAmount] = React.useState('');
   const [socialAdDescription, setSocialAdDescription] = React.useState('');
   const [socialAdSubmitting, setSocialAdSubmitting] = React.useState(false);
+  const [todoNewText, setTodoNewText] = React.useState('');
+  const [todoSaving, setTodoSaving] = React.useState(false);
 
   const safeCategoryKey = (category) =>
     String(category)
@@ -69,6 +74,7 @@ const EmployeeKiosk = ({
   const selectedClientGeneralNote = selectedClientObj?.generalNotes || '';
 
   const SOCIAL_AD_CATEGORY = 'Social Ad Budget';
+  const isDollarCategory = selectedRetainerCategory === SOCIAL_AD_CATEGORY || selectedClientObj?.retainerUnits?.[selectedRetainerCategory] === 'dollar';
   const isSocialAdCategory = selectedRetainerCategory === SOCIAL_AD_CATEGORY;
 
   const cycleStartMs = cycleStart;
@@ -95,7 +101,7 @@ const EmployeeKiosk = ({
     activeTask.projectName === selectedRetainerCategory;
 
   const categoryUsedWithActive = categoryUsed + (selectedCategoryMatchesActiveTask ? activeDeltaHours : 0);
-  const categoryUsedWithActiveNormalized = isSocialAdCategory
+  const categoryUsedWithActiveNormalized = isDollarCategory
     ? Number(categoryUsed || 0)
     : categoryUsedWithActive;
 
@@ -105,10 +111,8 @@ const EmployeeKiosk = ({
     (selectedClientObj?.retainers &&
       selectedClientObj.retainers[selectedRetainerCategory]) || 0;
 
-  // Used/Allotted units:
-  // - Hours categories: hours
-  // - Social Ad Budget: dollars
-  const categoryUnitLabel = isSocialAdCategory ? '$' : '';
+  // Used/Allotted units: hours or dollars per client retainerUnits
+  const categoryUnitLabel = isDollarCategory ? '$' : '';
 
 
   React.useEffect(() => {
@@ -386,7 +390,7 @@ const EmployeeKiosk = ({
                             Category: {selectedRetainerCategory}
                           </div>
                           <div className="text-xs font-black text-slate-700 mb-2">
-                            {isSocialAdCategory
+                            {isDollarCategory
                               ? `$${Number(categoryUsedWithActiveNormalized || 0).toFixed(2)} used / $${Number(categoryAllotted || 0).toFixed(2)} available`
                               : `${Number(categoryUsedWithActiveNormalized || 0).toFixed(2)}h used / ${Number(categoryAllotted || 0).toFixed(2)}h available`}
                           </div>
@@ -439,6 +443,125 @@ const EmployeeKiosk = ({
                             </div>
                           )}
                         </div>
+                      )}
+
+                      {/* To-do list for this category (current cycle) */}
+                      {getTodoStateForCycle && updateClientTodo && selectedClientObj && selectedRetainerCategory && cycleStart && (
+                        (() => {
+                          const catKey = todoCategoryKey ? todoCategoryKey(selectedRetainerCategory) : safeCategoryKey(selectedRetainerCategory);
+                          const todoState = getTodoStateForCycle(selectedClientObj, cycleStart);
+                          const catTodo = todoState[catKey] || { closed: false, items: [] };
+                          const items = catTodo.items || [];
+                          return (
+                            <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
+                              <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                                To-do — {selectedRetainerCategory}
+                                {catTodo.closed && (
+                                  <span className="ml-2 px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[9px] font-bold uppercase">
+                                    Closed
+                                  </span>
+                                )}
+                              </div>
+                              {!catTodo.closed && (
+                                <>
+                                  {items.length === 0 ? (
+                                    <p className="text-xs italic text-slate-400 mb-2">No items yet.</p>
+                                  ) : (
+                                    <ul className="space-y-2 mb-3">
+                                      {items.map((item) => (
+                                        <li
+                                          key={item.id}
+                                          className="flex items-center gap-2 bg-slate-50 rounded-lg p-2"
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={!!item.done}
+                                            onChange={async () => {
+                                              setTodoSaving(true);
+                                              try {
+                                                const next = items.map((i) =>
+                                                  i.id === item.id
+                                                    ? { ...i, done: !i.done, doneAt: !i.done ? Date.now() : null }
+                                                    : i
+                                                );
+                                                await updateClientTodo(selectedClientObj, cycleStart, catKey, { ...catTodo, items: next });
+                                              } finally {
+                                                setTodoSaving(false);
+                                              }
+                                            }}
+                                            disabled={todoSaving}
+                                            className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
+                                          />
+                                          <span className={`text-sm flex-1 ${item.done ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+                                            {item.text || '(no text)'}
+                                          </span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                  <div className="flex gap-2">
+                                    <input
+                                      type="text"
+                                      value={todoNewText}
+                                      onChange={(e) => setTodoNewText(e.target.value)}
+                                      placeholder="New to-do..."
+                                      className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          if (todoNewText.trim()) {
+                                            const newItem = {
+                                              id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                                              text: todoNewText.trim(),
+                                              done: false,
+                                              doneAt: null,
+                                            };
+                                            setTodoSaving(true);
+                                            updateClientTodo(selectedClientObj, cycleStart, catKey, {
+                                              ...catTodo,
+                                              closed: false,
+                                              items: [...items, newItem],
+                                            }).finally(() => {
+                                              setTodoSaving(false);
+                                              setTodoNewText('');
+                                            });
+                                          }
+                                        }
+                                      }}
+                                    />
+                                    <button
+                                      type="button"
+                                      disabled={!todoNewText.trim() || todoSaving}
+                                      onClick={async () => {
+                                        if (!todoNewText.trim()) return;
+                                        const newItem = {
+                                          id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                                          text: todoNewText.trim(),
+                                          done: false,
+                                          doneAt: null,
+                                        };
+                                        setTodoSaving(true);
+                                        try {
+                                          await updateClientTodo(selectedClientObj, cycleStart, catKey, {
+                                            ...catTodo,
+                                            closed: false,
+                                            items: [...items, newItem],
+                                          });
+                                          setTodoNewText('');
+                                        } finally {
+                                          setTodoSaving(false);
+                                        }
+                                      }}
+                                      className="px-4 py-2 rounded-xl bg-[#fd7414] text-white font-bold text-sm disabled:opacity-40"
+                                    >
+                                      Add
+                                    </button>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })()
                       )}
 
                       {/* Log Social Ad Spend (kiosk-only when Social Ad Budget selected) */}
@@ -552,7 +675,7 @@ const EmployeeKiosk = ({
                             Category: {selectedRetainerCategory}
                           </div>
                           <div className="text-xs font-black text-slate-700 mb-2">
-                            {isSocialAdCategory
+                            {isDollarCategory
                               ? `$${Number(categoryUsedWithActiveNormalized || 0).toFixed(2)} used / $${Number(categoryAllotted || 0).toFixed(2)} available`
                               : `${Number(categoryUsedWithActiveNormalized || 0).toFixed(2)}h used / ${Number(categoryAllotted || 0).toFixed(2)}h available`}
                           </div>

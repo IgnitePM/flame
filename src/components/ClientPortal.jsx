@@ -28,7 +28,18 @@ const ClientPortal = ({
   signOut,
   auth,
 }) => {
-  const period = getBillingPeriod(clientProfile.billingDay || 1, portalOffset);
+  const minPortalOffset = (() => {
+    if (!clientProfile.clientStartDate) return -1e9;
+    let o = 0;
+    for (let i = 0; i < 1200; i++) {
+      const p = getBillingPeriod(clientProfile.billingDay || 1, o - 1);
+      if (p.end < clientProfile.clientStartDate) return o;
+      o--;
+    }
+    return o;
+  })();
+  const effectivePortalOffset = Math.max(portalOffset, minPortalOffset);
+  const period = getBillingPeriod(clientProfile.billingDay || 1, effectivePortalOffset);
   const mStart = period.start;
   const mEnd = period.end;
 
@@ -97,8 +108,22 @@ const ClientPortal = ({
 
           <div className="flex items-center gap-4 bg-white border border-slate-200 p-2 rounded-2xl shadow-sm">
             <button
-              onClick={() => setPortalOffset((prev) => prev - 1)}
-              className="p-2 hover:bg-slate-100 rounded-xl transition-colors"
+              onClick={() => {
+                setPortalOffset((prev) => {
+                  const next = prev - 1;
+                  if (clientProfile.clientStartDate) {
+                    const p = getBillingPeriod(clientProfile.billingDay || 1, next);
+                    if (p.end < clientProfile.clientStartDate) return prev;
+                  }
+                  return next;
+                });
+              }}
+              disabled={effectivePortalOffset <= minPortalOffset}
+              className={`p-2 rounded-xl transition-colors ${
+                effectivePortalOffset <= minPortalOffset
+                  ? 'opacity-30 cursor-not-allowed'
+                  : 'hover:bg-slate-100'
+              }`}
             >
               <ChevronLeft className="w-5 h-5" />
             </button>

@@ -79,6 +79,9 @@ const AdminDashboard = ({
   updateDoc,
   doc,
   logAudit,
+  getTodoStateForCycle,
+  updateClientTodo,
+  todoCategoryKey,
 }) => {
   const canBilling = currentUserRole === 'admin' || currentUserRole === 'billing';
   const isAdmin = currentUserRole === 'admin';
@@ -112,6 +115,9 @@ const AdminDashboard = ({
   const [cycleNotesSaving, setCycleNotesSaving] = useState({});
   const [retainerCategoryOpen, setRetainerCategoryOpen] = useState({});
   const [expandedProjectsExpenses, setExpandedProjectsExpenses] = useState({});
+  const [todoEditId, setTodoEditId] = useState(null);
+  const [todoEditText, setTodoEditText] = useState('');
+  const [todoSaving, setTodoSaving] = useState(false);
   const [estimateModal, setEstimateModal] = useState(null);
   const [estimateValues, setEstimateValues] = useState({
     hours: '',
@@ -980,7 +986,18 @@ const AdminDashboard = ({
               .filter((c) => !c.archived)
               .map((c) => {
               const offset = clientCycleOffsets[c.id] ?? 0;
-              const period = getBillingPeriod(c.billingDay || 1, offset);
+              const minCycleOffset = (() => {
+                if (!c.clientStartDate) return -1e9;
+                let o = 0;
+                for (let i = 0; i < 1200; i++) {
+                  const p = getBillingPeriod(c.billingDay || 1, o - 1);
+                  if (p.end < c.clientStartDate) return o;
+                  o--;
+                }
+                return o;
+              })();
+              const effectiveOffset = Math.max(offset, minCycleOffset);
+              const period = getBillingPeriod(c.billingDay || 1, effectiveOffset);
               const mStart = period.start;
               const mEnd = period.end;
               const isExpanded = expandedClients[c.id];
@@ -1132,12 +1149,17 @@ const AdminDashboard = ({
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setClientCycleOffsets((prev) => ({
-                                ...prev,
-                                [c.id]: (prev[c.id] ?? 0) - 1,
-                              }));
+                              setClientCycleOffsets((prev) => {
+                                const newOffset = (prev[c.id] ?? 0) - 1;
+                                if (c.clientStartDate) {
+                                  const p = getBillingPeriod(c.billingDay || 1, newOffset);
+                                  if (p.end < c.clientStartDate) return prev;
+                                }
+                                return { ...prev, [c.id]: newOffset };
+                              });
                             }}
-                            className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 transition-colors"
+                            disabled={effectiveOffset <= minCycleOffset}
+                            className={`p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors ${effectiveOffset <= minCycleOffset ? 'opacity-30 cursor-not-allowed' : 'hover:bg-slate-50'}`}
                             title="Previous billing cycle"
                           >
                             <ChevronLeft className="w-4 h-4" />
@@ -1447,8 +1469,8 @@ const AdminDashboard = ({
                               const used =
                                 stats.categoryBreakdown[cat] || 0;
                               const baseNum = Number(base) || 0;
-                              const isSocialAdCategory =
-                                cat === 'Social Ad Budget';
+                              const isDollarCategory =
+                                cat === 'Social Ad Budget' || c?.retainerUnits?.[cat] === 'dollar';
                               const usedDisplay = Number(used || 0).toFixed(2);
                               const baseDisplay = Number(baseNum || 0).toFixed(2);
                               const pct =
@@ -1477,7 +1499,7 @@ const AdminDashboard = ({
                                     <span>{cat}</span>
                                     <span className="flex items-center gap-2">
                                       <span>
-                                        {isSocialAdCategory
+                                        {isDollarCategory
                                           ? `$${usedDisplay} / $${baseDisplay}`
                                           : `${usedDisplay}h / ${baseDisplay}h`}
                                       </span>
@@ -1500,73 +1522,358 @@ const AdminDashboard = ({
                                   </div>
 
                                   {retainerCategoryOpen[`${c.id}__${cycleStart}__${catKey}`] && (
-                                    <div className="mt-2">
-                                      <textarea
-                                        value={
-                                          cycleNotesDraft[noteKey] ??
-                                          (existingNote || '')
-                                        }
-                                        onChange={(e) =>
-                                          setCycleNotesDraft((prev) => ({
-                                            ...prev,
-                                            [noteKey]: e.target.value,
-                                          }))
-                                        }
-                                        className="w-full bg-white border border-slate-200 p-3 rounded-xl font-medium text-xs outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[70px]"
-                                        placeholder="Cycle note for this category (manual entry)..."
-                                      />
-                                      <div className="flex justify-end mt-2">
-                                        <button
-                                          onClick={async () => {
-                                            const value =
-                                              cycleNotesDraft[noteKey] ??
-                                              existingNote ??
-                                              '';
-                                            if (isCycleLocked(c, cycleStart)) {
-                                              window.alert(
-                                                'This billing cycle is locked. Unlock to edit cycle notes.',
+                                    <div className="mt-2 space-y-4">
+                                      {(() => {
+                                        const categoryTasks = periodTasks.filter((t) => t.projectName === cat);
+                                        const categoryExps = periodExps.filter((e) => e.category === cat);
+                                        const catIsDollar = cat === 'Social Ad Budget' || c?.retainerUnits?.[cat] === 'dollar';
+                                        return (
+                                          <>
+                                            <div>
+                                              <h6 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                                                Logged tasks ({categoryTasks.length})
+                                              </h6>
+                                              {categoryTasks.length === 0 ? (
+                                                <p className="text-xs italic text-slate-400">No tasks this period.</p>
+                                              ) : (
+                                                <div className="space-y-2">
+                                                  {categoryTasks.map((task) => (
+                                                    <div
+                                                      key={task.id}
+                                                      className="bg-white p-3 rounded-xl border border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2"
+                                                    >
+                                                      <div className="flex-1 min-w-0">
+                                                        <span className="text-[10px] text-slate-400 font-bold">
+                                                          {new Date(task.clockInTime).toLocaleDateString()}
+                                                        </span>
+                                                        {task.notes && (
+                                                          <p className="text-xs text-slate-600 italic line-clamp-1 mt-0.5">
+                                                            &quot;{task.notes}&quot;
+                                                          </p>
+                                                        )}
+                                                      </div>
+                                                      <div className="flex items-center gap-2 shrink-0">
+                                                        <span className="font-black text-sm text-[#fd7414] font-mono">
+                                                          {formatTime(getTaskDuration(task))}
+                                                        </span>
+                                                        <button
+                                                          onClick={() =>
+                                                            setDeleteConfirm({
+                                                              collection: 'taskLogs',
+                                                              id: task.id,
+                                                              title: 'this task record',
+                                                            })
+                                                          }
+                                                          className="p-1.5 text-slate-300 hover:text-red-500 transition-colors"
+                                                        >
+                                                          <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                      </div>
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              )}
+                                            </div>
+                                            <div>
+                                              <h6 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                                                Logged expenses ({categoryExps.length})
+                                              </h6>
+                                              {categoryExps.length === 0 ? (
+                                                <p className="text-xs italic text-slate-400">No expenses this period.</p>
+                                              ) : (
+                                                <div className="space-y-2">
+                                                  {categoryExps.map((exp) => (
+                                                    <div
+                                                      key={exp.id}
+                                                      className="bg-white p-3 rounded-xl border border-slate-100 border-l-4 border-l-blue-400 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2"
+                                                    >
+                                                      <div className="flex-1 min-w-0">
+                                                        <span className="text-[10px] text-slate-400 font-bold">
+                                                          {new Date(exp.date).toLocaleDateString()}
+                                                        </span>
+                                                        {exp.description && (
+                                                          <p className="text-xs text-slate-600 italic line-clamp-1 mt-0.5">
+                                                            &quot;{exp.description}&quot;
+                                                          </p>
+                                                        )}
+                                                      </div>
+                                                      <div className="flex items-center gap-2 shrink-0">
+                                                        <span className="font-black text-sm text-blue-500">
+                                                          ${exp.finalCost.toFixed(2)}
+                                                        </span>
+                                                        {!catIsDollar && (
+                                                          <span className="text-[10px] text-slate-400">
+                                                            {(exp.equivalentHours || 0).toFixed(2)}h
+                                                          </span>
+                                                        )}
+                                                        <button
+                                                          onClick={() =>
+                                                            setDeleteConfirm({
+                                                              collection: 'expenses',
+                                                              id: exp.id,
+                                                              title: 'this expense',
+                                                            })
+                                                          }
+                                                          className="p-1.5 text-slate-300 hover:text-red-500 transition-colors"
+                                                        >
+                                                          <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                      </div>
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              )}
+                                            </div>
+                                            {getTodoStateForCycle && updateClientTodo && (() => {
+                                              const todoState = getTodoStateForCycle(c, cycleStart);
+                                              const catTodo = todoState[catKey] || { closed: false, items: [] };
+                                              const items = catTodo.items || [];
+                                              const allDone = items.length > 0 && items.every((i) => i.done);
+                                              return (
+                                                <div>
+                                                  <h6 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2 flex-wrap">
+                                                    To-do
+                                                    {catTodo.closed && (
+                                                      <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[9px] font-bold uppercase">
+                                                        Closed for cycle
+                                                      </span>
+                                                    )}
+                                                  </h6>
+                                                  {catTodo.closed ? (
+                                                    <button
+                                                      type="button"
+                                                      onClick={async () => {
+                                                        if (isCycleLocked(c, cycleStart)) return;
+                                                        setTodoSaving(true);
+                                                        try {
+                                                          await updateClientTodo(c, cycleStart, catKey, { ...catTodo, closed: false });
+                                                        } finally {
+                                                          setTodoSaving(false);
+                                                        }
+                                                      }}
+                                                      disabled={todoSaving}
+                                                      className="text-xs font-bold text-slate-600 hover:text-slate-900"
+                                                    >
+                                                      Re-open category
+                                                    </button>
+                                                  ) : (
+                                                    <>
+                                                      {items.length === 0 ? (
+                                                        <p className="text-xs italic text-slate-400 mb-2">No to-do items yet.</p>
+                                                      ) : (
+                                                        <ul className="space-y-2 mb-2">
+                                                          {items.map((item) => (
+                                                            <li
+                                                              key={item.id}
+                                                              className="flex items-center gap-2 bg-white border border-slate-100 rounded-lg p-2"
+                                                            >
+                                                              <input
+                                                                type="checkbox"
+                                                                checked={!!item.done}
+                                                                onChange={async () => {
+                                                                  if (isCycleLocked(c, cycleStart)) return;
+                                                                  setTodoSaving(true);
+                                                                  try {
+                                                                    const next = items.map((i) =>
+                                                                      i.id === item.id
+                                                                        ? { ...i, done: !i.done, doneAt: !i.done ? Date.now() : null }
+                                                                        : i
+                                                                    );
+                                                                    await updateClientTodo(c, cycleStart, catKey, { ...catTodo, items: next });
+                                                                  } finally {
+                                                                    setTodoSaving(false);
+                                                                  }
+                                                                }}
+                                                                disabled={todoSaving}
+                                                                className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414]"
+                                                              />
+                                                              {todoEditId === item.id ? (
+                                                                <input
+                                                                  value={todoEditText}
+                                                                  onChange={(e) => setTodoEditText(e.target.value)}
+                                                                  onBlur={async () => {
+                                                                    if (todoEditText.trim() === '' || todoEditText === item.text) {
+                                                                      setTodoEditId(null);
+                                                                      return;
+                                                                    }
+                                                                    setTodoSaving(true);
+                                                                    try {
+                                                                      const next = items.map((i) =>
+                                                                        i.id === item.id ? { ...i, text: todoEditText.trim() } : i
+                                                                      );
+                                                                      await updateClientTodo(c, cycleStart, catKey, { ...catTodo, items: next });
+                                                                    } finally {
+                                                                      setTodoSaving(false);
+                                                                      setTodoEditId(null);
+                                                                    }
+                                                                  }}
+                                                                  onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter') e.target.blur();
+                                                                    if (e.key === 'Escape') setTodoEditId(null);
+                                                                  }}
+                                                                  autoFocus
+                                                                  className="flex-1 text-sm border border-slate-200 rounded px-2 py-1 outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                                                />
+                                                              ) : (
+                                                                <span
+                                                                  className={`flex-1 text-sm ${item.done ? 'line-through text-slate-400' : 'text-slate-800'}`}
+                                                                  onDoubleClick={() => {
+                                                                    if (isCycleLocked(c, cycleStart)) return;
+                                                                    setTodoEditId(item.id);
+                                                                    setTodoEditText(item.text || '');
+                                                                  }}
+                                                                >
+                                                                  {item.text || '(no text)'}
+                                                                </span>
+                                                              )}
+                                                              <button
+                                                                type="button"
+                                                                onClick={async () => {
+                                                                  if (isCycleLocked(c, cycleStart)) return;
+                                                                  setTodoSaving(true);
+                                                                  try {
+                                                                    const next = items.filter((i) => i.id !== item.id);
+                                                                    await updateClientTodo(c, cycleStart, catKey, { ...catTodo, items: next });
+                                                                  } finally {
+                                                                    setTodoSaving(false);
+                                                                  }
+                                                                }}
+                                                                disabled={todoSaving}
+                                                                className="p-1 text-slate-300 hover:text-red-500"
+                                                              >
+                                                                <Trash2 className="w-4 h-4" />
+                                                              </button>
+                                                            </li>
+                                                          ))}
+                                                        </ul>
+                                                      )}
+                                                      <div className="flex flex-wrap gap-2">
+                                                        <button
+                                                          type="button"
+                                                          onClick={async () => {
+                                                            if (isCycleLocked(c, cycleStart)) return;
+                                                            const text = window.prompt('New to-do item');
+                                                            if (text == null || text.trim() === '') return;
+                                                            setTodoSaving(true);
+                                                            try {
+                                                              const newItem = {
+                                                                id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                                                                text: text.trim(),
+                                                                done: false,
+                                                                doneAt: null,
+                                                              };
+                                                              await updateClientTodo(c, cycleStart, catKey, {
+                                                                ...catTodo,
+                                                                closed: false,
+                                                                items: [...items, newItem],
+                                                              });
+                                                            } finally {
+                                                              setTodoSaving(false);
+                                                            }
+                                                          }}
+                                                          disabled={todoSaving}
+                                                          className="text-xs font-bold text-[#fd7414] hover:underline"
+                                                        >
+                                                          + Add item
+                                                        </button>
+                                                        {allDone && (
+                                                          <button
+                                                            type="button"
+                                                            onClick={async () => {
+                                                              if (isCycleLocked(c, cycleStart)) return;
+                                                              setTodoSaving(true);
+                                                              try {
+                                                                await updateClientTodo(c, cycleStart, catKey, { ...catTodo, closed: true });
+                                                              } finally {
+                                                                setTodoSaving(false);
+                                                              }
+                                                            }}
+                                                            disabled={todoSaving}
+                                                            className="text-xs font-bold text-emerald-600 hover:underline"
+                                                          >
+                                                            Close category for this cycle
+                                                          </button>
+                                                        )}
+                                                      </div>
+                                                    </>
+                                                  )}
+                                                </div>
                                               );
-                                              return;
-                                            }
-                                            setCycleNotesSaving((prev) => ({
-                                              ...prev,
-                                              [noteKey]: true,
-                                            }));
-                                            try {
-                                              await updateDoc(
-                                                doc('clients', c.id),
-                                                {
-                                                  [`cycleNotes.${cycleStart}.${catKey}`]:
-                                                    value,
-                                                },
-                                              );
-                                              logAudit?.({
-                                                type: 'retainer_cycle_note_saved',
-                                                entityType: 'client',
-                                                entityId: c.id,
-                                                clientId: c.id,
-                                                cycleStart,
-                                                meta: { category: cat },
-                                              });
-                                            } catch (err) {
-                                              window.alert(
-                                                `Could not save cycle note (${cat}): ${
-                                                  err?.message || String(err)
-                                                }`,
-                                              );
-                                            } finally {
-                                              setCycleNotesSaving((prev) => ({
-                                                ...prev,
-                                                [noteKey]: false,
-                                              }));
-                                            }
-                                          }}
-                                          disabled={!!cycleNotesSaving[noteKey]}
-                                          className="px-3 py-1 rounded-xl bg-slate-100 text-slate-600 text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all disabled:opacity-30"
-                                        >
-                                          Save Note
-                                        </button>
-                                      </div>
+                                            })()}
+                                            <div>
+                                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                                                Cycle note
+                                              </label>
+                                              <textarea
+                                                value={
+                                                  cycleNotesDraft[noteKey] ??
+                                                  (existingNote || '')
+                                                }
+                                                onChange={(e) =>
+                                                  setCycleNotesDraft((prev) => ({
+                                                    ...prev,
+                                                    [noteKey]: e.target.value,
+                                                  }))
+                                                }
+                                                className="w-full bg-white border border-slate-200 p-3 rounded-xl font-medium text-xs outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[70px]"
+                                                placeholder="Cycle note for this category (manual entry)..."
+                                              />
+                                              <div className="flex justify-end mt-2">
+                                                <button
+                                                  onClick={async () => {
+                                                    const value =
+                                                      cycleNotesDraft[noteKey] ??
+                                                      existingNote ??
+                                                      '';
+                                                    if (isCycleLocked(c, cycleStart)) {
+                                                      window.alert(
+                                                        'This billing cycle is locked. Unlock to edit cycle notes.',
+                                                      );
+                                                      return;
+                                                    }
+                                                    setCycleNotesSaving((prev) => ({
+                                                      ...prev,
+                                                      [noteKey]: true,
+                                                    }));
+                                                    try {
+                                                      await updateDoc(
+                                                        doc('clients', c.id),
+                                                        {
+                                                          [`cycleNotes.${cycleStart}.${catKey}`]:
+                                                            value,
+                                                        },
+                                                      );
+                                                      logAudit?.({
+                                                        type: 'retainer_cycle_note_saved',
+                                                        entityType: 'client',
+                                                        entityId: c.id,
+                                                        clientId: c.id,
+                                                        cycleStart,
+                                                        meta: { category: cat },
+                                                      });
+                                                    } catch (err) {
+                                                      window.alert(
+                                                        `Could not save cycle note (${cat}): ${
+                                                          err?.message || String(err)
+                                                        }`,
+                                                        );
+                                                      } finally {
+                                                        setCycleNotesSaving((prev) => ({
+                                                          ...prev,
+                                                          [noteKey]: false,
+                                                        }));
+                                                      }
+                                                    }}
+                                                    disabled={!!cycleNotesSaving[noteKey]}
+                                                    className="px-3 py-1 rounded-xl bg-slate-100 text-slate-600 text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all disabled:opacity-30"
+                                                  >
+                                                    Save Note
+                                                  </button>
+                                                </div>
+                                            </div>
+                                          </>
+                                        );
+                                      })()}
                                     </div>
                                   )}
                                 </div>
@@ -1839,125 +2146,6 @@ const AdminDashboard = ({
                                   </div>
                                 );
                               })}
-                          </div>
-                        )}
-                      </div>
-                      <div>
-                        <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                          <Activity className="w-3 h-3" /> Logged Tasks This
-                          Period (Retainer)
-                        </h5>
-                        {periodTasks.length === 0 ? (
-                          <p className="text-xs italic text-slate-400">
-                            No retainer tasks logged.
-                          </p>
-                        ) : (
-                          <div className="space-y-3">
-                            {periodTasks.map((task) => (
-                              <div
-                                key={task.id}
-                                className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 group"
-                              >
-                                <div className="flex-1 text-left">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <span className="font-black text-sm text-slate-800">
-                                      {task.projectName}
-                                    </span>
-                                    <span className="text-[10px] text-slate-400 font-bold">
-                                      {new Date(
-                                        task.clockInTime,
-                                      ).toLocaleDateString()}
-                                    </span>
-                                  </div>
-                                  {task.notes && (
-                                    <p className="text-xs text-slate-500 leading-relaxed font-medium italic line-clamp-2">
-                                      &quot;{task.notes}&quot;
-                                    </p>
-                                  )}
-                                </div>
-                                <div className="flex flex-col items-end gap-2 w-full sm:w-auto">
-                                  <div className="font-black text-lg text-[#fd7414] font-mono">
-                                    {formatTime(getTaskDuration(task))}
-                                  </div>
-                                  <div className="flex gap-2">
-                                    <button
-                                      onClick={() =>
-                                        setDeleteConfirm({
-                                          collection: 'taskLogs',
-                                          id: task.id,
-                                          title: 'this task record',
-                                        })
-                                      }
-                                      className="p-2 text-slate-200 hover:text-red-500 transition-colors"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      <div>
-                        <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                          <DollarSign className="w-3 h-3" /> Logged Expenses This
-                          Period
-                        </h5>
-                        {periodExps.length === 0 ? (
-                          <p className="text-xs italic text-slate-400">
-                            No expenses logged.
-                          </p>
-                        ) : (
-                          <div className="space-y-3">
-                            {periodExps.map((exp) => (
-                              <div
-                                key={exp.id}
-                                className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 group border-l-4 border-l-blue-400"
-                              >
-                                <div className="flex-1 text-left">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <span className="font-black text-sm text-slate-800">
-                                      {exp.category}
-                                    </span>
-                                    <span className="text-[10px] text-slate-400 font-bold">
-                                      {new Date(
-                                        exp.date,
-                                      ).toLocaleDateString()}
-                                    </span>
-                                  </div>
-                                  {exp.description && (
-                                    <p className="text-xs text-slate-500 font-medium italic">
-                                      &quot;{exp.description}&quot;
-                                    </p>
-                                  )}
-                                </div>
-                                <div className="flex flex-col items-end gap-2 w-full sm:w-auto">
-                                  <div className="font-black text-blue-500">
-                                    ${exp.finalCost.toFixed(2)}
-                                  </div>
-                                  <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                                    {exp.equivalentHours.toFixed(2)} hrs
-                                    deducted
-                                  </div>
-                                  <div className="flex gap-2">
-                                    <button
-                                      onClick={() =>
-                                        setDeleteConfirm({
-                                          collection: 'expenses',
-                                          id: exp.id,
-                                          title: 'this expense',
-                                        })
-                                      }
-                                      className="p-2 text-slate-200 hover:text-red-500 transition-colors"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
                           </div>
                         )}
                       </div>

@@ -275,6 +275,8 @@ export default function App() {
       }))
     : [];
   const GENERAL_LABEL = 'General / Unclassified';
+  const isDollarCategory = (client, categoryName) =>
+    !categoryName ? false : categoryName === 'Social Ad Budget' || client?.retainerUnits?.[categoryName] === 'dollar';
 
   useEffect(() => {
     let interval;
@@ -455,10 +457,10 @@ export default function App() {
     if (manualTaskValues.parsedExpense > 0) {
       const clientObj = clients.find(c => c.name === manualTaskValues.clientName);
       const rawAmount = manualTaskValues.parsedExpense;
-      const isSocialAd = projName === 'Social Ad Budget';
-      const finalCost = isSocialAd ? rawAmount : rawAmount * 1.30;
+      const isDollar = isDollarCategory(clientObj, projName);
+      const finalCost = isDollar ? rawAmount : rawAmount * 1.30;
       const rate = clientObj?.hourlyRate || 0;
-      const equivalentHours = isSocialAd ? 0 : rate > 0 ? (finalCost / rate) : 0;
+      const equivalentHours = isDollar ? 0 : rate > 0 ? (finalCost / rate) : 0;
 
       await addDoc(collection(db, 'expenses'), {
         clientId: clientObj?.id || 'manual',
@@ -489,13 +491,18 @@ export default function App() {
     const amountInOriginalCurrency = Number(expenseValues.amount);
     const amountCad = amountInOriginalCurrency * rateToCad;
 
-    const isSocialAd = catName === 'Social Ad Budget';
-    const applyMarkup = expenseValues.applyMarkup !== false && !isSocialAd;
+    const isDollar = isDollarCategory(expenseModal, catName);
+    const applyMarkup = expenseValues.applyMarkup !== false && !isDollar;
     const rawAmount = amountCad;
     const finalCost = applyMarkup ? amountCad * 1.30 : amountCad;
     const clientRate = expenseModal.hourlyRate || 0;
-    const equivalentHours = isSocialAd ? 0 : clientRate > 0 ? (finalCost / clientRate) : 0;
-    const expenseDate = expenseValues.date ? new Date(expenseValues.date).getTime() : Date.now();
+    const equivalentHours = isDollar ? 0 : clientRate > 0 ? (finalCost / clientRate) : 0;
+    const expenseDate = expenseValues.date
+      ? (() => {
+          const [y, m, d] = expenseValues.date.split('-').map(Number);
+          return new Date(y, m - 1, d, 12, 0, 0, 0).getTime();
+        })()
+      : Date.now();
 
     await addDoc(collection(db, 'expenses'), {
       clientId: expenseModal.id,
@@ -678,6 +685,53 @@ export default function App() {
     return i + "th";
   };
 
+  const todoCategoryKey = (cat) =>
+    String(cat ?? '').replace(/[~*[\]/]/g, '_').replace(/\./g, '_');
+
+  const getTodoStateForCycle = (client, cycleStart) => {
+    const cycles = client.todoCycles || {};
+    const existing = cycles[String(cycleStart)];
+    if (existing) return existing;
+    const currentCycleStart = getBillingPeriod(client.billingDay || 1, 0).start;
+    if (cycleStart !== currentCycleStart) return {};
+    const prevStart = getBillingPeriod(client.billingDay || 1, -1).start;
+    const prevData = cycles[String(prevStart)] || {};
+    const categories = Object.keys(client.retainers || {});
+    const result = {};
+    categories.forEach((cat) => {
+      const ck = todoCategoryKey(cat);
+      const prevCat = prevData[ck];
+      const carried = (prevCat?.items || []).filter((i) => !i.done).map((i) => ({ ...i, done: false }));
+      result[ck] = { closed: false, items: carried };
+    });
+    return result;
+  };
+
+  const ensureCurrentCycleTodoData = (client, cycleStart) => {
+    const cycles = { ...(client.todoCycles || {}) };
+    const currentCycleStart = getBillingPeriod(client.billingDay || 1, 0).start;
+    if (cycleStart !== currentCycleStart) return cycles;
+    if (cycles[String(cycleStart)]) return cycles;
+    const prevStart = getBillingPeriod(client.billingDay || 1, -1).start;
+    const prevData = cycles[String(prevStart)] || {};
+    const categories = Object.keys(client.retainers || {});
+    cycles[String(cycleStart)] = {};
+    categories.forEach((cat) => {
+      const ck = todoCategoryKey(cat);
+      const prevCat = prevData[ck];
+      const carried = (prevCat?.items || []).filter((i) => !i.done).map((i) => ({ ...i, done: false }));
+      cycles[String(cycleStart)][ck] = { closed: false, items: carried };
+    });
+    return cycles;
+  };
+
+  const updateClientTodo = async (client, cycleStart, categoryKey, nextCategoryData) => {
+    const cycles = ensureCurrentCycleTodoData(client, cycleStart);
+    const cycleData = cycles[String(cycleStart)] || {};
+    cycles[String(cycleStart)] = { ...cycleData, [categoryKey]: nextCategoryData };
+    await updateDoc(doc(db, 'clients', client.id), { todoCycles: cycles });
+  };
+
   // Dynamic Billing Period & Global Carryover Logic
   const getBillingPeriod = (billingDay = 1, offsetMonths = 0) => {
     const now = new Date();
@@ -723,19 +777,23 @@ export default function App() {
   };
 
   const getGlobalRetainerStats = (client, mStart, mEnd) => {
-    const SOCIAL_AD_CATEGORY = 'Social Ad Budget';
-
     // Retainers pool math is in hours (task/expense equivalent hours). We exclude
     // dollar-only categories from the combined pool so the existing progress bars remain consistent.
     const hourRetainerBase = Object.entries(client.retainers || {}).reduce(
-      (sum, [cat, val]) => (cat === SOCIAL_AD_CATEGORY ? sum : sum + (Number(val) || 0)),
+      (sum, [cat, val]) => (isDollarCategory(client, cat) ? sum : sum + (Number(val) || 0)),
       0,
     );
     
+    const clientStartMs = client.clientStartDate || 0;
     let pastTasks = taskLogs.filter(t => t.clientName === client.name && t.clockInTime < mStart && !t.projectId);
     let pastExps = expenses.filter(e => e.clientName === client.name && e.date < mStart && !e.projectId);
     let pastAddons = addons.filter(a => a.clientId === client.id && a.date < mStart);
 
+    if (clientStartMs) {
+        pastTasks = pastTasks.filter(t => t.clockInTime >= clientStartMs);
+        pastExps = pastExps.filter(e => e.date >= clientStartMs);
+        pastAddons = pastAddons.filter(a => a.date >= clientStartMs);
+    }
     if (client.lastCarryoverResetDate) {
         pastTasks = pastTasks.filter(t => t.clockInTime >= client.lastCarryoverResetDate);
         pastExps = pastExps.filter(e => e.date >= client.lastCarryoverResetDate);
@@ -752,6 +810,11 @@ export default function App() {
 
     if (client.lastCarryoverResetDate) {
         firstDateMs = firstDateMs ? Math.max(firstDateMs, client.lastCarryoverResetDate) : client.lastCarryoverResetDate;
+    }
+    if (clientStartMs && firstDateMs !== null) {
+        firstDateMs = Math.max(firstDateMs, clientStartMs);
+    } else if (clientStartMs) {
+        firstDateMs = clientStartMs;
     }
 
     let carryover = 0;
@@ -788,11 +851,10 @@ export default function App() {
       return acc;
     }, categoryBreakdown);
 
-    // Social Ad Budget is dollar-based (from expenses).
-    // Other retainer categories are hour-based (from expenses' equivalentHours).
+    // Dollar categories use finalCost; hour categories use equivalentHours.
     currentExps.forEach((e) => {
       if (!e.category || !client.retainers) return;
-      if (e.category === SOCIAL_AD_CATEGORY) {
+      if (isDollarCategory(client, e.category)) {
         categoryBreakdown[e.category] = (categoryBreakdown[e.category] || 0) + (Number(e.finalCost) || 0);
       } else {
         categoryBreakdown[e.category] = (categoryBreakdown[e.category] || 0) + (Number(e.equivalentHours) || 0);
@@ -1198,6 +1260,9 @@ export default function App() {
               }
               formatTime={formatTime}
               onLogSocialAdSpend={logSocialAdSpend}
+              getTodoStateForCycle={getTodoStateForCycle}
+              updateClientTodo={updateClientTodo}
+              todoCategoryKey={todoCategoryKey}
             />
           ) : (
             <AdminDashboard
@@ -1257,6 +1322,9 @@ export default function App() {
               doc={(coll, id) => doc(db, coll, id)}
               logAudit={logAudit}
               policy={policy}
+              getTodoStateForCycle={getTodoStateForCycle}
+              updateClientTodo={updateClientTodo}
+              todoCategoryKey={todoCategoryKey}
               updatePolicy={updatePolicy}
             />
           )}
@@ -1453,7 +1521,12 @@ export default function App() {
                             </>
                           )}
                           <div className="flex justify-between font-black text-slate-800"><span>Final Cost (CAD):</span><span>${finalCostCad.toFixed(2)}</span></div>
-                          <div className="flex justify-between text-[10px] font-black uppercase text-[#fd7414] pt-2"><span>Retainer Deduction:</span><span>{(finalCostCad / expenseModal.hourlyRate).toFixed(2)} hrs</span></div>
+                          {(() => {
+                            const retainerCat = expenseValues.billingTarget?.startsWith('retainer_') ? expenseValues.billingTarget.replace('retainer_', '') : null;
+                            const isDollar = retainerCat && isDollarCategory(expenseModal, retainerCat);
+                            if (isDollar) return <div className="flex justify-between text-[10px] font-black uppercase text-slate-500 pt-2"><span>Dollar category</span><span>No hours deduction</span></div>;
+                            return <div className="flex justify-between text-[10px] font-black uppercase text-[#fd7414] pt-2"><span>Retainer Deduction:</span><span>{(expenseModal.hourlyRate ? (finalCostCad / expenseModal.hourlyRate).toFixed(2) : '0.00')} hrs</span></div>;
+                          })()}
                         </div>
                       );
                     })()
@@ -1589,6 +1662,21 @@ export default function App() {
                   <p className="text-xs text-slate-400 mt-2 ml-1">Retainer periods reset on this day. Unused hours carry forward.</p>
                 </div>
                 <div className="space-y-2 pt-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Client Start Date (first invoice)</label>
+                  <input
+                    type="date"
+                    value={editingClient.clientStartDate ? (() => { const d = new Date(editingClient.clientStartDate); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })() : ''}
+                    onChange={e => {
+                      const v = e.target.value;
+                      if (!v) { setEditingClient({ ...editingClient, clientStartDate: null }); return; }
+                      const [y, m, d] = v.split('-').map(Number);
+                      setEditingClient({ ...editingClient, clientStartDate: new Date(y, m - 1, d, 0, 0, 0, 0).getTime() });
+                    }}
+                    className="w-full bg-white border border-slate-200 p-4 rounded-xl font-black outline-none focus:ring-2 focus:ring-[#fd7414]"
+                  />
+                  <p className="text-xs text-slate-400 mt-2 ml-1">Reporting and tracking for this client will only include data from this date onward.</p>
+                </div>
+                <div className="space-y-2 pt-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Client Hourly Rate ($)</label>
                   <input type="number" value={editingClient.hourlyRate || ''} onChange={e => setEditingClient({...editingClient, hourlyRate: Number(e.target.value)})} className="w-full bg-white border border-slate-200 p-4 rounded-xl font-black outline-none focus:ring-2 focus:ring-[#fd7414]" placeholder="e.g. 100" />
                 </div>
@@ -1605,7 +1693,7 @@ export default function App() {
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 block">
                     Monthly Base Allocation
                     <span className="ml-1 text-[9px] font-bold text-slate-400 normal-case">
-                      (hours for most categories; dollars for Social Ad Budget)
+                      (set hours or dollars per category below)
                     </span>
                   </label>
                   <button 
@@ -1621,9 +1709,9 @@ export default function App() {
                 </div>
                 <div className="space-y-3">
                   {retainerConfigCategories.map((type) => {
-                    const isSocialAd = type === 'Social Ad Budget';
-                    const unitLabel = isSocialAd ? '$' : 'hrs';
-                    const step = isSocialAd ? 1 : 0.5;
+                    const units = (editingClient.retainerUnits || {})[type] ?? (type === 'Social Ad Budget' ? 'dollar' : 'hours');
+                    const unitLabel = units === 'dollar' ? '$' : 'hrs';
+                    const step = units === 'dollar' ? 1 : 0.5;
                     return (
                       <div
                         key={type}
@@ -1633,13 +1721,24 @@ export default function App() {
                           <span className="font-bold text-slate-700 text-sm">
                             {type}
                           </span>
-                          {isSocialAd && (
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                              Per-cycle budget (dollars)
-                            </span>
-                          )}
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            {units === 'dollar' ? 'Per-cycle budget (dollars)' : 'Allocation in hours'}
+                          </span>
                         </div>
                         <div className="flex items-center gap-2">
+                          <select
+                            value={units}
+                            onChange={(e) =>
+                              setEditingClient({
+                                ...editingClient,
+                                retainerUnits: { ...(editingClient.retainerUnits || {}), [type]: e.target.value },
+                              })
+                            }
+                            className="bg-white border border-slate-200 p-2 rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                          >
+                            <option value="hours">Hours</option>
+                            <option value="dollar">Dollars ($)</option>
+                          </select>
                           <input
                             type="number"
                             min="0"
@@ -1670,7 +1769,7 @@ export default function App() {
 
             <div className="p-8 border-t border-slate-100 bg-white shrink-0">
               <button 
-                onClick={async () => { await updateDoc(doc(db, 'clients', editingClient.id), { retainers: editingClient.retainers, hourlyRate: editingClient.hourlyRate || 0, clientEmails: editingClient.clientEmails || [], billingDay: editingClient.billingDay || 1, status: editingClient.status || 'active', lastCarryoverResetDate: editingClient.lastCarryoverResetDate || null }); setEditingClient(null); }} 
+                onClick={async () => { await updateDoc(doc(db, 'clients', editingClient.id), { retainers: editingClient.retainers, retainerUnits: editingClient.retainerUnits || {}, hourlyRate: editingClient.hourlyRate || 0, clientEmails: editingClient.clientEmails || [], billingDay: editingClient.billingDay || 1, status: editingClient.status || 'active', lastCarryoverResetDate: editingClient.lastCarryoverResetDate || null, clientStartDate: editingClient.clientStartDate || null }); setEditingClient(null); }} 
                 className="w-full bg-black hover:bg-slate-800 text-white p-5 rounded-2xl font-black text-lg shadow-xl flex items-center justify-center gap-3 transition-all active:scale-95"
               >
                 <Save className="w-5 h-5" /> Save Profile
