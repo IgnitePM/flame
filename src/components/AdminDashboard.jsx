@@ -1212,22 +1212,26 @@ const AdminDashboard = ({
                 ))}
               </div>
 
-              <input
-                type="text"
-                value={clientSearchQuery}
-                onChange={(e) => setClientSearchQuery(e.target.value)}
-                className="flex-1 bg-slate-50 border-slate-200 border px-4 py-3 rounded-2xl font-bold outline-none placeholder:text-slate-300"
-                placeholder="Search clients (name or email)…"
-              />
+              {!clientId && (
+                <>
+                  <input
+                    type="text"
+                    value={clientSearchQuery}
+                    onChange={(e) => setClientSearchQuery(e.target.value)}
+                    className="flex-1 bg-slate-50 border-slate-200 border px-4 py-3 rounded-2xl font-bold outline-none placeholder:text-slate-300"
+                    placeholder="Search clients (name or email)…"
+                  />
 
-              {clientSearchQuery.trim() !== '' && (
-                <button
-                  onClick={() => setClientSearchQuery('')}
-                  className="px-4 py-3 rounded-2xl font-black text-slate-500 bg-slate-100 hover:bg-slate-200 transition-colors"
-                  title="Clear search"
-                >
-                  Clear
-                </button>
+                  {clientSearchQuery.trim() !== '' && (
+                    <button
+                      onClick={() => setClientSearchQuery('')}
+                      className="px-4 py-3 rounded-2xl font-black text-slate-500 bg-slate-100 hover:bg-slate-200 transition-colors"
+                      title="Clear search"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </div>

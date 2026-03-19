@@ -43,7 +43,6 @@ const EmployeeKiosk = ({
   todoCategoryKey,
 }) => {
   const [clientSearch, setClientSearch] = React.useState('');
-  const [targetSearch, setTargetSearch] = React.useState('');
   const [socialAdAmount, setSocialAdAmount] = React.useState('');
   const [socialAdDescription, setSocialAdDescription] = React.useState('');
   const [socialAdSubmitting, setSocialAdSubmitting] = React.useState(false);
@@ -276,7 +275,6 @@ const EmployeeKiosk = ({
                             onChange={(e) => {
                               setSelectedClient(e.target.value);
                               setSelectedBillingTarget('');
-                              setTargetSearch('');
                             }}
                             className="w-full bg-slate-50 border-slate-200 border p-4 rounded-xl font-bold focus:ring-2 focus:ring-[#fd7414] outline-none"
                           >
@@ -301,12 +299,6 @@ const EmployeeKiosk = ({
                           <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
                             Billing Target
                           </label>
-                          <input
-                            value={targetSearch}
-                            onChange={(e) => setTargetSearch(e.target.value)}
-                            className="w-full bg-white border border-slate-200 p-3 rounded-xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414] mb-2"
-                            placeholder="Search targets..."
-                          />
                           <select
                             value={selectedBillingTarget}
                             onChange={(e) => setSelectedBillingTarget(e.target.value)}
@@ -318,13 +310,6 @@ const EmployeeKiosk = ({
                                 {GENERAL_LABEL}
                               </option>
                               {selectableRetainers
-                                .filter((opt) =>
-                                  targetSearch
-                                    ? opt.name
-                                        .toLowerCase()
-                                        .includes(targetSearch.toLowerCase())
-                                    : true,
-                                )
                                 .map((opt) => (
                                 <option
                                   key={opt.name}
@@ -339,13 +324,6 @@ const EmployeeKiosk = ({
                             {clientActiveProjects.length > 0 && (
                               <optgroup label="Custom Projects">
                                 {clientActiveProjects
-                                  .filter((p) =>
-                                    targetSearch
-                                      ? p.title
-                                          .toLowerCase()
-                                          .includes(targetSearch.toLowerCase())
-                                      : true,
-                                  )
                                   .map((p) => (
                                   <option key={p.id} value={`project_${p.id}`}>
                                     {p.title}

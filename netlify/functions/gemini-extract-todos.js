@@ -33,7 +33,7 @@ exports.handler = async (event) => {
       };
     }
 
-    const model = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+    const preferredModel = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
 
     const payload = JSON.parse(event.body || '{}');
     const transcript = String(payload.transcript || '').trim();
@@ -100,10 +100,6 @@ ${trimmedTranscript}
 """
 `.trim();
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-      model,
-    )}:generateContent?key=${encodeURIComponent(apiKey)}`;
-
     const requestBody = {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: {
@@ -114,22 +110,60 @@ ${trimmedTranscript}
       },
     };
 
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
-    });
+    // Try preferred model first, then fall back to known low-cost options.
+    const modelCandidates = Array.from(
+      new Set([
+        preferredModel,
+        'gemini-1.5-flash-latest',
+        'gemini-2.0-flash-lite',
+        'gemini-2.0-flash',
+      ]),
+    );
 
-    const data = await resp.json();
-    if (!resp.ok) {
+    let data = null;
+    let resp = null;
+    let lastError = null;
+
+    for (const model of modelCandidates) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+        model,
+      )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+      resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+      data = await resp.json().catch(() => ({}));
+
+      if (resp.ok) break;
+
+      lastError =
+        data?.error?.message || data?.message || 'Gemini request failed';
+
+      // Retry on model-not-found / unsupported-model errors only.
+      const msg = String(lastError || '').toLowerCase();
+      const shouldTryNextModel =
+        msg.includes('not found') ||
+        msg.includes('not supported for generatecontent') ||
+        msg.includes('unsupported');
+
+      if (!shouldTryNextModel) {
+        return {
+          statusCode: resp.status || 500,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ error: lastError }),
+        };
+      }
+    }
+
+    if (!resp?.ok) {
       return {
-        statusCode: resp.status || 500,
+        statusCode: resp?.status || 500,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           error:
-            data?.error?.message ||
-            data?.message ||
-            'Gemini request failed',
+            lastError ||
+            'No compatible Gemini model was available for generateContent.',
         }),
       };
     }
