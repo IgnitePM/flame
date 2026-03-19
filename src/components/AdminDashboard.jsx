@@ -2087,6 +2087,10 @@ const AdminDashboard = ({
                                 className="w-full bg-white border border-slate-200 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[220px] font-medium text-sm"
                                 placeholder="Paste the transcript or notes here. Gemini will extract action items and map them to retainer categories."
                               />
+                              <p className="text-[11px] text-slate-400 font-bold">
+                                Note: very large transcripts may be trimmed by the
+                                server cap before AI extraction.
+                              </p>
                             </div>
 
                             <div className="flex justify-between items-center gap-3">

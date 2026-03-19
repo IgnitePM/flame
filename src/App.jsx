@@ -90,6 +90,21 @@ const IgniteLogo = ({ className }) => (
   />
 );
 
+const KioskRouteView = (props) => <EmployeeKiosk {...props} />;
+
+const AdminDashboardRouteView = ({ adminDashboardProps, navigate }) => {
+  const params = useParams();
+  const clientId = params?.clientId || null;
+  return (
+    <AdminDashboard
+      {...adminDashboardProps}
+      clientId={clientId}
+      navigateToClient={(id) => navigate(`/admin/clients/${id}`)}
+      navigateToClientsList={() => navigate('/admin')}
+    />
+  );
+};
+
 export default function App() {
   const ENABLE_DEMOS = import.meta?.env?.VITE_ENABLE_DEMOS === 'true';
   const [user, setUser] = useState(null);
@@ -1213,116 +1228,103 @@ export default function App() {
     );
   }
 
-  const KioskRoute = () => (
-    <EmployeeKiosk
-      user={user}
-      activeShift={activeShift}
-      activeTask={activeTask}
-      liveDuration={liveDuration}
-      liveTaskDuration={liveTaskDuration}
-      clients={clients.filter((c) => !c.archived && c.status !== 'paused')}
-      selectableRetainers={selectableRetainers}
-      GENERAL_LABEL={GENERAL_LABEL}
-      clientActiveProjects={clientActiveProjects}
-      policy={policy}
-      selectedClient={selectedClient}
-      setSelectedClient={setSelectedClient}
-      selectedBillingTarget={selectedBillingTarget}
-      setSelectedBillingTarget={setSelectedBillingTarget}
-      activeTaskNotes={activeTaskNotes}
-      setActiveTaskNotes={setActiveTaskNotes}
-      clientsFull={clients}
-      getBillingPeriod={getBillingPeriod}
-      taskLogs={taskLogs}
-      handleClockIn={handleClockIn}
-      handleEndBreak={handleEndBreak}
-      handleStartTask={handleStartTask}
-      handleStopTask={handleStopTask}
-      handleResumeTask={handleResumeTask}
-      handleTakeBreak={handleTakeBreak}
-      handleClockOut={handleClockOut}
-      getGlobalRetainerStats={(client, start, end, ctx) =>
-        getGlobalRetainerStats(client, start, end)
-      }
-      formatTime={formatTime}
-      onLogSocialAdSpend={logSocialAdSpend}
-      getTodoStateForCycle={getTodoStateForCycle}
-      updateClientTodo={updateClientTodo}
-      todoCategoryKey={todoCategoryKey}
-    />
-  );
+  const kioskRouteProps = {
+    user,
+    activeShift,
+    activeTask,
+    liveDuration,
+    liveTaskDuration,
+    clients: clients.filter((c) => !c.archived && c.status !== 'paused'),
+    selectableRetainers,
+    GENERAL_LABEL,
+    clientActiveProjects,
+    policy,
+    selectedClient,
+    setSelectedClient,
+    selectedBillingTarget,
+    setSelectedBillingTarget,
+    activeTaskNotes,
+    setActiveTaskNotes,
+    clientsFull: clients,
+    getBillingPeriod,
+    taskLogs,
+    handleClockIn,
+    handleEndBreak,
+    handleStartTask,
+    handleStopTask,
+    handleResumeTask,
+    handleTakeBreak,
+    handleClockOut,
+    getGlobalRetainerStats: (client, start, end, ctx) =>
+      getGlobalRetainerStats(client, start, end),
+    formatTime,
+    onLogSocialAdSpend: logSocialAdSpend,
+    getTodoStateForCycle,
+    updateClientTodo,
+    todoCategoryKey,
+  };
 
-  const AdminDashboardRoute = () => {
-    const params = useParams();
-    const clientId = params?.clientId || null;
-    return (
-      <AdminDashboard
-        adminTab={adminTab}
-        setAdminTab={setAdminTab}
-        clientId={clientId}
-        navigateToClient={(id) => navigate(`/admin/clients/${id}`)}
-        navigateToClientsList={() => navigate('/admin')}
-        currentUserRole={currentUserRole}
-        user={user}
-        clients={clients}
-        taskLogs={taskLogs}
-        timesheets={timesheets}
-        expenses={expenses}
-        projects={projects}
-        addons={addons}
-        taskTypes={taskTypes}
-        adminUsers={adminUsers}
-        newClientName={newClientName}
-        setNewClientName={setNewClientName}
-        newTaskType={newTaskType}
-        setNewTaskType={setNewTaskType}
-        newAdminEmail={newAdminEmail}
-        setNewAdminEmail={setNewAdminEmail}
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
-        clientFilter={clientFilter}
-        setClientFilter={setClientFilter}
-        dateFilterType={dateFilterType}
-        setDateFilterType={setDateFilterType}
-        customDateRange={customDateRange}
-        setCustomDateRange={setCustomDateRange}
-        expandedShifts={expandedShifts}
-        toggleShiftAccordion={toggleShiftAccordion}
-        expandedClients={expandedClients}
-        toggleClientAccordion={toggleClientAccordion}
-        manualTaskValues={manualTaskValues}
-        setManualTaskValues={setManualTaskValues}
-        setManualTaskModal={setManualTaskModal}
-        setExpenseModal={setExpenseModal}
-        setAddonModal={setAddonModal}
-        setProjectModal={setProjectModal}
-        setEditingClient={setEditingClient}
-        setDeleteConfirm={setDeleteConfirm}
-        startEditing={startEditing}
-        activeTaskTypes={activeTaskTypes}
-        getBillingPeriod={getBillingPeriod}
-        getShiftDuration={getShiftDuration}
-        getTaskDuration={getTaskDuration}
-        formatTime={formatTime}
-        getGlobalRetainerStats={(client, start, end, ctx) =>
-          getGlobalRetainerStats(client, start, end)
-        }
-        exportCSV={exportCSV}
-        exportPDF={exportPDF}
-        addDoc={addDoc}
-        setDoc={setDoc}
-        collection={(coll) => collection(db, coll)}
-        updateDoc={updateDoc}
-        doc={(coll, id) => doc(db, coll, id)}
-        logAudit={logAudit}
-        policy={policy}
-        getTodoStateForCycle={getTodoStateForCycle}
-        updateClientTodo={updateClientTodo}
-              updateClientTodosBatch={updateClientTodosBatch}
-        todoCategoryKey={todoCategoryKey}
-        updatePolicy={updatePolicy}
-      />
-    );
+  const adminDashboardRouteProps = {
+    adminTab,
+    setAdminTab,
+    currentUserRole,
+    user,
+    clients,
+    taskLogs,
+    timesheets,
+    expenses,
+    projects,
+    addons,
+    taskTypes,
+    adminUsers,
+    newClientName,
+    setNewClientName,
+    newTaskType,
+    setNewTaskType,
+    newAdminEmail,
+    setNewAdminEmail,
+    searchQuery,
+    setSearchQuery,
+    clientFilter,
+    setClientFilter,
+    dateFilterType,
+    setDateFilterType,
+    customDateRange,
+    setCustomDateRange,
+    expandedShifts,
+    toggleShiftAccordion,
+    expandedClients,
+    toggleClientAccordion,
+    manualTaskValues,
+    setManualTaskValues,
+    setManualTaskModal,
+    setExpenseModal,
+    setAddonModal,
+    setProjectModal,
+    setEditingClient,
+    setDeleteConfirm,
+    startEditing,
+    activeTaskTypes,
+    getBillingPeriod,
+    getShiftDuration,
+    getTaskDuration,
+    formatTime,
+    getGlobalRetainerStats: (client, start, end, ctx) =>
+      getGlobalRetainerStats(client, start, end),
+    exportCSV,
+    exportPDF,
+    addDoc,
+    setDoc,
+    collection: (coll) => collection(db, coll),
+    updateDoc,
+    doc: (coll, id) => doc(db, coll, id),
+    logAudit,
+    policy,
+    getTodoStateForCycle,
+    updateClientTodo,
+    updateClientTodosBatch,
+    todoCategoryKey,
+    updatePolicy,
   };
 
   const content =
@@ -1406,11 +1408,24 @@ export default function App() {
         <main className="max-w-6xl mx-auto p-6 pb-24">
           <Routes>
             <Route path="/" element={<Navigate to="/kiosk" replace />} />
-            <Route path="/kiosk" element={<KioskRoute />} />
-            <Route path="/admin" element={<AdminDashboardRoute />} />
+            <Route path="/kiosk" element={<KioskRouteView {...kioskRouteProps} />} />
+            <Route
+              path="/admin"
+              element={
+                <AdminDashboardRouteView
+                  adminDashboardProps={adminDashboardRouteProps}
+                  navigate={navigate}
+                />
+              }
+            />
             <Route
               path="/admin/clients/:clientId"
-              element={<AdminDashboardRoute />}
+              element={
+                <AdminDashboardRouteView
+                  adminDashboardProps={adminDashboardRouteProps}
+                  navigate={navigate}
+                />
+              }
             />
             <Route path="*" element={<Navigate to="/kiosk" replace />} />
           </Routes>
