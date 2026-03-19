@@ -1052,6 +1052,7 @@ const AdminDashboard = ({
               })
               .filter((c) => !c.archived)
               .map((c) => {
+              const isClientPage = !!clientId;
               const offset = clientCycleOffsets[c.id] ?? 0;
               const minCycleOffset = (() => {
                 if (!c.clientStartDate) return -1e9;
@@ -1067,7 +1068,7 @@ const AdminDashboard = ({
               const period = getBillingPeriod(c.billingDay || 1, effectiveOffset);
               const mStart = period.start;
               const mEnd = period.end;
-              const isExpanded = clientId ? true : expandedClients[c.id];
+              const isExpanded = isClientPage ? true : expandedClients[c.id];
 
               const periodTasks = taskLogs.filter(
                 (t) =>
@@ -1103,7 +1104,19 @@ const AdminDashboard = ({
                   key={c.id}
                   className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden flex flex-col"
                 >
-                  <div className="p-6 border-b border-slate-50 flex justify-between items-start bg-slate-50/50">
+                  <div
+                    className="p-6 border-b border-slate-50 flex justify-between items-start bg-slate-50/50 hover:bg-slate-50 transition-colors cursor-pointer"
+                    role="button"
+                    tabIndex={0}
+                    title="Open client page"
+                    onClick={() => navigateToClient?.(c.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        navigateToClient?.(c.id);
+                      }
+                    }}
+                  >
                     <div>
                       <div className="flex items-center gap-3">
                         <h4
@@ -1133,10 +1146,11 @@ const AdminDashboard = ({
                     >
                       <button
                         onClick={() => navigateToClient?.(c.id)}
-                        className="p-2 text-slate-700 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors"
+                        className="px-3 py-2 text-white bg-[#fd7414] rounded-2xl hover:bg-[#e66a12] transition-colors font-black flex items-center gap-2 shadow-sm"
                         title="Open client page"
                       >
-                        <ArrowRight className="w-5 h-5" />
+                        Open
+                        <ArrowRight className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => {
@@ -1259,143 +1273,147 @@ const AdminDashboard = ({
                               Cycle Locked
                             </span>
                           )}
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              exportClientCyclePDF({
-                                client: c,
-                                mStart,
-                                mEnd,
-                                stats,
-                                periodTasks,
-                                periodExps,
-                                clientProjects,
-                                taskLogs,
-                                expenses,
-                              });
-                            }}
-                            className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
-                            title="Export this billing cycle to PDF"
-                          >
-                            <FileText className="w-3 h-3" />
-                            Export PDF
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              exportClientCycleCSV({
-                                client: c,
-                                mStart,
-                                mEnd,
-                                stats,
-                                periodTasks,
-                                periodExps,
-                                clientProjects,
-                                taskLogs,
-                                expenses,
-                                addons,
-                              });
-                            }}
-                            className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
-                            title="Export this billing cycle to CSV"
-                          >
-                            <FileDown className="w-3 h-3" />
-                            Export CSV
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              exportClientCyclePDF({
-                                client: c,
-                                mStart,
-                                mEnd,
-                                stats,
-                                periodTasks,
-                                periodExps,
-                                clientProjects,
-                                taskLogs,
-                                expenses,
-                              });
-                              exportClientCycleCSV({
-                                client: c,
-                                mStart,
-                                mEnd,
-                                stats,
-                                periodTasks,
-                                periodExps,
-                                clientProjects,
-                                taskLogs,
-                                expenses,
-                                addons,
-                              });
-                            }}
-                            className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-black text-white hover:bg-slate-800 transition-colors"
-                            title="Export PDF + CSV for this cycle"
-                          >
-                            <FileText className="w-3 h-3" />
-                            Invoice Pack
-                          </button>
-                          <button
-                            onClick={async (e) => {
-                              e.stopPropagation();
-                              const locked = isCycleLocked(c, mStart);
-                              if (locked && !isAdmin) return;
-                              await updateDoc(doc('clients', c.id), {
-                                [`cycleLocks.${mStart}`]: locked
-                                  ? null
-                                  : {
-                                      locked: true,
-                                      lockedAt: Date.now(),
-                                      lockedByEmail: user?.email || '',
-                                    },
-                              });
-                              logAudit?.({
-                                type: locked ? 'cycle_unlocked' : 'cycle_locked',
-                                entityType: 'client',
-                                entityId: c.id,
-                                clientId: c.id,
-                                cycleStart: mStart,
-                              });
-                            }}
-                            className={`hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest transition-colors border ${
-                              isCycleLocked(c, mStart)
-                                ? isAdmin
-                                  ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100'
-                                  : 'bg-red-50 text-red-300 border-red-100 opacity-60 cursor-not-allowed'
-                                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                            }`}
-                            title={
-                              isCycleLocked(c, mStart)
-                                ? isAdmin
-                                  ? 'Unlock this billing cycle'
-                                  : 'Only Admin can unlock'
-                                : 'Lock this billing cycle'
-                            }
-                            disabled={isCycleLocked(c, mStart) && !isAdmin}
-                          >
-                            <Lock className="w-3 h-3" />
-                            {isCycleLocked(c, mStart) ? 'Unlock' : 'Lock'}
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (isCycleLocked(c, mStart)) {
-                                window.alert(
-                                  'This billing cycle is locked. Unlock to add hours.',
-                                );
-                                return;
-                              }
-                              setAddonModal(c);
-                            }}
-                            className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors"
-                          >
-                            <CheckSquare className="w-3 h-3" />
-                            Add Hours
-                          </button>
+                          {isClientPage && (
+                            <>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  exportClientCyclePDF({
+                                    client: c,
+                                    mStart,
+                                    mEnd,
+                                    stats,
+                                    periodTasks,
+                                    periodExps,
+                                    clientProjects,
+                                    taskLogs,
+                                    expenses,
+                                  });
+                                }}
+                                className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
+                                title="Export this billing cycle to PDF"
+                              >
+                                <FileText className="w-3 h-3" />
+                                Export PDF
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  exportClientCycleCSV({
+                                    client: c,
+                                    mStart,
+                                    mEnd,
+                                    stats,
+                                    periodTasks,
+                                    periodExps,
+                                    clientProjects,
+                                    taskLogs,
+                                    expenses,
+                                    addons,
+                                  });
+                                }}
+                                className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
+                                title="Export this billing cycle to CSV"
+                              >
+                                <FileDown className="w-3 h-3" />
+                                Export CSV
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  exportClientCyclePDF({
+                                    client: c,
+                                    mStart,
+                                    mEnd,
+                                    stats,
+                                    periodTasks,
+                                    periodExps,
+                                    clientProjects,
+                                    taskLogs,
+                                    expenses,
+                                  });
+                                  exportClientCycleCSV({
+                                    client: c,
+                                    mStart,
+                                    mEnd,
+                                    stats,
+                                    periodTasks,
+                                    periodExps,
+                                    clientProjects,
+                                    taskLogs,
+                                    expenses,
+                                    addons,
+                                  });
+                                }}
+                                className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-black text-white hover:bg-slate-800 transition-colors"
+                                title="Export PDF + CSV for this cycle"
+                              >
+                                <FileText className="w-3 h-3" />
+                                Invoice Pack
+                              </button>
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  const locked = isCycleLocked(c, mStart);
+                                  if (locked && !isAdmin) return;
+                                  await updateDoc(doc('clients', c.id), {
+                                    [`cycleLocks.${mStart}`]: locked
+                                      ? null
+                                      : {
+                                          locked: true,
+                                          lockedAt: Date.now(),
+                                          lockedByEmail: user?.email || '',
+                                        },
+                                  });
+                                  logAudit?.({
+                                    type: locked ? 'cycle_unlocked' : 'cycle_locked',
+                                    entityType: 'client',
+                                    entityId: c.id,
+                                    clientId: c.id,
+                                    cycleStart: mStart,
+                                  });
+                                }}
+                                className={`hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest transition-colors border ${
+                                  isCycleLocked(c, mStart)
+                                    ? isAdmin
+                                      ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100'
+                                      : 'bg-red-50 text-red-300 border-red-100 opacity-60 cursor-not-allowed'
+                                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                                }`}
+                                title={
+                                  isCycleLocked(c, mStart)
+                                    ? isAdmin
+                                      ? 'Unlock this billing cycle'
+                                      : 'Only Admin can unlock'
+                                    : 'Lock this billing cycle'
+                                }
+                                disabled={isCycleLocked(c, mStart) && !isAdmin}
+                              >
+                                <Lock className="w-3 h-3" />
+                                {isCycleLocked(c, mStart) ? 'Unlock' : 'Lock'}
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (isCycleLocked(c, mStart)) {
+                                    window.alert(
+                                      'This billing cycle is locked. Unlock to add hours.',
+                                    );
+                                    return;
+                                  }
+                                  setAddonModal(c);
+                                }}
+                                className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors"
+                              >
+                                <CheckSquare className="w-3 h-3" />
+                                Add Hours
+                              </button>
+                            </>
+                          )}
                         </div>
                       </h5>
 
-                      <div className="mt-3">
+                      {isClientPage && (<div className="mt-3">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -1469,7 +1487,7 @@ const AdminDashboard = ({
                             </div>
                           </div>
                         )}
-                      </div>
+                      </div>)}
 
                       {!stats || stats.base === 0 ? (
                         <p className="text-xs italic text-slate-400">
@@ -1563,34 +1581,60 @@ const AdminDashboard = ({
                                   : 0;
                               const over =
                                 baseNum > 0 && used > baseNum;
+                              const categoryTasks = periodTasks.filter(
+                                (t) => t.projectName === cat,
+                              );
+                              const categoryExps = periodExps.filter(
+                                (e) => e.category === cat,
+                              );
+                              const hasLogged =
+                                categoryTasks.length > 0 ||
+                                categoryExps.length > 0;
 
                               return (
                                 <div key={cat}>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setRetainerCategoryOpen((prev) => ({
-                                        ...prev,
-                                        [`${c.id}__${cycleStart}__${catKey}`]:
-                                          !prev[`${c.id}__${cycleStart}__${catKey}`],
-                                      }))
-                                    }
-                                    className="flex justify-between items-center w-full text-left text-[10px] font-bold text-slate-500 mb-1"
-                                  >
-                                    <span>{cat}</span>
-                                    <span className="flex items-center gap-2">
-                                      <span>
+                                  <div className="flex items-start justify-between gap-3 mb-1">
+                                    <div className="min-w-0">
+                                      <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest truncate">
+                                        {cat}
+                                      </div>
+                                      <div className="text-[10px] font-bold text-slate-400">
                                         {isDollarCategory
                                           ? `$${usedDisplay} / $${baseDisplay}`
                                           : `${usedDisplay}h / ${baseDisplay}h`}
-                                      </span>
-                                      <span aria-hidden>
-                                        {retainerCategoryOpen[`${c.id}__${cycleStart}__${catKey}`]
-                                          ? '▲'
-                                          : '▼'}
-                                      </span>
-                                    </span>
-                                  </button>
+                                      </div>
+                                    </div>
+
+                                    {hasLogged ? (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setRetainerCategoryOpen((prev) => ({
+                                            ...prev,
+                                            [`${c.id}__${cycleStart}__${catKey}`]:
+                                              !prev[
+                                                `${c.id}__${cycleStart}__${catKey}`
+                                              ],
+                                          }))
+                                        }
+                                        className="shrink-0 px-3 py-2 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-[10px] uppercase tracking-widest flex items-center gap-2 transition-colors"
+                                        title="Show logged tasks and expenses"
+                                      >
+                                        Logged tasks &amp; expenses
+                                        {retainerCategoryOpen[
+                                          `${c.id}__${cycleStart}__${catKey}`
+                                        ] ? (
+                                          <ChevronUp className="w-4 h-4" />
+                                        ) : (
+                                          <ChevronDown className="w-4 h-4" />
+                                        )}
+                                      </button>
+                                    ) : (
+                                      <div className="shrink-0 px-3 py-2 rounded-2xl bg-slate-50 text-slate-300 font-black text-[10px] uppercase tracking-widest border border-slate-100">
+                                        No logged tasks/expenses
+                                      </div>
+                                    )}
+                                  </div>
                                   <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
                                     <div
                                       className={`h-2 rounded-full ${
@@ -1604,8 +1648,6 @@ const AdminDashboard = ({
 
                                   <div className="mt-2 flex flex-col space-y-4">
                                       {(() => {
-                                        const categoryTasks = periodTasks.filter((t) => t.projectName === cat);
-                                        const categoryExps = periodExps.filter((e) => e.category === cat);
                                         const catIsDollar = cat === 'Social Ad Budget' || c?.retainerUnits?.[cat] === 'dollar';
                                         return (
                                           <>
@@ -1704,7 +1746,7 @@ const AdminDashboard = ({
                                                 </div>
                                               )}
                                             </div>)}
-                                            {getTodoStateForCycle && updateClientTodo && (() => {
+                                            {isClientPage && getTodoStateForCycle && updateClientTodo && (() => {
                                               const todoState = getTodoStateForCycle(c, cycleStart);
                                               const catTodo = todoState[catKey] || { closed: false, items: [] };
                                               const items = catTodo.items || [];
