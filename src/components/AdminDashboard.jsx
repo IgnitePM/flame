@@ -118,6 +118,7 @@ const AdminDashboard = ({
   const [todoEditId, setTodoEditId] = useState(null);
   const [todoEditText, setTodoEditText] = useState('');
   const [todoSaving, setTodoSaving] = useState(false);
+  const [todoAddTextDraft, setTodoAddTextDraft] = useState({});
   const [estimateModal, setEstimateModal] = useState(null);
   const [estimateValues, setEstimateValues] = useState({
     hours: '',
