@@ -21,6 +21,7 @@ import {
   ShoppingCart,
   Trash2,
   Users,
+  X,
 } from 'lucide-react';
 
 const AdminDashboard = ({
@@ -121,6 +122,15 @@ const AdminDashboard = ({
   const [clientCycleOffsets, setClientCycleOffsets] = useState({});
   const [clientStatusFilter, setClientStatusFilter] = useState('all');
   const [clientSearchQuery, setClientSearchQuery] = useState('');
+  const [addClientModalOpen, setAddClientModalOpen] = useState(false);
+  const [addClientValues, setAddClientValues] = useState({
+    name: '',
+    status: 'active',
+    hourlyRate: '100',
+    billingDay: '1',
+    clientStartDate: '',
+    clientEmails: '',
+  });
   const [clientNotesOpen, setClientNotesOpen] = useState({});
   const [clientNotesDraft, setClientNotesDraft] = useState({});
   const [clientNotesSaving, setClientNotesSaving] = useState({});
@@ -954,40 +964,225 @@ const AdminDashboard = ({
             </div>
           )}
 
-          <div className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-sm">
-            <h3 className="font-black text-xl mb-4">Add Client Account</h3>
-            <div className="flex flex-col sm:flex-row gap-4">
-              <input
-                type="text"
-                value={newClientName}
-                onChange={(e) => setNewClientName(e.target.value)}
-                className="flex-1 bg-slate-50 border-slate-200 border p-4 rounded-3xl font-bold outline-none placeholder:text-slate-300"
-                placeholder="New Client Name"
-              />
+          {!clientId && (
+            <div className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-sm flex items-center justify-between gap-6">
+              <div>
+                <h3 className="font-black text-xl mb-1">Add Client Account</h3>
+                <p className="text-[12px] font-bold text-slate-400">
+                  Enter details in a popup before submitting.
+                </p>
+              </div>
               <button
-                onClick={async () => {
-                  if (!newClientName?.trim()) return;
-                  try {
-                    await addDoc(collection('clients'), {
-                      name: newClientName.trim(),
-                      status: 'active',
-                      hourlyRate: 100,
-                      billingDay: 1,
-                      retainers: {},
-                      clientEmails: [],
-                    });
-                    setNewClientName('');
-                  } catch (err) {
-                    console.error('Create client failed:', err);
-                    window.alert('Could not create client. You may need admin or billing access.\n\n' + (err?.message || String(err)));
-                  }
+                onClick={() => {
+                  setAddClientValues({
+                    name: '',
+                    status: 'active',
+                    hourlyRate: '100',
+                    billingDay: '1',
+                    clientStartDate: '',
+                    clientEmails: '',
+                  });
+                  setAddClientModalOpen(true);
                 }}
-                className="bg-black text-white px-10 py-4 rounded-3xl font-black shadow-lg active:scale-95 transition-all"
+                className="bg-[#fd7414] text-white px-10 py-4 rounded-3xl font-black shadow-lg active:scale-95 transition-all"
               >
-                Create Profile
+                Add a Client
               </button>
             </div>
-          </div>
+          )}
+
+          {addClientModalOpen && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[120] animate-in fade-in">
+              <div className="bg-white rounded-[32px] w-full max-w-xl shadow-2xl overflow-hidden">
+                <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                  <div>
+                    <h3 className="font-black text-2xl text-slate-900">
+                      Add a Client
+                    </h3>
+                    <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                      Create the client profile
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setAddClientModalOpen(false)}
+                    className="p-2 bg-white rounded-full hover:bg-slate-100 border border-slate-200"
+                    title="Close"
+                  >
+                    <X className="w-5 h-5 text-slate-500" />
+                  </button>
+                </div>
+
+                <div className="p-8 space-y-5">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
+                      Client Name
+                    </label>
+                    <input
+                      type="text"
+                      value={addClientValues.name}
+                      onChange={(e) =>
+                        setAddClientValues((prev) => ({
+                          ...prev,
+                          name: e.target.value,
+                        }))
+                      }
+                      placeholder="e.g. Ignite Media"
+                      className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
+                        Status
+                      </label>
+                      <select
+                        value={addClientValues.status}
+                        onChange={(e) =>
+                          setAddClientValues((prev) => ({
+                            ...prev,
+                            status: e.target.value,
+                          }))
+                        }
+                        className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      >
+                        <option value="active">Active</option>
+                        <option value="paused">Paused</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
+                        Billing Day
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={addClientValues.billingDay}
+                        onChange={(e) =>
+                          setAddClientValues((prev) => ({
+                            ...prev,
+                            billingDay: e.target.value,
+                          }))
+                        }
+                        className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
+                        Hourly Rate
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={addClientValues.hourlyRate}
+                        onChange={(e) =>
+                          setAddClientValues((prev) => ({
+                            ...prev,
+                            hourlyRate: e.target.value,
+                          }))
+                        }
+                        className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
+                        Client Start Date (optional)
+                      </label>
+                      <input
+                        type="date"
+                        value={addClientValues.clientStartDate}
+                        onChange={(e) =>
+                          setAddClientValues((prev) => ({
+                            ...prev,
+                            clientStartDate: e.target.value,
+                          }))
+                        }
+                        className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
+                      Client Emails (optional, comma-separated)
+                    </label>
+                    <textarea
+                      value={addClientValues.clientEmails}
+                      onChange={(e) =>
+                        setAddClientValues((prev) => ({
+                          ...prev,
+                          clientEmails: e.target.value,
+                        }))
+                      }
+                      placeholder="name@company.com, billing@company.com"
+                      className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[90px]"
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-3 pt-2">
+                    <button
+                      onClick={() => setAddClientModalOpen(false)}
+                      className="px-5 py-3 rounded-2xl font-black text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={async () => {
+                        const name = (addClientValues.name || '').trim();
+                        if (!name) return;
+
+                        const billingDay = Number(addClientValues.billingDay) || 1;
+                        const hourlyRate = Number(addClientValues.hourlyRate) || 0;
+                        const status = addClientValues.status || 'active';
+
+                        const startDateStr = (addClientValues.clientStartDate || '').trim();
+                        const clientStartDate = startDateStr
+                          ? (() => {
+                              const [y, m, d] = startDateStr
+                                .split('-')
+                                .map(Number);
+                              // Store as ms at local noon so it doesn't drift.
+                              return new Date(y, m - 1, d, 12, 0, 0, 0).getTime();
+                            })()
+                          : null;
+
+                        const clientEmails = (addClientValues.clientEmails || '')
+                          .split(/[,\n;]/g)
+                          .map((s) => s.trim())
+                          .filter(Boolean);
+
+                        try {
+                          await addDoc(collection('clients'), {
+                            name,
+                            status,
+                            hourlyRate,
+                            billingDay,
+                            retainers: {},
+                            retainerUnits: {},
+                            clientEmails,
+                            clientStartDate,
+                          });
+                          setAddClientModalOpen(false);
+                        } catch (err) {
+                          console.error('Create client failed:', err);
+                          window.alert(
+                            'Could not create client. You may need admin or billing access.\n\n' +
+                              (err?.message || String(err)),
+                          );
+                        }
+                      }}
+                      className="bg-black text-white px-10 py-3 rounded-2xl font-black shadow-lg active:scale-95 transition-all"
+                    >
+                      Submit
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="bg-white p-4 rounded-[32px] border border-slate-100 shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center gap-3">
@@ -1610,6 +1805,7 @@ const AdminDashboard = ({
                                     {hasLogged ? (
                                       <button
                                         type="button"
+                                        aria-label="Toggle logged tasks and expenses"
                                         onClick={() =>
                                           setRetainerCategoryOpen((prev) => ({
                                             ...prev,
@@ -1620,9 +1816,8 @@ const AdminDashboard = ({
                                           }))
                                         }
                                         className="shrink-0 px-3 py-2 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-[10px] uppercase tracking-widest flex items-center gap-2 transition-colors"
-                                        title="Show logged tasks and expenses"
+                                        title="Toggle logged tasks and expenses"
                                       >
-                                        Logged tasks &amp; expenses
                                         {retainerCategoryOpen[
                                           `${c.id}__${cycleStart}__${catKey}`
                                         ] ? (
@@ -2101,6 +2296,37 @@ const AdminDashboard = ({
                                                     Save Note
                                                   </button>
                                                 </div>
+                                              <div style={{ order: 25, marginTop: 10 }}>
+                                                {hasLogged ? (
+                                                  <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                      setRetainerCategoryOpen((prev) => ({
+                                                        ...prev,
+                                                        [`${c.id}__${cycleStart}__${catKey}`]:
+                                                          !prev[
+                                                            `${c.id}__${cycleStart}__${catKey}`
+                                                          ],
+                                                      }))
+                                                    }
+                                                    className="w-full sm:w-auto px-3 py-2 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-[10px] uppercase tracking-widest flex items-center justify-between gap-3 transition-colors text-left"
+                                                    title="Toggle logged tasks and expenses"
+                                                  >
+                                                    <span>Logged tasks &amp; expenses</span>
+                                                    {retainerCategoryOpen[
+                                                      `${c.id}__${cycleStart}__${catKey}`
+                                                    ] ? (
+                                                      <ChevronUp className="w-4 h-4 shrink-0" />
+                                                    ) : (
+                                                      <ChevronDown className="w-4 h-4 shrink-0" />
+                                                    )}
+                                                  </button>
+                                                ) : (
+                                                  <div className="w-full sm:w-auto px-3 py-2 rounded-2xl bg-slate-50 text-slate-300 font-black text-[10px] uppercase tracking-widest border border-slate-100">
+                                                    No logged tasks/expenses
+                                                  </div>
+                                                )}
+                                              </div>
                                             </div>
                                           </>
                                         );
