@@ -114,9 +114,10 @@ ${trimmedTranscript}
     const modelCandidates = Array.from(
       new Set([
         preferredModel,
+        'gemini-2.5-flash-lite',
+        'gemini-2.5-flash',
         'gemini-1.5-flash-latest',
-        'gemini-2.0-flash-lite',
-        'gemini-2.0-flash',
+        'gemini-1.5-flash',
       ]),
     );
 
@@ -145,7 +146,9 @@ ${trimmedTranscript}
       const shouldTryNextModel =
         msg.includes('not found') ||
         msg.includes('not supported for generatecontent') ||
-        msg.includes('unsupported');
+        msg.includes('unsupported') ||
+        msg.includes('no longer available') ||
+        msg.includes('deprecated');
 
       if (!shouldTryNextModel) {
         return {
