@@ -151,6 +151,8 @@ const AdminDashboard = ({
   const [todoAddDueDraft, setTodoAddDueDraft] = useState({});
   const [todoAddAssigneesDraft, setTodoAddAssigneesDraft] = useState({});
   const [todoAddRecurrenceDraft, setTodoAddRecurrenceDraft] = useState({});
+  /** Which retainer category's add-to-do "Options" modal is open (due date + recurrence). */
+  const [todoAddOptionsModalCatKey, setTodoAddOptionsModalCatKey] = useState(null);
   const [taskClientFilter, setTaskClientFilter] = useState('all');
   const [taskCategoryFilter, setTaskCategoryFilter] = useState('all');
   const [taskAssigneeFilter, setTaskAssigneeFilter] = useState('me');
@@ -665,6 +667,11 @@ const AdminDashboard = ({
       type: 'monthly_fixed_day',
       dayOfMonth: new Date(source).getDate(),
     };
+  };
+
+  const resetTodoAddDraftOptionsForCategory = (categoryKey) => {
+    setTodoAddDueDraft((prev) => ({ ...prev, [categoryKey]: '' }));
+    setTodoAddRecurrenceDraft((prev) => ({ ...prev, [categoryKey]: 'none' }));
   };
 
   const normalizeTodoAssignees = (item) => {
@@ -2297,7 +2304,7 @@ const AdminDashboard = ({
                                   </ul>
                                 )}
 
-                                <div className="grid grid-cols-1 lg:grid-cols-5 gap-2">
+                                <div className="flex flex-wrap gap-2 items-center">
                                   <input
                                     type="text"
                                     value={todoAddTextDraft[catKey] || ''}
@@ -2308,7 +2315,7 @@ const AdminDashboard = ({
                                       }))
                                     }
                                     placeholder="New to-do..."
-                                    className="lg:col-span-2 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                    className="flex-1 min-w-[160px] bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
                                     onKeyDown={(e) => {
                                       if (e.key !== 'Enter') return;
                                       e.preventDefault();
@@ -2342,31 +2349,12 @@ const AdminDashboard = ({
                                             ...prev,
                                             [catKey]: '',
                                           }));
-                                          setTodoAddDueDraft((prev) => ({
-                                            ...prev,
-                                            [catKey]: '',
-                                          }));
-                                          setTodoAddRecurrenceDraft((prev) => ({
-                                            ...prev,
-                                            [catKey]: 'none',
-                                          }));
+                                          resetTodoAddDraftOptionsForCategory(catKey);
                                         } finally {
                                           setTodoSaving(false);
                                         }
                                       })();
                                     }}
-                                  />
-                                  <input
-                                    type="date"
-                                    value={todoAddDueDraft[catKey] || ''}
-                                    onChange={(e) =>
-                                      setTodoAddDueDraft((prev) => ({
-                                        ...prev,
-                                        [catKey]: e.target.value,
-                                      }))
-                                    }
-                                    className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
-                                    title="Optional due date"
                                   />
                                   <select
                                     value={
@@ -2381,7 +2369,7 @@ const AdminDashboard = ({
                                         [catKey]: e.target.value,
                                       }))
                                     }
-                                    className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px]"
+                                    className="min-w-[140px] max-w-[220px] bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px]"
                                     title="Assign to user"
                                   >
                                     {assignableEmails.map((email) => (
@@ -2390,20 +2378,14 @@ const AdminDashboard = ({
                                       </option>
                                     ))}
                                   </select>
-                                  <select
-                                    value={todoAddRecurrenceDraft[catKey] || 'none'}
-                                    onChange={(e) =>
-                                      setTodoAddRecurrenceDraft((prev) => ({
-                                        ...prev,
-                                        [catKey]: e.target.value,
-                                      }))
-                                    }
-                                    className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414]"
-                                    title="Recurring due date"
+                                  <button
+                                    type="button"
+                                    onClick={() => setTodoAddOptionsModalCatKey(catKey)}
+                                    className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-black text-slate-600 uppercase tracking-widest hover:bg-slate-50 transition-all shrink-0"
+                                    title="Due date and recurrence"
                                   >
-                                    <option value="none">No repeat</option>
-                                    <option value="monthly">Monthly</option>
-                                  </select>
+                                    Options
+                                  </button>
                                   <button
                                     type="button"
                                     disabled={
@@ -2440,19 +2422,12 @@ const AdminDashboard = ({
                                           ...prev,
                                           [catKey]: '',
                                         }));
-                                        setTodoAddDueDraft((prev) => ({
-                                          ...prev,
-                                          [catKey]: '',
-                                        }));
-                                        setTodoAddRecurrenceDraft((prev) => ({
-                                          ...prev,
-                                          [catKey]: 'none',
-                                        }));
+                                        resetTodoAddDraftOptionsForCategory(catKey);
                                       } finally {
                                         setTodoSaving(false);
                                       }
                                     }}
-                                    className="px-4 py-2 rounded-xl bg-[#fd7414] text-white font-bold text-sm disabled:opacity-40"
+                                    className="px-4 py-2 rounded-xl bg-[#fd7414] text-white font-bold text-sm disabled:opacity-40 shrink-0"
                                   >
                                     Add
                                   </button>
@@ -3197,7 +3172,7 @@ const AdminDashboard = ({
                                                         </ul>
                                                       )}
                                                       <div className="space-y-2">
-                                                        <div className="grid grid-cols-1 lg:grid-cols-5 gap-2">
+                                                        <div className="flex flex-wrap gap-2 items-center">
                                                           <input
                                                             type="text"
                                                             value={todoAddTextDraft[catKey] || ''}
@@ -3208,7 +3183,7 @@ const AdminDashboard = ({
                                                               }))
                                                             }
                                                             placeholder="New to-do..."
-                                                            className="lg:col-span-2 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                                            className="flex-1 min-w-[160px] bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
                                                             onKeyDown={(e) => {
                                                               if (e.key !== 'Enter') return;
                                                               e.preventDefault();
@@ -3239,30 +3214,12 @@ const AdminDashboard = ({
                                                                     ...prev,
                                                                     [catKey]: '',
                                                                   }));
-                                                                  setTodoAddDueDraft((prev) => ({
-                                                                    ...prev,
-                                                                    [catKey]: '',
-                                                                  }));
-                                                                  setTodoAddRecurrenceDraft((prev) => ({
-                                                                    ...prev,
-                                                                    [catKey]: 'none',
-                                                                  }));
+                                                                  resetTodoAddDraftOptionsForCategory(catKey);
                                                                 } finally {
                                                                   setTodoSaving(false);
                                                                 }
                                                               })();
                                                             }}
-                                                          />
-                                                          <input
-                                                            type="date"
-                                                            value={todoAddDueDraft[catKey] || ''}
-                                                            onChange={(e) =>
-                                                              setTodoAddDueDraft((prev) => ({
-                                                                ...prev,
-                                                                [catKey]: e.target.value,
-                                                              }))
-                                                            }
-                                                            className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
                                                           />
                                                           <select
                                                             value={
@@ -3277,7 +3234,7 @@ const AdminDashboard = ({
                                                                 [catKey]: e.target.value,
                                                               }))
                                                             }
-                                                            className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px]"
+                                                            className="min-w-[140px] max-w-[220px] bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px]"
                                                           >
                                                             {assignableEmails.map((email) => (
                                                               <option key={email} value={email}>
@@ -3285,19 +3242,14 @@ const AdminDashboard = ({
                                                               </option>
                                                             ))}
                                                           </select>
-                                                          <select
-                                                            value={todoAddRecurrenceDraft[catKey] || 'none'}
-                                                            onChange={(e) =>
-                                                              setTodoAddRecurrenceDraft((prev) => ({
-                                                                ...prev,
-                                                                [catKey]: e.target.value,
-                                                              }))
-                                                            }
-                                                            className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => setTodoAddOptionsModalCatKey(catKey)}
+                                                            className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-black text-slate-600 uppercase tracking-widest hover:bg-slate-50 transition-all shrink-0"
+                                                            title="Due date and recurrence"
                                                           >
-                                                            <option value="none">No repeat</option>
-                                                            <option value="monthly">Monthly</option>
-                                                          </select>
+                                                            Options
+                                                          </button>
                                                           <button
                                                             type="button"
                                                             disabled={
@@ -3331,19 +3283,12 @@ const AdminDashboard = ({
                                                                   ...prev,
                                                                   [catKey]: '',
                                                                 }));
-                                                                setTodoAddDueDraft((prev) => ({
-                                                                  ...prev,
-                                                                  [catKey]: '',
-                                                                }));
-                                                                setTodoAddRecurrenceDraft((prev) => ({
-                                                                  ...prev,
-                                                                  [catKey]: 'none',
-                                                                }));
+                                                                resetTodoAddDraftOptionsForCategory(catKey);
                                                               } finally {
                                                                 setTodoSaving(false);
                                                               }
                                                             }}
-                                                            className="px-4 py-2 rounded-xl bg-[#fd7414] text-white font-bold text-sm disabled:opacity-40"
+                                                            className="px-4 py-2 rounded-xl bg-[#fd7414] text-white font-bold text-sm disabled:opacity-40 shrink-0"
                                                           >
                                                             Add
                                                           </button>
@@ -4623,6 +4568,77 @@ const AdminDashboard = ({
                   {projectEditError}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {todoAddOptionsModalCatKey && (
+        <div className="fixed inset-0 z-[150] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">
+                To-do options
+              </h4>
+              <button
+                type="button"
+                onClick={() => setTodoAddOptionsModalCatKey(null)}
+                className="px-2 py-1 rounded-lg text-xs font-bold text-slate-500 hover:bg-slate-100"
+              >
+                Close
+              </button>
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                Due date
+              </label>
+              <input
+                type="date"
+                value={todoAddDueDraft[todoAddOptionsModalCatKey] || ''}
+                onChange={(e) =>
+                  setTodoAddDueDraft((prev) => ({
+                    ...prev,
+                    [todoAddOptionsModalCatKey]: e.target.value,
+                  }))
+                }
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                Recurrence
+              </label>
+              <select
+                value={todoAddRecurrenceDraft[todoAddOptionsModalCatKey] || 'none'}
+                onChange={(e) =>
+                  setTodoAddRecurrenceDraft((prev) => ({
+                    ...prev,
+                    [todoAddOptionsModalCatKey]: e.target.value,
+                  }))
+                }
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+              >
+                <option value="none">No repeat</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() =>
+                  resetTodoAddDraftOptionsForCategory(todoAddOptionsModalCatKey)
+                }
+                className="px-3 py-2 rounded-xl text-xs font-black text-slate-500 bg-slate-100 hover:bg-slate-200 uppercase tracking-widest"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={() => setTodoAddOptionsModalCatKey(null)}
+                className="px-3 py-2 rounded-xl text-xs font-black text-white bg-[#fd7414] hover:brightness-95 uppercase tracking-widest"
+              >
+                Done
+              </button>
             </div>
           </div>
         </div>
