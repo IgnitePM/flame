@@ -725,6 +725,9 @@ export default function App() {
   const todoCategoryKey = (cat) =>
     String(cat ?? '').replace(/[~*[\]/]/g, '_').replace(/\./g, '_');
 
+  const carryoverCategoryKey = (cat) =>
+    String(cat ?? '').replace(/[~*[\]/]/g, '_').replace(/\./g, '_');
+
   const getTodoStateForCycle = (client, cycleStart) => {
     const cycles = client.todoCycles || {};
     const existing = cycles[String(cycleStart)];
@@ -865,48 +868,101 @@ export default function App() {
     );
     
     const clientStartMs = client.clientStartDate || 0;
-    let pastTasks = taskLogs.filter(t => t.clientName === client.name && t.clockInTime < mStart && !t.projectId);
-    let pastExps = expenses.filter(e => e.clientName === client.name && e.date < mStart && !e.projectId);
-    let pastAddons = addons.filter(a => a.clientId === client.id && a.date < mStart);
+    const globalResetMs = client.lastCarryoverResetDate || 0;
+    const perCategoryReset = client.carryoverResetByCategory || {};
 
-    if (clientStartMs) {
-        pastTasks = pastTasks.filter(t => t.clockInTime >= clientStartMs);
-        pastExps = pastExps.filter(e => e.date >= clientStartMs);
-        pastAddons = pastAddons.filter(a => a.date >= clientStartMs);
-    }
-    if (client.lastCarryoverResetDate) {
-        pastTasks = pastTasks.filter(t => t.clockInTime >= client.lastCarryoverResetDate);
-        pastExps = pastExps.filter(e => e.date >= client.lastCarryoverResetDate);
-        pastAddons = pastAddons.filter(a => a.date >= client.lastCarryoverResetDate);
-    }
+    const pastAddons = addons
+      .filter((a) => a.clientId === client.id && a.date < mStart)
+      .filter((a) => !clientStartMs || a.date >= clientStartMs)
+      .filter((a) => !globalResetMs || a.date >= globalResetMs);
+    const pastAddonHours = pastAddons.reduce(
+      (acc, a) => acc + Number(a.hours || 0),
+      0,
+    );
 
-    const firstTaskTime = pastTasks.length > 0 ? Math.min(...pastTasks.map(t => t.clockInTime)) : null;
-    const firstExpTime = pastExps.length > 0 ? Math.min(...pastExps.map(e => e.date)) : null;
-    
-    let firstDateMs = null;
-    if (firstTaskTime && firstExpTime) firstDateMs = Math.min(firstTaskTime, firstExpTime);
-    else if (firstTaskTime) firstDateMs = firstTaskTime;
-    else if (firstExpTime) firstDateMs = firstExpTime;
-
-    if (client.lastCarryoverResetDate) {
-        firstDateMs = firstDateMs ? Math.max(firstDateMs, client.lastCarryoverResetDate) : client.lastCarryoverResetDate;
-    }
-    if (clientStartMs && firstDateMs !== null) {
-        firstDateMs = Math.max(firstDateMs, clientStartMs);
-    } else if (clientStartMs) {
-        firstDateMs = clientStartMs;
-    }
+    const hourCategories = Object.keys(client.retainers || {}).filter(
+      (cat) => !isDollarCategory(client, cat),
+    );
 
     let carryover = 0;
-    if (firstDateMs) {
-        const periodsPassed = getPeriodsPassed(firstDateMs, mStart, client.billingDay || 1);
-        const totalAllottedPast = periodsPassed * hourRetainerBase;
-        const pastTaskHours = pastTasks.reduce((acc, t) => acc + getTaskDuration(t), 0) / 3600000;
-        const pastExpHours = pastExps.reduce((acc, e) => acc + (e.equivalentHours || 0), 0);
-        const pastAddonHours = pastAddons.reduce((acc, a) => acc + Number(a.hours), 0);
-        
-        carryover = (totalAllottedPast + pastAddonHours) - (pastTaskHours + pastExpHours);
-    }
+    hourCategories.forEach((cat) => {
+      const catResetMs = Number(
+        perCategoryReset[carryoverCategoryKey(cat)] || 0,
+      );
+      const effectiveResetMs = Math.max(globalResetMs, catResetMs);
+
+      let pastTasksCat = taskLogs.filter(
+        (t) =>
+          t.clientName === client.name &&
+          t.clockInTime < mStart &&
+          !t.projectId &&
+          t.projectName === cat,
+      );
+      let pastExpsCat = expenses.filter(
+        (e) =>
+          e.clientName === client.name &&
+          e.date < mStart &&
+          !e.projectId &&
+          e.category === cat,
+      );
+
+      if (clientStartMs) {
+        pastTasksCat = pastTasksCat.filter((t) => t.clockInTime >= clientStartMs);
+        pastExpsCat = pastExpsCat.filter((e) => e.date >= clientStartMs);
+      }
+      if (effectiveResetMs) {
+        pastTasksCat = pastTasksCat.filter(
+          (t) => t.clockInTime >= effectiveResetMs,
+        );
+        pastExpsCat = pastExpsCat.filter((e) => e.date >= effectiveResetMs);
+      }
+
+      const firstTaskTime =
+        pastTasksCat.length > 0
+          ? Math.min(...pastTasksCat.map((t) => t.clockInTime))
+          : null;
+      const firstExpTime =
+        pastExpsCat.length > 0
+          ? Math.min(...pastExpsCat.map((e) => e.date))
+          : null;
+
+      let firstDateMs = null;
+      if (firstTaskTime && firstExpTime) firstDateMs = Math.min(firstTaskTime, firstExpTime);
+      else if (firstTaskTime) firstDateMs = firstTaskTime;
+      else if (firstExpTime) firstDateMs = firstExpTime;
+
+      if (effectiveResetMs) {
+        firstDateMs = firstDateMs
+          ? Math.max(firstDateMs, effectiveResetMs)
+          : effectiveResetMs;
+      }
+      if (clientStartMs && firstDateMs !== null) {
+        firstDateMs = Math.max(firstDateMs, clientStartMs);
+      } else if (clientStartMs) {
+        firstDateMs = clientStartMs;
+      }
+
+      if (!firstDateMs) return;
+
+      const periodsPassed = getPeriodsPassed(
+        firstDateMs,
+        mStart,
+        client.billingDay || 1,
+      );
+      const base = Number(client.retainers?.[cat] || 0);
+      const totalAllottedPast = periodsPassed * base;
+      const pastTaskHours =
+        pastTasksCat.reduce((acc, t) => acc + getTaskDuration(t), 0) / 3600000;
+      const pastExpHours = pastExpsCat.reduce(
+        (acc, e) => acc + Number(e.equivalentHours || 0),
+        0,
+      );
+
+      carryover += totalAllottedPast - (pastTaskHours + pastExpHours);
+    });
+
+    // Keep historical Add Hours behavior as a global carryover contributor.
+    carryover += pastAddonHours;
 
     const currentTasks = taskLogs.filter(t => t.clientName === client.name && t.clockInTime >= mStart && t.clockInTime <= mEnd && !t.projectId);
     const currentExps = expenses.filter(e => e.clientName === client.name && e.date >= mStart && e.date <= mEnd && !e.projectId);
@@ -1800,12 +1856,16 @@ export default function App() {
                   <button 
                     onClick={() => {
                       if(confirm("Are you sure? This will permanently clear any compounded surplus or deficit carryover hours from past months, starting them fresh for this current period.")) {
-                        setEditingClient({...editingClient, lastCarryoverResetDate: Date.now()})
+                        setEditingClient({
+                          ...editingClient,
+                          lastCarryoverResetDate: Date.now(),
+                          carryoverResetByCategory: {},
+                        })
                       }
                     }} 
                     className="text-[10px] bg-red-50 text-red-500 hover:bg-red-100 px-3 py-1.5 rounded-lg font-bold uppercase tracking-widest transition-all"
                   >
-                    Reset Carryover Balance
+                    Reset Carryover (All)
                   </button>
                 </div>
                 <div className="space-y-3">
@@ -1813,6 +1873,7 @@ export default function App() {
                     const units = (editingClient.retainerUnits || {})[type] ?? (type === 'Social Ad Budget' ? 'dollar' : 'hours');
                     const unitLabel = units === 'dollar' ? '$' : 'hrs';
                     const step = units === 'dollar' ? 1 : 0.5;
+                    const categoryResetKey = carryoverCategoryKey(type);
                     return (
                       <div
                         key={type}
@@ -1827,6 +1888,31 @@ export default function App() {
                           </span>
                         </div>
                         <div className="flex items-center gap-2">
+                          {units !== 'dollar' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (
+                                  !confirm(
+                                    `Reset carryover for "${type}" only? This starts this category fresh from the current period.`,
+                                  )
+                                ) {
+                                  return;
+                                }
+                                setEditingClient({
+                                  ...editingClient,
+                                  carryoverResetByCategory: {
+                                    ...(editingClient.carryoverResetByCategory || {}),
+                                    [categoryResetKey]: Date.now(),
+                                  },
+                                });
+                              }}
+                              className="text-[10px] bg-amber-50 text-amber-700 hover:bg-amber-100 px-2.5 py-1.5 rounded-lg font-bold uppercase tracking-widest transition-all"
+                              title="Reset this category carryover only"
+                            >
+                              Reset
+                            </button>
+                          )}
                           <select
                             value={units}
                             onChange={(e) =>
@@ -1870,7 +1956,7 @@ export default function App() {
 
             <div className="p-8 border-t border-slate-100 bg-white shrink-0">
               <button 
-                onClick={async () => { await updateDoc(doc(db, 'clients', editingClient.id), { retainers: editingClient.retainers, retainerUnits: editingClient.retainerUnits || {}, hourlyRate: editingClient.hourlyRate || 0, clientEmails: editingClient.clientEmails || [], billingDay: editingClient.billingDay || 1, status: editingClient.status || 'active', lastCarryoverResetDate: editingClient.lastCarryoverResetDate || null, clientStartDate: editingClient.clientStartDate || null }); setEditingClient(null); }} 
+                onClick={async () => { await updateDoc(doc(db, 'clients', editingClient.id), { retainers: editingClient.retainers, retainerUnits: editingClient.retainerUnits || {}, hourlyRate: editingClient.hourlyRate || 0, clientEmails: editingClient.clientEmails || [], billingDay: editingClient.billingDay || 1, status: editingClient.status || 'active', lastCarryoverResetDate: editingClient.lastCarryoverResetDate || null, carryoverResetByCategory: editingClient.carryoverResetByCategory || {}, clientStartDate: editingClient.clientStartDate || null }); setEditingClient(null); }} 
                 className="w-full bg-black hover:bg-slate-800 text-white p-5 rounded-2xl font-black text-lg shadow-xl flex items-center justify-center gap-3 transition-all active:scale-95"
               >
                 <Save className="w-5 h-5" /> Save Profile

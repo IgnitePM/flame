@@ -1420,6 +1420,8 @@ const AdminDashboard = ({
                             clientEmails: c.clientEmails || [],
                             billingDay: c.billingDay || 1,
                             status: c.status || 'active',
+                            carryoverResetByCategory:
+                              c.carryoverResetByCategory || {},
                           })
                         }
                         className="p-2 text-slate-400 bg-slate-100 rounded-xl hover:text-[#fd7414] transition-colors"
