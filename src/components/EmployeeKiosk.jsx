@@ -55,14 +55,25 @@ const EmployeeKiosk = ({
       .replace(/[~*[\]/]/g, '_')
       .replace(/\./g, '_');
 
-  const selectedClientObj = clientsFull?.find((c) => c.name === selectedClient);
+  // When a task is actively running, use the active task's client/category
+  // so the retainer progress bar doesn't lag behind when switching tasks.
+  const effectiveClientName = activeTask?.clientName || selectedClient;
+  const selectedClientObj = clientsFull?.find((c) => c.name === effectiveClientName);
   const cycleStart = selectedClientObj
     ? getBillingPeriod(selectedClientObj.billingDay || 1, 0).start
     : null;
 
-  const selectedRetainerCategory = selectedBillingTarget?.startsWith('retainer_')
-    ? selectedBillingTarget.replace('retainer_', '')
-    : null;
+  const selectedRetainerCategory = (() => {
+    // If we're actively working a retainer category (projectId is null), show progress/to-dos.
+    // If we're actively working a custom project (projectId is truthy), hide retainer UI.
+    if (activeTask) {
+      if (activeTask.projectId) return null;
+      return activeTask.projectName || null;
+    }
+    return selectedBillingTarget?.startsWith('retainer_')
+      ? selectedBillingTarget.replace('retainer_', '')
+      : null;
+  })();
 
   const selectedRetainerNote =
     selectedClientObj && cycleStart && selectedRetainerCategory
