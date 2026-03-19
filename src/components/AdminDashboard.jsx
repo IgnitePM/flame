@@ -1351,6 +1351,26 @@ const AdminDashboard = ({
                       )}
                       <button
                         onClick={() => {
+                          setManualTaskValues({
+                            clientName: c.name,
+                            billingTarget: '',
+                            date: '',
+                            hours: '',
+                            minutes: '',
+                            notes: '',
+                            employeeName:
+                              user?.displayName || user?.email || '',
+                            parsedExpense: 0,
+                          });
+                          setManualTaskModal(true);
+                        }}
+                        className="p-2 text-white bg-slate-800 rounded-xl hover:bg-black transition-colors shadow-sm flex items-center justify-center"
+                        title="Log a task for this client"
+                      >
+                        <History className="w-5 h-5" />
+                      </button>
+                      <button
+                        onClick={() => {
                           setProjectModal({ ...c, lockClient: true });
                           setProjectValues({
                             clientId: c.id,
