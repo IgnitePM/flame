@@ -440,6 +440,37 @@ const EmployeeKiosk = ({
                                           <span className={`text-sm flex-1 ${item.done ? 'line-through text-slate-400' : 'text-slate-800'}`}>
                                             {item.text || '(no text)'}
                                           </span>
+                                          <button
+                                            type="button"
+                                            disabled={todoSaving}
+                                            onClick={async () => {
+                                              setTodoSaving(true);
+                                              try {
+                                                const next = items.map((i) => {
+                                                  if (i.id !== item.id) return i;
+                                                  const nextRecurring = !i.recurring;
+                                                  return {
+                                                    ...i,
+                                                    recurring: nextRecurring,
+                                                    recurringId: nextRecurring
+                                                      ? (i.recurringId || i.id)
+                                                      : null,
+                                                  };
+                                                });
+                                                await updateClientTodo(selectedClientObj, cycleStart, catKey, { ...catTodo, items: next });
+                                              } finally {
+                                                setTodoSaving(false);
+                                              }
+                                            }}
+                                            className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${
+                                              item.recurring
+                                                ? 'bg-[#fd7414] text-white border-[#fd7414]'
+                                                : 'bg-white text-slate-500 border-slate-200'
+                                            }`}
+                                            title="Recurring each cycle"
+                                          >
+                                            Recurring
+                                          </button>
                                         </li>
                                       ))}
                                     </ul>
@@ -751,6 +782,37 @@ const EmployeeKiosk = ({
                                           <span className={`text-sm flex-1 ${item.done ? 'line-through text-slate-400' : 'text-slate-800'}`}>
                                             {item.text || '(no text)'}
                                           </span>
+                                          <button
+                                            type="button"
+                                            disabled={todoSaving}
+                                            onClick={async () => {
+                                              setTodoSaving(true);
+                                              try {
+                                                const next = items.map((i) => {
+                                                  if (i.id !== item.id) return i;
+                                                  const nextRecurring = !i.recurring;
+                                                  return {
+                                                    ...i,
+                                                    recurring: nextRecurring,
+                                                    recurringId: nextRecurring
+                                                      ? (i.recurringId || i.id)
+                                                      : null,
+                                                  };
+                                                });
+                                                await updateClientTodo(selectedClientObj, cycleStart, catKey, { ...catTodo, items: next });
+                                              } finally {
+                                                setTodoSaving(false);
+                                              }
+                                            }}
+                                            className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${
+                                              item.recurring
+                                                ? 'bg-[#fd7414] text-white border-[#fd7414]'
+                                                : 'bg-white text-slate-500 border-slate-200'
+                                            }`}
+                                            title="Recurring each cycle"
+                                          >
+                                            Recurring
+                                          </button>
                                         </li>
                                       ))}
                                     </ul>

@@ -1851,9 +1851,48 @@ const AdminDashboard = ({
                                                                     setTodoEditText(item.text || '');
                                                                   }}
                                                                 >
-                                                                  {item.text || '(no text)'}
+                                                                  <span className="flex items-center gap-2">
+                                                                    <span>
+                                                                      {item.text || '(no text)'}
+                                                                    </span>
+                                                                    {item.recurring && (
+                                                                      <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[9px] font-black uppercase tracking-widest">
+                                                                        Recurring
+                                                                      </span>
+                                                                    )}
+                                                                  </span>
                                                                 </span>
                                                               )}
+                                                              <button
+                                                                type="button"
+                                                                onClick={async () => {
+                                                                  if (isCycleLocked(c, cycleStart)) return;
+                                                                  setTodoSaving(true);
+                                                                  try {
+                                                                    const next = items.map((i) => {
+                                                                      if (i.id !== item.id) return i;
+                                                                      const nextRecurring = !i.recurring;
+                                                                      return {
+                                                                        ...i,
+                                                                        recurring: nextRecurring,
+                                                                        recurringId: nextRecurring ? (i.recurringId || i.id) : null,
+                                                                      };
+                                                                    });
+                                                                    await updateClientTodo(c, cycleStart, catKey, { ...catTodo, items: next });
+                                                                  } finally {
+                                                                    setTodoSaving(false);
+                                                                  }
+                                                                }}
+                                                                disabled={todoSaving}
+                                                                className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border transition-colors ${
+                                                                  item.recurring
+                                                                    ? 'bg-[#fd7414] text-white border-[#fd7414]'
+                                                                    : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+                                                                }`}
+                                                                title="Toggle recurring each cycle"
+                                                              >
+                                                                Recurring
+                                                              </button>
                                                               <button
                                                                 type="button"
                                                                 onClick={async () => {

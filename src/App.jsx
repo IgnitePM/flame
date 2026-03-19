@@ -723,8 +723,21 @@ export default function App() {
     categories.forEach((cat) => {
       const ck = todoCategoryKey(cat);
       const prevCat = prevData[ck];
-      const carried = (prevCat?.items || []).filter((i) => !i.done).map((i) => ({ ...i, done: false }));
-      result[ck] = { closed: false, items: carried };
+      const prevItems = prevCat?.items || [];
+      const carried = prevItems
+        .filter((i) => !i.done && !i.recurring)
+        .map((i) => ({ ...i, done: false }));
+      const recurring = prevItems
+        .filter((i) => !!i.recurring)
+        .map((i) => ({
+          id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+          text: i.text,
+          done: false,
+          doneAt: null,
+          recurring: true,
+          recurringId: i.recurringId || i.id,
+        }));
+      result[ck] = { closed: false, items: [...carried, ...recurring] };
     });
     return result;
   };
@@ -741,8 +754,21 @@ export default function App() {
     categories.forEach((cat) => {
       const ck = todoCategoryKey(cat);
       const prevCat = prevData[ck];
-      const carried = (prevCat?.items || []).filter((i) => !i.done).map((i) => ({ ...i, done: false }));
-      cycles[String(cycleStart)][ck] = { closed: false, items: carried };
+      const prevItems = prevCat?.items || [];
+      const carried = prevItems
+        .filter((i) => !i.done && !i.recurring)
+        .map((i) => ({ ...i, done: false }));
+      const recurring = prevItems
+        .filter((i) => !!i.recurring)
+        .map((i) => ({
+          id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+          text: i.text,
+          done: false,
+          doneAt: null,
+          recurring: true,
+          recurringId: i.recurringId || i.id,
+        }));
+      cycles[String(cycleStart)][ck] = { closed: false, items: [...carried, ...recurring] };
     });
     return cycles;
   };
