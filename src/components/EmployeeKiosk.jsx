@@ -51,6 +51,7 @@ const EmployeeKiosk = ({
   const [todoDueDate, setTodoDueDate] = React.useState('');
   const [todoMineOnly, setTodoMineOnly] = React.useState(true);
   const [todoRecurrenceMode, setTodoRecurrenceMode] = React.useState('none');
+  const [todoOptionsOpen, setTodoOptionsOpen] = React.useState(false);
 
   const safeCategoryKey = (category) =>
     String(category)
@@ -94,6 +95,27 @@ const EmployeeKiosk = ({
       type: 'monthly_fixed_day',
       dayOfMonth: new Date(dueDateMs || Date.now()).getDate(),
     };
+  };
+
+  const buildNewTodoItem = (text) => {
+    const dueDate = parseDateInputToMs(todoDueDate);
+    return {
+      id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      text: String(text || '').trim(),
+      done: false,
+      doneAt: null,
+      recurring: false,
+      recurringId: null,
+      dueDate,
+      assigneeEmails: [String(user?.email || '').toLowerCase()].filter(Boolean),
+      recurrence: getDraftRecurrence(dueDate),
+    };
+  };
+
+  const resetTodoDraftOptions = () => {
+    setTodoDueDate('');
+    setTodoRecurrenceMode('none');
+    setTodoOptionsOpen(false);
   };
 
   // When a task is actively running, use the active task's client/category
@@ -541,7 +563,7 @@ const EmployeeKiosk = ({
                                       ))}
                                     </ul>
                                   )}
-                                  <div className="flex gap-2">
+                                  <div className="flex gap-2 items-center">
                                     <input
                                       type="text"
                                       value={todoNewText}
@@ -552,18 +574,7 @@ const EmployeeKiosk = ({
                                         if (e.key === 'Enter') {
                                           e.preventDefault();
                                           if (todoNewText.trim()) {
-                                            const dueDate = parseDateInputToMs(todoDueDate);
-                                            const newItem = {
-                                              id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-                                              text: todoNewText.trim(),
-                                              done: false,
-                                              doneAt: null,
-                                              recurring: false,
-                                              recurringId: null,
-                                              dueDate,
-                                              assigneeEmails: [String(user?.email || '').toLowerCase()].filter(Boolean),
-                                              recurrence: getDraftRecurrence(dueDate),
-                                            };
+                                            const newItem = buildNewTodoItem(todoNewText);
                                             setTodoSaving(true);
                                             updateClientTodo(selectedClientObj, cycleStart, catKey, {
                                               ...catTodo,
@@ -572,44 +583,25 @@ const EmployeeKiosk = ({
                                             }).finally(() => {
                                               setTodoSaving(false);
                                               setTodoNewText('');
-                                              setTodoDueDate('');
-                                              setTodoRecurrenceMode('none');
+                                              resetTodoDraftOptions();
                                             });
                                           }
                                         }
                                       }}
                                     />
-                                    <input
-                                      type="date"
-                                      value={todoDueDate}
-                                      onChange={(e) => setTodoDueDate(e.target.value)}
-                                      className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414] w-[150px]"
-                                    />
-                                    <select
-                                      value={todoRecurrenceMode}
-                                      onChange={(e) => setTodoRecurrenceMode(e.target.value)}
-                                      className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                    <button
+                                      type="button"
+                                      onClick={() => setTodoOptionsOpen(true)}
+                                      className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-black text-slate-600 uppercase tracking-widest hover:bg-slate-100 transition-all"
                                     >
-                                      <option value="none">No repeat</option>
-                                      <option value="monthly">Monthly</option>
-                                    </select>
+                                      Options
+                                    </button>
                                     <button
                                       type="button"
                                       disabled={!todoNewText.trim() || todoSaving}
                                       onClick={async () => {
                                         if (!todoNewText.trim()) return;
-                                        const dueDate = parseDateInputToMs(todoDueDate);
-                                        const newItem = {
-                                          id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-                                          text: todoNewText.trim(),
-                                          done: false,
-                                          doneAt: null,
-                                          recurring: false,
-                                          recurringId: null,
-                                          dueDate,
-                                          assigneeEmails: [String(user?.email || '').toLowerCase()].filter(Boolean),
-                                          recurrence: getDraftRecurrence(dueDate),
-                                        };
+                                        const newItem = buildNewTodoItem(todoNewText);
                                         setTodoSaving(true);
                                         try {
                                           await updateClientTodo(selectedClientObj, cycleStart, catKey, {
@@ -618,8 +610,7 @@ const EmployeeKiosk = ({
                                             items: [...(catTodo.items || []), newItem],
                                           });
                                           setTodoNewText('');
-                                          setTodoDueDate('');
-                                          setTodoRecurrenceMode('none');
+                                          resetTodoDraftOptions();
                                         } finally {
                                           setTodoSaving(false);
                                         }
@@ -959,7 +950,7 @@ const EmployeeKiosk = ({
                                       ))}
                                     </ul>
                                   )}
-                                  <div className="flex gap-2">
+                                  <div className="flex gap-2 items-center">
                                     <input
                                       type="text"
                                       value={todoNewText}
@@ -970,18 +961,7 @@ const EmployeeKiosk = ({
                                         if (e.key === 'Enter') {
                                           e.preventDefault();
                                           if (todoNewText.trim()) {
-                                            const dueDate = parseDateInputToMs(todoDueDate);
-                                            const newItem = {
-                                              id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-                                              text: todoNewText.trim(),
-                                              done: false,
-                                              doneAt: null,
-                                              recurring: false,
-                                              recurringId: null,
-                                              dueDate,
-                                              assigneeEmails: [String(user?.email || '').toLowerCase()].filter(Boolean),
-                                              recurrence: getDraftRecurrence(dueDate),
-                                            };
+                                            const newItem = buildNewTodoItem(todoNewText);
                                             setTodoSaving(true);
                                             updateClientTodo(selectedClientObj, cycleStart, catKey, {
                                               ...catTodo,
@@ -990,44 +970,25 @@ const EmployeeKiosk = ({
                                             }).finally(() => {
                                               setTodoSaving(false);
                                               setTodoNewText('');
-                                              setTodoDueDate('');
-                                              setTodoRecurrenceMode('none');
+                                              resetTodoDraftOptions();
                                             });
                                           }
                                         }
                                       }}
                                     />
-                                    <input
-                                      type="date"
-                                      value={todoDueDate}
-                                      onChange={(e) => setTodoDueDate(e.target.value)}
-                                      className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414] w-[150px]"
-                                    />
-                                    <select
-                                      value={todoRecurrenceMode}
-                                      onChange={(e) => setTodoRecurrenceMode(e.target.value)}
-                                      className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                    <button
+                                      type="button"
+                                      onClick={() => setTodoOptionsOpen(true)}
+                                      className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-black text-slate-600 uppercase tracking-widest hover:bg-slate-100 transition-all"
                                     >
-                                      <option value="none">No repeat</option>
-                                      <option value="monthly">Monthly</option>
-                                    </select>
+                                      Options
+                                    </button>
                                     <button
                                       type="button"
                                       disabled={!todoNewText.trim() || todoSaving}
                                       onClick={async () => {
                                         if (!todoNewText.trim()) return;
-                                        const dueDate = parseDateInputToMs(todoDueDate);
-                                        const newItem = {
-                                          id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-                                          text: todoNewText.trim(),
-                                          done: false,
-                                          doneAt: null,
-                                          recurring: false,
-                                          recurringId: null,
-                                          dueDate,
-                                          assigneeEmails: [String(user?.email || '').toLowerCase()].filter(Boolean),
-                                          recurrence: getDraftRecurrence(dueDate),
-                                        };
+                                        const newItem = buildNewTodoItem(todoNewText);
                                         setTodoSaving(true);
                                         try {
                                           await updateClientTodo(selectedClientObj, cycleStart, catKey, {
@@ -1036,8 +997,7 @@ const EmployeeKiosk = ({
                                             items: [...(catTodo.items || []), newItem],
                                           });
                                           setTodoNewText('');
-                                          setTodoDueDate('');
-                                          setTodoRecurrenceMode('none');
+                                          resetTodoDraftOptions();
                                         } finally {
                                           setTodoSaving(false);
                                         }
@@ -1197,6 +1157,67 @@ const EmployeeKiosk = ({
             </div>
           )}
         </div>
+        {todoOptionsOpen && (
+          <div className="fixed inset-0 z-[150] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">
+                  To-do Options
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setTodoOptionsOpen(false)}
+                  className="px-2 py-1 rounded-lg text-xs font-bold text-slate-500 hover:bg-slate-100"
+                >
+                  Close
+                </button>
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                  Due date
+                </label>
+                <input
+                  type="date"
+                  value={todoDueDate}
+                  onChange={(e) => setTodoDueDate(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                  Recurrence
+                </label>
+                <select
+                  value={todoRecurrenceMode}
+                  onChange={(e) => setTodoRecurrenceMode(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                >
+                  <option value="none">No repeat</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTodoDueDate('');
+                    setTodoRecurrenceMode('none');
+                  }}
+                  className="px-3 py-2 rounded-xl text-xs font-black text-slate-500 bg-slate-100 hover:bg-slate-200 uppercase tracking-widest"
+                >
+                  Clear
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTodoOptionsOpen(false)}
+                  className="px-3 py-2 rounded-xl text-xs font-black text-white bg-[#fd7414] hover:brightness-95 uppercase tracking-widest"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -678,6 +678,20 @@ const AdminDashboard = ({
     return user?.email ? [String(user.email).trim().toLowerCase()] : [];
   };
 
+  const getDraftAssigneeEmails = (categoryKey) => {
+    const raw = todoAddAssigneesDraft?.[categoryKey];
+    if (Array.isArray(raw)) {
+      const cleaned = raw
+        .map((e) => String(e || '').trim().toLowerCase())
+        .filter(Boolean);
+      if (cleaned.length > 0) return cleaned;
+    }
+    const one = String(raw || '').trim().toLowerCase();
+    if (one) return [one];
+    const me = String(user?.email || '').trim().toLowerCase();
+    return me ? [me] : [];
+  };
+
   const getTodoUrgencyStyles = (item) => {
     const due = Number(item?.dueDate || 0);
     if (!due) {
@@ -1464,7 +1478,8 @@ const AdminDashboard = ({
             </div>
           )}
 
-          <div className="bg-white p-4 rounded-[32px] border border-slate-100 shadow-sm">
+          {!clientId && (
+            <div className="bg-white p-4 rounded-[32px] border border-slate-100 shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center gap-3">
               <div className="flex bg-slate-100 p-1 rounded-2xl w-full sm:w-auto">
                 {[
@@ -1508,7 +1523,8 @@ const AdminDashboard = ({
                 </>
               )}
             </div>
-          </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-6">
             {clients
@@ -1607,6 +1623,19 @@ const AdminDashboard = ({
                         >
                           {c.name}
                         </h4>
+                        {!isClientPage && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigateToClient?.(c.id);
+                            }}
+                            className="px-3 py-2 text-white bg-[#fd7414] rounded-2xl hover:bg-[#e66a12] transition-colors font-black flex items-center gap-2 shadow-sm"
+                            title="Open client page"
+                          >
+                            Open
+                            <ArrowRight className="w-4 h-4" />
+                          </button>
+                        )}
                         {c.status === 'paused' && (
                           <span className="bg-slate-200 text-slate-500 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
                             Paused
@@ -1623,16 +1652,6 @@ const AdminDashboard = ({
                       className="flex gap-1"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {!isClientPage && (
-                        <button
-                          onClick={() => navigateToClient?.(c.id)}
-                          className="px-3 py-2 text-white bg-[#fd7414] rounded-2xl hover:bg-[#e66a12] transition-colors font-black flex items-center gap-2 shadow-sm"
-                          title="Open client page"
-                        >
-                          Open
-                          <ArrowRight className="w-4 h-4" />
-                        </button>
-                      )}
                       <button
                         onClick={() => {
                           setManualTaskValues({
@@ -2311,7 +2330,7 @@ const AdminDashboard = ({
                                             recurring: false,
                                             recurringId: null,
                                             dueDate,
-                                            assigneeEmails: (todoAddAssigneesDraft[catKey] || [String(user?.email || '').toLowerCase()]).filter(Boolean),
+                                            assigneeEmails: getDraftAssigneeEmails(catKey),
                                             recurrence: getDraftRecurrence(catKey, dueDate),
                                           };
                                           await updateClientTodo(c, cycleStart, catKey, {
@@ -2350,16 +2369,20 @@ const AdminDashboard = ({
                                     title="Optional due date"
                                   />
                                   <select
-                                    multiple
-                                    value={todoAddAssigneesDraft[catKey] || [String(user?.email || '').toLowerCase()].filter(Boolean)}
+                                    value={
+                                      (Array.isArray(todoAddAssigneesDraft[catKey])
+                                        ? todoAddAssigneesDraft[catKey][0]
+                                        : todoAddAssigneesDraft[catKey]) ||
+                                      String(user?.email || '').toLowerCase()
+                                    }
                                     onChange={(e) =>
                                       setTodoAddAssigneesDraft((prev) => ({
                                         ...prev,
-                                        [catKey]: Array.from(e.target.selectedOptions).map((o) => o.value),
+                                        [catKey]: e.target.value,
                                       }))
                                     }
                                     className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px]"
-                                    title="Assign to one or more users"
+                                    title="Assign to user"
                                   >
                                     {assignableEmails.map((email) => (
                                       <option key={email} value={email}>
@@ -2405,7 +2428,7 @@ const AdminDashboard = ({
                                           recurring: false,
                                           recurringId: null,
                                             dueDate,
-                                          assigneeEmails: (todoAddAssigneesDraft[catKey] || [String(user?.email || '').toLowerCase()]).filter(Boolean),
+                                          assigneeEmails: getDraftAssigneeEmails(catKey),
                                             recurrence: getDraftRecurrence(catKey, dueDate),
                                         };
                                         await updateClientTodo(c, cycleStart, catKey, {
@@ -3204,7 +3227,7 @@ const AdminDashboard = ({
                                                                     recurring: false,
                                                                     recurringId: null,
                                                                     dueDate,
-                                                                    assigneeEmails: (todoAddAssigneesDraft[catKey] || [String(user?.email || '').toLowerCase()]).filter(Boolean),
+                                                                    assigneeEmails: getDraftAssigneeEmails(catKey),
                                                                     recurrence: getDraftRecurrence(catKey, dueDate),
                                                                   };
                                                                   await updateClientTodo(c, cycleStart, catKey, {
@@ -3242,12 +3265,16 @@ const AdminDashboard = ({
                                                             className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
                                                           />
                                                           <select
-                                                            multiple
-                                                            value={todoAddAssigneesDraft[catKey] || [String(user?.email || '').toLowerCase()].filter(Boolean)}
+                                                            value={
+                                                              (Array.isArray(todoAddAssigneesDraft[catKey])
+                                                                ? todoAddAssigneesDraft[catKey][0]
+                                                                : todoAddAssigneesDraft[catKey]) ||
+                                                              String(user?.email || '').toLowerCase()
+                                                            }
                                                             onChange={(e) =>
                                                               setTodoAddAssigneesDraft((prev) => ({
                                                                 ...prev,
-                                                                [catKey]: Array.from(e.target.selectedOptions).map((o) => o.value),
+                                                                [catKey]: e.target.value,
                                                               }))
                                                             }
                                                             className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px]"
@@ -3292,7 +3319,7 @@ const AdminDashboard = ({
                                                                   recurring: false,
                                                                   recurringId: null,
                                                                   dueDate,
-                                                                  assigneeEmails: (todoAddAssigneesDraft[catKey] || [String(user?.email || '').toLowerCase()]).filter(Boolean),
+                                                                  assigneeEmails: getDraftAssigneeEmails(catKey),
                                                                   recurrence: getDraftRecurrence(catKey, dueDate),
                                                                 };
                                                                 await updateClientTodo(c, cycleStart, catKey, {
