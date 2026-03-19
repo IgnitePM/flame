@@ -53,9 +53,13 @@ exports.handler = async (event) => {
       };
     }
 
-    // Basic input protection so the model doesn't get unbounded text.
+    // Keep an upper bound for safety, but allow long transcripts.
+    // Default supports ~3h meeting notes pasted as text.
+    const maxTranscriptChars = Number(process.env.GEMINI_MAX_TRANSCRIPT_CHARS) || 350000;
     const trimmedTranscript =
-      transcript.length > 30000 ? transcript.slice(0, 30000) : transcript;
+      transcript.length > maxTranscriptChars
+        ? transcript.slice(0, maxTranscriptChars)
+        : transcript;
 
     const allowedCategories = Array.from(
       new Set([...retainerCategories, generalCategoryLabel]),
