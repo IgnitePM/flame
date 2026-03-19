@@ -14,7 +14,9 @@ service cloud.firestore {
       return isSignedIn() && request.auth.token.email.matches('.*@ignitepm\\.com$');
     }
     function isAnyStaff() {
-      return isSignedIn() && (isIgniteStaff() || safeAdminRole() in ['admin','billing','kiosk']);
+      // Treat anyone with an admin doc as staff, regardless of role string,
+      // so role naming like "super_admin" doesn't accidentally lose permissions.
+      return isSignedIn() && (isIgniteStaff() || adminDoc().exists);
     }
 
     function clientDoc(clientId) {
