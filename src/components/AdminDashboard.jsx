@@ -153,6 +153,10 @@ const AdminDashboard = ({
   const [todoAddRecurrenceDraft, setTodoAddRecurrenceDraft] = useState({});
   /** Which retainer category's add-to-do "Options" modal is open (due date + recurrence). */
   const [todoAddOptionsModalCatKey, setTodoAddOptionsModalCatKey] = useState(null);
+  /** Existing to-do row: which item's due/recurrence is being edited in the Options modal. */
+  const [todoEditOptionsTarget, setTodoEditOptionsTarget] = useState(null);
+  const [todoEditOptionsDue, setTodoEditOptionsDue] = useState('');
+  const [todoEditOptionsRecurrence, setTodoEditOptionsRecurrence] = useState('none');
   const [taskClientFilter, setTaskClientFilter] = useState('all');
   const [taskCategoryFilter, setTaskCategoryFilter] = useState('all');
   const [taskAssigneeFilter, setTaskAssigneeFilter] = useState('me');
@@ -672,6 +676,71 @@ const AdminDashboard = ({
   const resetTodoAddDraftOptionsForCategory = (categoryKey) => {
     setTodoAddDueDraft((prev) => ({ ...prev, [categoryKey]: '' }));
     setTodoAddRecurrenceDraft((prev) => ({ ...prev, [categoryKey]: 'none' }));
+  };
+
+  const openTodoEditOptionsModal = (c, cycleStart, categoryKey, item) => {
+    setTodoAddOptionsModalCatKey(null);
+    setTodoEditOptionsTarget({
+      clientId: c.id,
+      cycleStart,
+      categoryKey,
+      itemId: item.id,
+    });
+    setTodoEditOptionsDue(asDateInput(item.dueDate));
+    const monthly =
+      item?.recurrence?.type === 'monthly_fixed_day' || !!item?.recurring;
+    setTodoEditOptionsRecurrence(monthly ? 'monthly' : 'none');
+  };
+
+  const applyTodoEditOptionsModal = async () => {
+    if (!todoEditOptionsTarget || !updateClientTodo || !getTodoStateForCycle) {
+      setTodoEditOptionsTarget(null);
+      return;
+    }
+    const { clientId, cycleStart, categoryKey, itemId } = todoEditOptionsTarget;
+    const client = clients.find((cl) => cl.id === clientId);
+    if (!client) {
+      setTodoEditOptionsTarget(null);
+      return;
+    }
+    if (isCycleLocked(client, cycleStart)) {
+      setTodoEditOptionsTarget(null);
+      return;
+    }
+    const todoState = getTodoStateForCycle(client, cycleStart);
+    const catTodo = todoState[categoryKey] || { closed: false, items: [] };
+    const list = catTodo.items || [];
+    const item = list.find((i) => i.id === itemId);
+    if (!item) {
+      setTodoEditOptionsTarget(null);
+      return;
+    }
+    const dueDate = parseDateInputToMs(todoEditOptionsDue);
+    const mode = todoEditOptionsRecurrence;
+    const nextItem = { ...item, dueDate };
+    if (mode === 'monthly') {
+      nextItem.recurring = true;
+      nextItem.recurringId = item.recurringId || item.id;
+      nextItem.recurrence = {
+        type: 'monthly_fixed_day',
+        dayOfMonth: new Date(dueDate || Date.now()).getDate(),
+      };
+    } else {
+      nextItem.recurring = false;
+      nextItem.recurringId = null;
+      nextItem.recurrence = null;
+    }
+    const nextList = list.map((i) => (i.id === itemId ? nextItem : i));
+    setTodoSaving(true);
+    try {
+      await updateClientTodo(client, cycleStart, categoryKey, {
+        ...catTodo,
+        items: nextList,
+      });
+    } finally {
+      setTodoSaving(false);
+      setTodoEditOptionsTarget(null);
+    }
   };
 
   const normalizeTodoAssignees = (item) => {
@@ -2199,39 +2268,20 @@ const AdminDashboard = ({
                                             </span>
                                           )}
                                         </span>
-                                        <input
-                                          type="date"
-                                          value={asDateInput(item.dueDate)}
-                                          onChange={async (e) => {
-                                            if (isCycleLocked(c, cycleStart)) return;
-                                            setTodoSaving(true);
-                                            try {
-                                              const dueDate = parseDateInputToMs(e.target.value);
-                                              const next = items.map((i) =>
-                                                i.id === item.id ? { ...i, dueDate } : i,
-                                              );
-                                              await updateClientTodo(c, cycleStart, catKey, {
-                                                ...catTodo,
-                                                items: next,
-                                              });
-                                            } finally {
-                                              setTodoSaving(false);
-                                            }
-                                          }}
-                                          disabled={todoSaving}
-                                          className="bg-white/90 border border-slate-200 rounded px-1.5 py-1 text-[10px] font-bold"
-                                          title="Optional due date"
-                                        />
                                         <select
-                                          multiple
-                                          value={assignees}
+                                          value={
+                                            assignees[0] ||
+                                            String(user?.email || '').toLowerCase()
+                                          }
                                           onChange={async (e) => {
                                             if (isCycleLocked(c, cycleStart)) return;
-                                            const selected = Array.from(e.target.selectedOptions).map((o) => o.value);
+                                            const v = e.target.value;
                                             setTodoSaving(true);
                                             try {
                                               const next = items.map((i) =>
-                                                i.id === item.id ? { ...i, assigneeEmails: selected } : i,
+                                                i.id === item.id
+                                                  ? { ...i, assigneeEmails: v ? [v] : [] }
+                                                  : i,
                                               );
                                               await updateClientTodo(c, cycleStart, catKey, {
                                                 ...catTodo,
@@ -2242,8 +2292,8 @@ const AdminDashboard = ({
                                             }
                                           }}
                                           disabled={todoSaving}
-                                          className="bg-white/90 border border-slate-200 rounded px-1.5 py-1 text-[10px] font-bold min-w-[120px] h-12"
-                                          title="Assign to one or more users"
+                                          className="min-w-[140px] max-w-[220px] bg-white/90 border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px]"
+                                          title="Assign to user"
                                         >
                                           {assignableEmails.map((email) => (
                                             <option key={email} value={email}>
@@ -2254,50 +2304,14 @@ const AdminDashboard = ({
                                         <button
                                           type="button"
                                           disabled={todoSaving}
-                                          onClick={async () => {
-                                            if (isCycleLocked(c, cycleStart))
-                                              return;
-                                            setTodoSaving(true);
-                                            try {
-                                              const next = items.map((i) => {
-                                                if (i.id !== item.id)
-                                                  return i;
-                                                const nextRecurring =
-                                                  !i.recurring;
-                                                return {
-                                                  ...i,
-                                                  recurring: nextRecurring,
-                                                  recurringId: nextRecurring
-                                                    ? i.recurringId || i.id
-                                                    : null,
-                                                  recurrence: nextRecurring
-                                                    ? {
-                                                        type: 'monthly_fixed_day',
-                                                        dayOfMonth: new Date(
-                                                          i.dueDate || Date.now(),
-                                                        ).getDate(),
-                                                      }
-                                                    : null,
-                                                };
-                                              });
-                                              await updateClientTodo(
-                                                c,
-                                                cycleStart,
-                                                catKey,
-                                                { ...catTodo, items: next },
-                                              );
-                                            } finally {
-                                              setTodoSaving(false);
-                                            }
+                                          onClick={() => {
+                                            setTodoAddOptionsModalCatKey(null);
+                                            openTodoEditOptionsModal(c, cycleStart, catKey, item);
                                           }}
-                                          className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${
-                                            item.recurring
-                                              ? 'bg-[#fd7414] text-white border-[#fd7414]'
-                                              : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
-                                          }`}
-                                          title="Toggle recurring each cycle"
+                                          className="px-3 py-2 rounded-xl bg-white/90 border border-slate-200 text-xs font-black text-slate-600 uppercase tracking-widest hover:bg-white transition-all shrink-0"
+                                          title="Due date and recurrence"
                                         >
-                                          Recurring
+                                          Options
                                         </button>
                                       </li>
                                     )})}
@@ -2380,7 +2394,10 @@ const AdminDashboard = ({
                                   </select>
                                   <button
                                     type="button"
-                                    onClick={() => setTodoAddOptionsModalCatKey(catKey)}
+                                    onClick={() => {
+                                      setTodoEditOptionsTarget(null);
+                                      setTodoAddOptionsModalCatKey(catKey);
+                                    }}
                                     className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-black text-slate-600 uppercase tracking-widest hover:bg-slate-50 transition-all shrink-0"
                                     title="Due date and recurrence"
                                   >
@@ -3068,43 +3085,32 @@ const AdminDashboard = ({
                                                                   </span>
                                                                 </span>
                                                               )}
-                                                              <input
-                                                                type="date"
-                                                                value={asDateInput(item.dueDate)}
-                                                                onChange={async (e) => {
-                                                                  if (isCycleLocked(c, cycleStart)) return;
-                                                                  setTodoSaving(true);
-                                                                  try {
-                                                                    const dueDate = parseDateInputToMs(e.target.value);
-                                                                    const next = items.map((i) =>
-                                                                      i.id === item.id ? { ...i, dueDate } : i
-                                                                    );
-                                                                    await updateClientTodo(c, cycleStart, catKey, { ...catTodo, items: next });
-                                                                  } finally {
-                                                                    setTodoSaving(false);
-                                                                  }
-                                                                }}
-                                                                disabled={todoSaving}
-                                                                className="bg-white/90 border border-slate-200 rounded px-1.5 py-1 text-[10px] font-bold"
-                                                              />
                                                               <select
-                                                                multiple
-                                                                value={assignees}
+                                                                value={
+                                                                  assignees[0] ||
+                                                                  String(user?.email || '').toLowerCase()
+                                                                }
                                                                 onChange={async (e) => {
                                                                   if (isCycleLocked(c, cycleStart)) return;
-                                                                  const selected = Array.from(e.target.selectedOptions).map((o) => o.value);
+                                                                  const v = e.target.value;
                                                                   setTodoSaving(true);
                                                                   try {
                                                                     const next = items.map((i) =>
-                                                                      i.id === item.id ? { ...i, assigneeEmails: selected } : i
+                                                                      i.id === item.id
+                                                                        ? { ...i, assigneeEmails: v ? [v] : [] }
+                                                                        : i
                                                                     );
-                                                                    await updateClientTodo(c, cycleStart, catKey, { ...catTodo, items: next });
+                                                                    await updateClientTodo(c, cycleStart, catKey, {
+                                                                      ...catTodo,
+                                                                      items: next,
+                                                                    });
                                                                   } finally {
                                                                     setTodoSaving(false);
                                                                   }
                                                                 }}
                                                                 disabled={todoSaving}
-                                                                className="bg-white/90 border border-slate-200 rounded px-1.5 py-1 text-[10px] font-bold min-w-[120px] h-12"
+                                                                className="min-w-[140px] max-w-[220px] bg-white/90 border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px]"
+                                                                title="Assign to user"
                                                               >
                                                                 {assignableEmails.map((email) => (
                                                                   <option key={email} value={email}>
@@ -3114,41 +3120,15 @@ const AdminDashboard = ({
                                                               </select>
                                                               <button
                                                                 type="button"
-                                                                onClick={async () => {
-                                                                  if (isCycleLocked(c, cycleStart)) return;
-                                                                  setTodoSaving(true);
-                                                                  try {
-                                                                    const next = items.map((i) => {
-                                                                      if (i.id !== item.id) return i;
-                                                                      const nextRecurring = !i.recurring;
-                                                                      return {
-                                                                        ...i,
-                                                                        recurring: nextRecurring,
-                                                                        recurringId: nextRecurring ? (i.recurringId || i.id) : null,
-                                                                        recurrence: nextRecurring
-                                                                          ? {
-                                                                              type: 'monthly_fixed_day',
-                                                                              dayOfMonth: new Date(
-                                                                                i.dueDate || Date.now(),
-                                                                              ).getDate(),
-                                                                            }
-                                                                          : null,
-                                                                      };
-                                                                    });
-                                                                    await updateClientTodo(c, cycleStart, catKey, { ...catTodo, items: next });
-                                                                  } finally {
-                                                                    setTodoSaving(false);
-                                                                  }
-                                                                }}
                                                                 disabled={todoSaving}
-                                                                className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border transition-colors ${
-                                                                  item.recurring
-                                                                    ? 'bg-[#fd7414] text-white border-[#fd7414]'
-                                                                    : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
-                                                                }`}
-                                                                title="Toggle recurring each cycle"
+                                                                onClick={() => {
+                                                                  setTodoAddOptionsModalCatKey(null);
+                                                                  openTodoEditOptionsModal(c, cycleStart, catKey, item);
+                                                                }}
+                                                                className="px-3 py-2 rounded-xl bg-white/90 border border-slate-200 text-xs font-black text-slate-600 uppercase tracking-widest hover:bg-white transition-all shrink-0"
+                                                                title="Due date and recurrence"
                                                               >
-                                                                Recurring
+                                                                Options
                                                               </button>
                                                               <button
                                                                 type="button"
@@ -3244,7 +3224,10 @@ const AdminDashboard = ({
                                                           </select>
                                                           <button
                                                             type="button"
-                                                            onClick={() => setTodoAddOptionsModalCatKey(catKey)}
+                                                            onClick={() => {
+                                                              setTodoEditOptionsTarget(null);
+                                                              setTodoAddOptionsModalCatKey(catKey);
+                                                            }}
                                                             className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-black text-slate-600 uppercase tracking-widest hover:bg-slate-50 transition-all shrink-0"
                                                             title="Due date and recurrence"
                                                           >
@@ -4568,6 +4551,72 @@ const AdminDashboard = ({
                   {projectEditError}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {todoEditOptionsTarget && (
+        <div className="fixed inset-0 z-[151] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">
+                Edit to-do options
+              </h4>
+              <button
+                type="button"
+                onClick={() => setTodoEditOptionsTarget(null)}
+                className="px-2 py-1 rounded-lg text-xs font-bold text-slate-500 hover:bg-slate-100"
+              >
+                Close
+              </button>
+            </div>
+            <p className="text-[11px] font-bold text-slate-400">
+              Set due date and recurrence, then click Save to apply.
+            </p>
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                Due date
+              </label>
+              <input
+                type="date"
+                value={todoEditOptionsDue}
+                onChange={(e) => setTodoEditOptionsDue(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                Recurrence
+              </label>
+              <select
+                value={todoEditOptionsRecurrence}
+                onChange={(e) => setTodoEditOptionsRecurrence(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+              >
+                <option value="none">No repeat</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setTodoEditOptionsDue('');
+                  setTodoEditOptionsRecurrence('none');
+                }}
+                className="px-3 py-2 rounded-xl text-xs font-black text-slate-500 bg-slate-100 hover:bg-slate-200 uppercase tracking-widest"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                disabled={todoSaving}
+                onClick={() => applyTodoEditOptionsModal()}
+                className="px-3 py-2 rounded-xl text-xs font-black text-white bg-[#fd7414] hover:brightness-95 uppercase tracking-widest disabled:opacity-50"
+              >
+                Save
+              </button>
             </div>
           </div>
         </div>
