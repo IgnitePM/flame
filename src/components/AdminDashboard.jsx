@@ -1144,14 +1144,16 @@ const AdminDashboard = ({
                       className="flex gap-1"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <button
-                        onClick={() => navigateToClient?.(c.id)}
-                        className="px-3 py-2 text-white bg-[#fd7414] rounded-2xl hover:bg-[#e66a12] transition-colors font-black flex items-center gap-2 shadow-sm"
-                        title="Open client page"
-                      >
-                        Open
-                        <ArrowRight className="w-4 h-4" />
-                      </button>
+                      {!isClientPage && (
+                        <button
+                          onClick={() => navigateToClient?.(c.id)}
+                          className="px-3 py-2 text-white bg-[#fd7414] rounded-2xl hover:bg-[#e66a12] transition-colors font-black flex items-center gap-2 shadow-sm"
+                          title="Open client page"
+                        >
+                          Open
+                          <ArrowRight className="w-4 h-4" />
+                        </button>
+                      )}
                       <button
                         onClick={() => {
                           setProjectModal({ ...c, lockClient: true });
