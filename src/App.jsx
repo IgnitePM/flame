@@ -718,7 +718,9 @@ export default function App() {
     if (cycleStart !== currentCycleStart) return {};
     const prevStart = getBillingPeriod(client.billingDay || 1, -1).start;
     const prevData = cycles[String(prevStart)] || {};
-    const categories = Object.keys(client.retainers || {});
+    const categories = [
+      ...new Set([...Object.keys(client.retainers || {}), GENERAL_LABEL]),
+    ];
     const result = {};
     categories.forEach((cat) => {
       const ck = todoCategoryKey(cat);
@@ -749,7 +751,9 @@ export default function App() {
     if (cycles[String(cycleStart)]) return cycles;
     const prevStart = getBillingPeriod(client.billingDay || 1, -1).start;
     const prevData = cycles[String(prevStart)] || {};
-    const categories = Object.keys(client.retainers || {});
+    const categories = [
+      ...new Set([...Object.keys(client.retainers || {}), GENERAL_LABEL]),
+    ];
     cycles[String(cycleStart)] = {};
     categories.forEach((cat) => {
       const ck = todoCategoryKey(cat);
@@ -777,6 +781,19 @@ export default function App() {
     const cycles = ensureCurrentCycleTodoData(client, cycleStart);
     const cycleData = cycles[String(cycleStart)] || {};
     cycles[String(cycleStart)] = { ...cycleData, [categoryKey]: nextCategoryData };
+    await updateDoc(doc(db, 'clients', client.id), { todoCycles: cycles });
+  };
+
+  // Batch update multiple to-do categories in a single Firestore write.
+  // This is important because calling `updateClientTodo` multiple times in a row
+  // would otherwise overwrite earlier category updates based on stale client state.
+  const updateClientTodosBatch = async (client, cycleStart, categoryKeyToData) => {
+    const cycles = ensureCurrentCycleTodoData(client, cycleStart);
+    const cycleData = cycles[String(cycleStart)] || {};
+    cycles[String(cycleStart)] = {
+      ...cycleData,
+      ...categoryKeyToData,
+    };
     await updateDoc(doc(db, 'clients', client.id), { todoCycles: cycles });
   };
 
@@ -1301,6 +1318,7 @@ export default function App() {
         policy={policy}
         getTodoStateForCycle={getTodoStateForCycle}
         updateClientTodo={updateClientTodo}
+              updateClientTodosBatch={updateClientTodosBatch}
         todoCategoryKey={todoCategoryKey}
         updatePolicy={updatePolicy}
       />

@@ -85,6 +85,7 @@ const AdminDashboard = ({
   logAudit,
   getTodoStateForCycle,
   updateClientTodo,
+  updateClientTodosBatch,
   todoCategoryKey,
 }) => {
   const canBilling = currentUserRole === 'admin' || currentUserRole === 'billing';
@@ -136,6 +137,11 @@ const AdminDashboard = ({
   const [clientNotesSaving, setClientNotesSaving] = useState({});
   const [cycleNotesDraft, setCycleNotesDraft] = useState({});
   const [cycleNotesSaving, setCycleNotesSaving] = useState({});
+  const [aiTodoModalOpen, setAiTodoModalOpen] = useState(false);
+  const [aiTodoTranscript, setAiTodoTranscript] = useState('');
+  const [aiTodoCandidates, setAiTodoCandidates] = useState([]);
+  const [aiTodoSelected, setAiTodoSelected] = useState({});
+  const [aiTodoLoading, setAiTodoLoading] = useState(false);
   const [retainerCategoryOpen, setRetainerCategoryOpen] = useState({});
   const [expandedProjectsExpenses, setExpandedProjectsExpenses] = useState({});
   const [todoEditId, setTodoEditId] = useState(null);
@@ -1760,6 +1766,562 @@ const AdminDashboard = ({
                         </div>
                       )}
                     </div>
+
+                    {/* General / Unclassified to-do bucket */}
+                    {isClientPage && getTodoStateForCycle && updateClientTodo && (
+                      (() => {
+                        const cycleStart = mStart;
+                        const generalLabel = 'General / Unclassified';
+                        const catKey = todoCategoryKey(generalLabel);
+                        const todoState = getTodoStateForCycle(c, cycleStart);
+                        const catTodo = todoState[catKey] || {
+                          closed: false,
+                          items: [],
+                        };
+                        const items = catTodo.items || [];
+                        const allDone =
+                          items.length > 0 && items.every((i) => i.done);
+
+                        return (
+                          <div className="pt-2 border-t border-slate-100">
+                            <div className="flex items-center justify-between gap-3 mb-3">
+                              <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                To-do — {generalLabel}
+                              </h5>
+                              {catTodo.closed && (
+                                <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[9px] font-bold uppercase">
+                                  Closed
+                                </span>
+                              )}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAiTodoTranscript('');
+                                setAiTodoCandidates([]);
+                                setAiTodoSelected({});
+                                setAiTodoModalOpen(true);
+                              }}
+                              className="w-full px-4 py-2 rounded-2xl bg-slate-900 text-white font-black text-[10px] uppercase tracking-widest hover:bg-black transition-colors"
+                              title="Extract action items from a meeting transcript and add them to this cycle"
+                            >
+                              AI Extract to-dos from transcript
+                            </button>
+
+                            {catTodo.closed ? (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (isCycleLocked(c, cycleStart))
+                                    return;
+                                  setTodoSaving(true);
+                                  try {
+                                    await updateClientTodo(c, cycleStart, catKey, {
+                                      ...catTodo,
+                                      closed: false,
+                                    });
+                                  } finally {
+                                    setTodoSaving(false);
+                                  }
+                                }}
+                                disabled={todoSaving}
+                                className="text-xs font-bold text-slate-600 hover:text-slate-900"
+                              >
+                                Re-open category
+                              </button>
+                            ) : (
+                              <>
+                                {items.length === 0 ? (
+                                  <p className="text-xs italic text-slate-400 mb-2">
+                                    No to-do items yet.
+                                  </p>
+                                ) : (
+                                  <ul className="space-y-2 mb-3">
+                                    {items.map((item) => (
+                                      <li
+                                        key={item.id}
+                                        className="flex items-center gap-2 bg-white border border-slate-100 rounded-lg p-2"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={!!item.done}
+                                          onChange={async () => {
+                                            if (isCycleLocked(c, cycleStart))
+                                              return;
+                                            setTodoSaving(true);
+                                            try {
+                                              const next = items.map((i) =>
+                                                i.id === item.id
+                                                  ? {
+                                                      ...i,
+                                                      done: !i.done,
+                                                      doneAt: !i.done
+                                                        ? Date.now()
+                                                        : null,
+                                                    }
+                                                  : i,
+                                              );
+                                              await updateClientTodo(
+                                                c,
+                                                cycleStart,
+                                                catKey,
+                                                { ...catTodo, items: next },
+                                              );
+                                            } finally {
+                                              setTodoSaving(false);
+                                            }
+                                          }}
+                                          disabled={todoSaving}
+                                          className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
+                                        />
+                                        <span className={`flex items-center gap-2 flex-1 ${item.done ? 'line-through text-slate-400 opacity-70' : 'text-slate-800'}`}>
+                                          <span>{item.text || '(no text)'}</span>
+                                          {item.recurring && (
+                                            <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[9px] font-black uppercase tracking-widest">
+                                              Recurring
+                                            </span>
+                                          )}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          disabled={todoSaving}
+                                          onClick={async () => {
+                                            if (isCycleLocked(c, cycleStart))
+                                              return;
+                                            setTodoSaving(true);
+                                            try {
+                                              const next = items.map((i) => {
+                                                if (i.id !== item.id)
+                                                  return i;
+                                                const nextRecurring =
+                                                  !i.recurring;
+                                                return {
+                                                  ...i,
+                                                  recurring: nextRecurring,
+                                                  recurringId: nextRecurring
+                                                    ? i.recurringId || i.id
+                                                    : null,
+                                                };
+                                              });
+                                              await updateClientTodo(
+                                                c,
+                                                cycleStart,
+                                                catKey,
+                                                { ...catTodo, items: next },
+                                              );
+                                            } finally {
+                                              setTodoSaving(false);
+                                            }
+                                          }}
+                                          className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${
+                                            item.recurring
+                                              ? 'bg-[#fd7414] text-white border-[#fd7414]'
+                                              : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+                                          }`}
+                                          title="Toggle recurring each cycle"
+                                        >
+                                          Recurring
+                                        </button>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+
+                                <div className="flex gap-2">
+                                  <input
+                                    type="text"
+                                    value={todoAddTextDraft[catKey] || ''}
+                                    onChange={(e) =>
+                                      setTodoAddTextDraft((prev) => ({
+                                        ...prev,
+                                        [catKey]: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="New to-do..."
+                                    className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                    onKeyDown={(e) => {
+                                      if (e.key !== 'Enter') return;
+                                      e.preventDefault();
+                                      if (isCycleLocked(c, cycleStart))
+                                        return;
+                                      const text = (
+                                        todoAddTextDraft[catKey] || ''
+                                      ).trim();
+                                      if (!text) return;
+                                      setTodoSaving(true);
+                                      (async () => {
+                                        try {
+                                          const newItem = {
+                                            id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                                            text,
+                                            done: false,
+                                            doneAt: null,
+                                            recurring: false,
+                                            recurringId: null,
+                                          };
+                                          await updateClientTodo(c, cycleStart, catKey, {
+                                            ...catTodo,
+                                            closed: false,
+                                            items: [...items, newItem],
+                                          });
+                                          setTodoAddTextDraft((prev) => ({
+                                            ...prev,
+                                            [catKey]: '',
+                                          }));
+                                        } finally {
+                                          setTodoSaving(false);
+                                        }
+                                      })();
+                                    }}
+                                  />
+                                  <button
+                                    type="button"
+                                    disabled={
+                                      todoSaving ||
+                                      !String(todoAddTextDraft[catKey] || '').trim()
+                                    }
+                                    onClick={async () => {
+                                      if (isCycleLocked(c, cycleStart))
+                                        return;
+                                      const text = (
+                                        todoAddTextDraft[catKey] || ''
+                                      ).trim();
+                                      if (!text) return;
+                                      setTodoSaving(true);
+                                      try {
+                                        const newItem = {
+                                          id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                                          text,
+                                          done: false,
+                                          doneAt: null,
+                                          recurring: false,
+                                          recurringId: null,
+                                        };
+                                        await updateClientTodo(c, cycleStart, catKey, {
+                                          ...catTodo,
+                                          closed: false,
+                                          items: [...items, newItem],
+                                        });
+                                        setTodoAddTextDraft((prev) => ({
+                                          ...prev,
+                                          [catKey]: '',
+                                        }));
+                                      } finally {
+                                        setTodoSaving(false);
+                                      }
+                                    }}
+                                    className="px-4 py-2 rounded-xl bg-[#fd7414] text-white font-bold text-sm disabled:opacity-40"
+                                  >
+                                    Add
+                                  </button>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    if (todoSaving) return;
+                                    if (isCycleLocked(c, cycleStart))
+                                      return;
+                                    if (!allDone) return;
+                                    setTodoSaving(true);
+                                    try {
+                                      await updateClientTodo(c, cycleStart, catKey, {
+                                        ...catTodo,
+                                        closed: true,
+                                      });
+                                    } finally {
+                                      setTodoSaving(false);
+                                    }
+                                  }}
+                                  disabled={todoSaving || !allDone}
+                                  className={`text-xs font-bold hover:underline ${
+                                    allDone
+                                      ? 'text-emerald-600'
+                                      : 'text-slate-400 cursor-not-allowed'
+                                  }`}
+                                  title={
+                                    allDone
+                                      ? 'Close category when all items are done'
+                                      : 'Check off all sub items to close this category'
+                                  }
+                                >
+                                  Close category for this cycle
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })()
+                    )}
+
+                    {isClientPage && aiTodoModalOpen && (
+                      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[200] animate-in fade-in">
+                        <div className="bg-white rounded-[32px] w-full max-w-3xl shadow-2xl overflow-hidden">
+                          <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                            <div>
+                              <h3 className="font-black text-2xl text-slate-900">
+                                AI Extract to-dos
+                              </h3>
+                              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                                Upload/paste meeting transcript, then review
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => setAiTodoModalOpen(false)}
+                              className="p-2 bg-white rounded-full hover:bg-slate-100 border border-slate-200"
+                              title="Close"
+                            >
+                              <X className="w-5 h-5 text-slate-500" />
+                            </button>
+                          </div>
+
+                          <div className="p-8 space-y-5">
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                                Meeting transcript (plain text)
+                              </label>
+                              <textarea
+                                value={aiTodoTranscript}
+                                onChange={(e) => setAiTodoTranscript(e.target.value)}
+                                className="w-full bg-white border border-slate-200 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[220px] font-medium text-sm"
+                                placeholder="Paste the transcript or notes here. Gemini will extract action items and map them to retainer categories."
+                              />
+                            </div>
+
+                            <div className="flex justify-between items-center gap-3">
+                              <button
+                                type="button"
+                                disabled={aiTodoLoading}
+                                onClick={async () => {
+                                  const transcript = (aiTodoTranscript || '').trim();
+                                  if (!transcript) {
+                                    window.alert('Paste meeting transcript first.');
+                                    return;
+                                  }
+
+                                  setAiTodoLoading(true);
+                                  try {
+                                    const retainerCategories = Object.keys(
+                                      c.retainers || {},
+                                    );
+                                    const res = await fetch(
+                                      '/.netlify/functions/gemini-extract-todos',
+                                      {
+                                        method: 'POST',
+                                        headers: {
+                                          'Content-Type': 'application/json',
+                                        },
+                                        body: JSON.stringify({
+                                          transcript,
+                                          clientName: c.name,
+                                          retainerCategories,
+                                          generalCategoryLabel:
+                                            'General / Unclassified',
+                                        }),
+                                      },
+                                    );
+                                    const data = await res.json().catch(() => null);
+                                    if (!res.ok) {
+                                      throw new Error(data?.error || 'AI extract failed.');
+                                    }
+                                    const todos = Array.isArray(data?.todos)
+                                      ? data.todos
+                                      : [];
+                                    const normalized = todos.map((t, idx) => ({
+                                      id: String(t.id || `ai_${Date.now()}_${idx}`),
+                                      text: String(t.text || '').trim(),
+                                      category: String(
+                                        t.category || 'General / Unclassified',
+                                      ),
+                                    })).filter((t) => t.text);
+
+                                    setAiTodoCandidates(normalized);
+                                    const selected = {};
+                                    normalized.forEach((t) => {
+                                      selected[t.id] = true;
+                                    });
+                                    setAiTodoSelected(selected);
+                                  } catch (err) {
+                                    console.error(err);
+                                    window.alert(
+                                      'Could not extract to-dos from transcript.\n\n' +
+                                        (err?.message || String(err)),
+                                    );
+                                  } finally {
+                                    setAiTodoLoading(false);
+                                  }
+                                }}
+                                className="bg-black text-white px-8 py-3 rounded-2xl font-black shadow-lg active:scale-95 transition-all disabled:opacity-50"
+                              >
+                                {aiTodoLoading ? 'Extracting…' : 'Extract to-dos'}
+                              </button>
+
+                              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                Review + select what to add
+                              </div>
+                            </div>
+
+                            {aiTodoCandidates.length > 0 && (
+                              <div className="space-y-3">
+                                <div className="flex items-center justify-between gap-3">
+                                  <h4 className="text-[12px] font-black text-slate-900">
+                                    Proposed items ({aiTodoCandidates.length})
+                                  </h4>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const allChecked = aiTodoCandidates.every(
+                                        (t) => aiTodoSelected[t.id],
+                                      );
+                                      const next = {};
+                                      aiTodoCandidates.forEach((t) => {
+                                        next[t.id] = !allChecked;
+                                      });
+                                      setAiTodoSelected(next);
+                                    }}
+                                    className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-[10px] uppercase tracking-widest"
+                                  >
+                                    Toggle select all
+                                  </button>
+                                </div>
+
+                                <div className="max-h-[280px] overflow-y-auto space-y-2 pr-2">
+                                  {aiTodoCandidates.map((t) => (
+                                    <label
+                                      key={t.id}
+                                      className="flex items-start gap-3 bg-slate-50 border border-slate-200 rounded-2xl p-3 hover:bg-slate-100 transition-colors cursor-pointer"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={!!aiTodoSelected[t.id]}
+                                        onChange={() =>
+                                          setAiTodoSelected((prev) => ({
+                                            ...prev,
+                                            [t.id]: !prev[t.id],
+                                          }))
+                                        }
+                                        className="mt-1"
+                                      />
+                                      <div className="flex-1 min-w-0">
+                                        <div className="text-sm font-black text-slate-900 line-clamp-3">
+                                          {t.text}
+                                        </div>
+                                        <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1">
+                                          Category: {t.category}
+                                        </div>
+                                      </div>
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="flex justify-end gap-3 pt-2">
+                              <button
+                                type="button"
+                                onClick={() => setAiTodoModalOpen(false)}
+                                className="px-5 py-3 rounded-2xl font-black text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                disabled={
+                                  aiTodoLoading ||
+                                  aiTodoCandidates.filter((t) => aiTodoSelected[t.id])
+                                    .length === 0
+                                }
+                                onClick={async () => {
+                                  const selected = aiTodoCandidates.filter(
+                                    (t) => aiTodoSelected[t.id],
+                                  );
+                                  if (!selected.length) return;
+
+                                  const cycleStart = mStart;
+                                  const todoState = getTodoStateForCycle(
+                                    c,
+                                    cycleStart,
+                                  );
+
+                                  // Build next todoCycles updates in-memory,
+                                  // then write everything in one Firestore update.
+                                  const categoryKeyToNext = {};
+                                  const byCategory = {};
+                                  selected.forEach((t) => {
+                                    const key = todoCategoryKey(t.category);
+                                    if (!byCategory[key]) {
+                                      byCategory[key] = [];
+                                    }
+                                    byCategory[key].push(t);
+                                  });
+
+                                  Object.entries(byCategory).forEach(
+                                    ([catKey, proposals]) => {
+                                      const existing = todoState[catKey]
+                                        ? todoState[catKey].items || []
+                                        : [];
+                                      const existingTextSet = new Set(
+                                        existing.map((i) =>
+                                          String(i.text || '')
+                                            .trim()
+                                            .toLowerCase(),
+                                        ),
+                                      );
+                                      const newItems = proposals
+                                        .map((p) => {
+                                          const text = String(p.text || '').trim();
+                                          if (!text) return null;
+                                          const norm = text.toLowerCase();
+                                          if (existingTextSet.has(norm))
+                                            return null;
+                                          return {
+                                            id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                                            text,
+                                            done: false,
+                                            doneAt: null,
+                                            recurring: false,
+                                            recurringId: null,
+                                          };
+                                        })
+                                        .filter(Boolean);
+
+                                      const baseCatTodo = todoState[catKey] || {
+                                        closed: false,
+                                        items: [],
+                                      };
+                                      categoryKeyToNext[catKey] = {
+                                        ...baseCatTodo,
+                                        closed: false,
+                                        items: [...existing, ...newItems],
+                                      };
+                                    },
+                                  );
+
+                                  setAiTodoLoading(true);
+                                  try {
+                                    await updateClientTodosBatch(
+                                      c,
+                                      cycleStart,
+                                      categoryKeyToNext,
+                                    );
+                                    setAiTodoModalOpen(false);
+                                    setAiTodoTranscript('');
+                                    setAiTodoCandidates([]);
+                                    setAiTodoSelected({});
+                                  } finally {
+                                    setAiTodoLoading(false);
+                                  }
+                                }}
+                                className="bg-[#fd7414] text-white px-8 py-3 rounded-2xl font-black shadow-lg active:scale-95 transition-all disabled:opacity-50"
+                              >
+                                Add to Categories
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {c.retainers &&
                       Object.keys(c.retainers).length > 0 &&
