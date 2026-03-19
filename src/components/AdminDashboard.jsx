@@ -936,15 +936,20 @@ const AdminDashboard = ({
               />
               <button
                 onClick={async () => {
-                  if (newClientName) {
+                  if (!newClientName?.trim()) return;
+                  try {
                     await addDoc(collection('clients'), {
-                      name: newClientName,
+                      name: newClientName.trim(),
                       status: 'active',
                       hourlyRate: 100,
                       billingDay: 1,
                       retainers: {},
+                      clientEmails: [],
                     });
                     setNewClientName('');
+                  } catch (err) {
+                    console.error('Create client failed:', err);
+                    window.alert('Could not create client. You may need admin or billing access.\n\n' + (err?.message || String(err)));
                   }
                 }}
                 className="bg-black text-white px-10 py-4 rounded-3xl font-black shadow-lg active:scale-95 transition-all"
@@ -1521,15 +1526,14 @@ const AdminDashboard = ({
                                     />
                                   </div>
 
-                                  {retainerCategoryOpen[`${c.id}__${cycleStart}__${catKey}`] && (
-                                    <div className="mt-2 space-y-4">
+                                  <div className="mt-2 flex flex-col space-y-4">
                                       {(() => {
                                         const categoryTasks = periodTasks.filter((t) => t.projectName === cat);
                                         const categoryExps = periodExps.filter((e) => e.category === cat);
                                         const catIsDollar = cat === 'Social Ad Budget' || c?.retainerUnits?.[cat] === 'dollar';
                                         return (
                                           <>
-                                            <div>
+                                            {retainerCategoryOpen[`${c.id}__${cycleStart}__${catKey}`] && (<div style={{ order: 30 }}>
                                               <h6 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
                                                 Logged tasks ({categoryTasks.length})
                                               </h6>
@@ -1573,8 +1577,8 @@ const AdminDashboard = ({
                                                   ))}
                                                 </div>
                                               )}
-                                            </div>
-                                            <div>
+                                            </div>)}
+                                            {retainerCategoryOpen[`${c.id}__${cycleStart}__${catKey}`] && (<div style={{ order: 40 }}>
                                               <h6 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
                                                 Logged expenses ({categoryExps.length})
                                               </h6>
@@ -1623,14 +1627,14 @@ const AdminDashboard = ({
                                                   ))}
                                                 </div>
                                               )}
-                                            </div>
+                                            </div>)}
                                             {getTodoStateForCycle && updateClientTodo && (() => {
                                               const todoState = getTodoStateForCycle(c, cycleStart);
                                               const catTodo = todoState[catKey] || { closed: false, items: [] };
                                               const items = catTodo.items || [];
                                               const allDone = items.length > 0 && items.every((i) => i.done);
                                               return (
-                                                <div>
+                                                <div style={{ order: 10 }}>
                                                   <h6 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2 flex-wrap">
                                                     To-do
                                                     {catTodo.closed && (
@@ -1716,7 +1720,11 @@ const AdminDashboard = ({
                                                                 />
                                                               ) : (
                                                                 <span
-                                                                  className={`flex-1 text-sm ${item.done ? 'line-through text-slate-400' : 'text-slate-800'}`}
+                                                                  className={`flex-1 text-sm ${
+                                                                    item.done
+                                                                      ? 'line-through text-slate-400 opacity-70'
+                                                                      : 'text-slate-800'
+                                                                  }`}
                                                                   onDoubleClick={() => {
                                                                     if (isCycleLocked(c, cycleStart)) return;
                                                                     setTodoEditId(item.id);
@@ -1747,35 +1755,86 @@ const AdminDashboard = ({
                                                           ))}
                                                         </ul>
                                                       )}
-                                                      <div className="flex flex-wrap gap-2">
-                                                        <button
-                                                          type="button"
-                                                          onClick={async () => {
-                                                            if (isCycleLocked(c, cycleStart)) return;
-                                                            const text = window.prompt('New to-do item');
-                                                            if (text == null || text.trim() === '') return;
-                                                            setTodoSaving(true);
-                                                            try {
-                                                              const newItem = {
-                                                                id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-                                                                text: text.trim(),
-                                                                done: false,
-                                                                doneAt: null,
-                                                              };
-                                                              await updateClientTodo(c, cycleStart, catKey, {
-                                                                ...catTodo,
-                                                                closed: false,
-                                                                items: [...items, newItem],
-                                                              });
-                                                            } finally {
-                                                              setTodoSaving(false);
+                                                      <div className="space-y-2">
+                                                        <div className="flex gap-2">
+                                                          <input
+                                                            type="text"
+                                                            value={todoAddTextDraft[catKey] || ''}
+                                                            onChange={(e) =>
+                                                              setTodoAddTextDraft((prev) => ({
+                                                                ...prev,
+                                                                [catKey]: e.target.value,
+                                                              }))
                                                             }
-                                                          }}
-                                                          disabled={todoSaving}
-                                                          className="text-xs font-bold text-[#fd7414] hover:underline"
-                                                        >
-                                                          + Add item
-                                                        </button>
+                                                            placeholder="New to-do..."
+                                                            className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                                            onKeyDown={(e) => {
+                                                              if (e.key !== 'Enter') return;
+                                                              e.preventDefault();
+                                                              (async () => {
+                                                                if (isCycleLocked(c, cycleStart)) return;
+                                                                const text = (todoAddTextDraft[catKey] || '').trim();
+                                                                if (!text) return;
+                                                                setTodoSaving(true);
+                                                                try {
+                                                                  const newItem = {
+                                                                    id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                                                                    text,
+                                                                    done: false,
+                                                                    doneAt: null,
+                                                                  };
+                                                                  await updateClientTodo(c, cycleStart, catKey, {
+                                                                    ...catTodo,
+                                                                    closed: false,
+                                                                    items: [...items, newItem],
+                                                                  });
+                                                                  setTodoAddTextDraft((prev) => ({
+                                                                    ...prev,
+                                                                    [catKey]: '',
+                                                                  }));
+                                                                } finally {
+                                                                  setTodoSaving(false);
+                                                                }
+                                                              })();
+                                                            }}
+                                                          />
+                                                          <button
+                                                            type="button"
+                                                            disabled={
+                                                              todoSaving ||
+                                                              !String(todoAddTextDraft[catKey] || '').trim()
+                                                            }
+                                                            onClick={async () => {
+                                                              if (isCycleLocked(c, cycleStart)) return;
+                                                              const text = (todoAddTextDraft[catKey] || '').trim();
+                                                              if (!text) return;
+                                                              setTodoSaving(true);
+                                                              try {
+                                                                const newItem = {
+                                                                  id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                                                                  text,
+                                                                  done: false,
+                                                                  doneAt: null,
+                                                                };
+                                                                await updateClientTodo(c, cycleStart, catKey, {
+                                                                  ...catTodo,
+                                                                  closed: false,
+                                                                  items: [...items, newItem],
+                                                                });
+                                                                setTodoAddTextDraft((prev) => ({
+                                                                  ...prev,
+                                                                  [catKey]: '',
+                                                                }));
+                                                              } finally {
+                                                                setTodoSaving(false);
+                                                              }
+                                                            }}
+                                                            className="px-4 py-2 rounded-xl bg-[#fd7414] text-white font-bold text-sm disabled:opacity-40"
+                                                          >
+                                                            Add
+                                                          </button>
+                                                        </div>
+
                                                         {allDone && (
                                                           <button
                                                             type="button"
@@ -1800,7 +1859,7 @@ const AdminDashboard = ({
                                                 </div>
                                               );
                                             })()}
-                                            <div>
+                                            <div style={{ order: 20 }}>
                                               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
                                                 Cycle note
                                               </label>
@@ -1875,7 +1934,6 @@ const AdminDashboard = ({
                                         );
                                       })()}
                                     </div>
-                                  )}
                                 </div>
                               );
                             })}

@@ -43,7 +43,7 @@ service cloud.firestore {
 
     match /clients/{clientId} {
       allow read: if clientAllowsEmail(clientId);
-      allow create: if isAdmin();
+      allow create: if isBilling();
       // Billing can update billing related fields; keep simple: admin/billing can update.
       // Staff can update notes/cycle notes as part of kiosk/admin workflows.
       allow update: if isSignedIn() && isAnyStaff();
