@@ -657,6 +657,16 @@ const AdminDashboard = ({
     return new Date(y, m - 1, d, 12, 0, 0, 0).getTime();
   };
 
+  const getDraftRecurrence = (categoryKey, dueDateMs) => {
+    const mode = String(todoAddRecurrenceDraft?.[categoryKey] || 'none');
+    if (mode !== 'monthly') return null;
+    const source = dueDateMs || Date.now();
+    return {
+      type: 'monthly_fixed_day',
+      dayOfMonth: new Date(source).getDate(),
+    };
+  };
+
   const normalizeTodoAssignees = (item) => {
     const raw = Array.isArray(item?.assigneeEmails)
       ? item.assigneeEmails
@@ -2268,7 +2278,7 @@ const AdminDashboard = ({
                                   </ul>
                                 )}
 
-                                <div className="grid grid-cols-1 lg:grid-cols-4 gap-2">
+                                <div className="grid grid-cols-1 lg:grid-cols-5 gap-2">
                                   <input
                                     type="text"
                                     value={todoAddTextDraft[catKey] || ''}
@@ -2292,6 +2302,7 @@ const AdminDashboard = ({
                                       setTodoSaving(true);
                                       (async () => {
                                         try {
+                                          const dueDate = parseDateInputToMs(todoAddDueDraft[catKey] || '');
                                           const newItem = {
                                             id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
                                             text,
@@ -2299,9 +2310,9 @@ const AdminDashboard = ({
                                             doneAt: null,
                                             recurring: false,
                                             recurringId: null,
-                                            dueDate: parseDateInputToMs(todoAddDueDraft[catKey] || ''),
+                                            dueDate,
                                             assigneeEmails: (todoAddAssigneesDraft[catKey] || [String(user?.email || '').toLowerCase()]).filter(Boolean),
-                                            recurrence: null,
+                                            recurrence: getDraftRecurrence(catKey, dueDate),
                                           };
                                           await updateClientTodo(c, cycleStart, catKey, {
                                             ...catTodo,
@@ -2315,6 +2326,10 @@ const AdminDashboard = ({
                                           setTodoAddDueDraft((prev) => ({
                                             ...prev,
                                             [catKey]: '',
+                                          }));
+                                          setTodoAddRecurrenceDraft((prev) => ({
+                                            ...prev,
+                                            [catKey]: 'none',
                                           }));
                                         } finally {
                                           setTodoSaving(false);
@@ -2352,6 +2367,20 @@ const AdminDashboard = ({
                                       </option>
                                     ))}
                                   </select>
+                                  <select
+                                    value={todoAddRecurrenceDraft[catKey] || 'none'}
+                                    onChange={(e) =>
+                                      setTodoAddRecurrenceDraft((prev) => ({
+                                        ...prev,
+                                        [catKey]: e.target.value,
+                                      }))
+                                    }
+                                    className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                    title="Recurring due date"
+                                  >
+                                    <option value="none">No repeat</option>
+                                    <option value="monthly">Monthly</option>
+                                  </select>
                                   <button
                                     type="button"
                                     disabled={
@@ -2367,16 +2396,17 @@ const AdminDashboard = ({
                                       if (!text) return;
                                       setTodoSaving(true);
                                       try {
-                                        const newItem = {
+                                          const dueDate = parseDateInputToMs(todoAddDueDraft[catKey] || '');
+                                          const newItem = {
                                           id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
                                           text,
                                           done: false,
                                           doneAt: null,
                                           recurring: false,
                                           recurringId: null,
-                                          dueDate: parseDateInputToMs(todoAddDueDraft[catKey] || ''),
+                                            dueDate,
                                           assigneeEmails: (todoAddAssigneesDraft[catKey] || [String(user?.email || '').toLowerCase()]).filter(Boolean),
-                                          recurrence: null,
+                                            recurrence: getDraftRecurrence(catKey, dueDate),
                                         };
                                         await updateClientTodo(c, cycleStart, catKey, {
                                           ...catTodo,
@@ -2390,6 +2420,10 @@ const AdminDashboard = ({
                                         setTodoAddDueDraft((prev) => ({
                                           ...prev,
                                           [catKey]: '',
+                                        }));
+                                        setTodoAddRecurrenceDraft((prev) => ({
+                                          ...prev,
+                                          [catKey]: 'none',
                                         }));
                                       } finally {
                                         setTodoSaving(false);
@@ -3140,7 +3174,7 @@ const AdminDashboard = ({
                                                         </ul>
                                                       )}
                                                       <div className="space-y-2">
-                                                        <div className="grid grid-cols-1 lg:grid-cols-4 gap-2">
+                                                        <div className="grid grid-cols-1 lg:grid-cols-5 gap-2">
                                                           <input
                                                             type="text"
                                                             value={todoAddTextDraft[catKey] || ''}
@@ -3161,6 +3195,7 @@ const AdminDashboard = ({
                                                                 if (!text) return;
                                                                 setTodoSaving(true);
                                                                 try {
+                                                                  const dueDate = parseDateInputToMs(todoAddDueDraft[catKey] || '');
                                                                   const newItem = {
                                                                     id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
                                                                     text,
@@ -3168,9 +3203,9 @@ const AdminDashboard = ({
                                                                     doneAt: null,
                                                                     recurring: false,
                                                                     recurringId: null,
-                                                                    dueDate: parseDateInputToMs(todoAddDueDraft[catKey] || ''),
+                                                                    dueDate,
                                                                     assigneeEmails: (todoAddAssigneesDraft[catKey] || [String(user?.email || '').toLowerCase()]).filter(Boolean),
-                                                                    recurrence: null,
+                                                                    recurrence: getDraftRecurrence(catKey, dueDate),
                                                                   };
                                                                   await updateClientTodo(c, cycleStart, catKey, {
                                                                     ...catTodo,
@@ -3184,6 +3219,10 @@ const AdminDashboard = ({
                                                                   setTodoAddDueDraft((prev) => ({
                                                                     ...prev,
                                                                     [catKey]: '',
+                                                                  }));
+                                                                  setTodoAddRecurrenceDraft((prev) => ({
+                                                                    ...prev,
+                                                                    [catKey]: 'none',
                                                                   }));
                                                                 } finally {
                                                                   setTodoSaving(false);
@@ -3219,6 +3258,19 @@ const AdminDashboard = ({
                                                               </option>
                                                             ))}
                                                           </select>
+                                                          <select
+                                                            value={todoAddRecurrenceDraft[catKey] || 'none'}
+                                                            onChange={(e) =>
+                                                              setTodoAddRecurrenceDraft((prev) => ({
+                                                                ...prev,
+                                                                [catKey]: e.target.value,
+                                                              }))
+                                                            }
+                                                            className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                                          >
+                                                            <option value="none">No repeat</option>
+                                                            <option value="monthly">Monthly</option>
+                                                          </select>
                                                           <button
                                                             type="button"
                                                             disabled={
@@ -3231,6 +3283,7 @@ const AdminDashboard = ({
                                                               if (!text) return;
                                                               setTodoSaving(true);
                                                               try {
+                                                                const dueDate = parseDateInputToMs(todoAddDueDraft[catKey] || '');
                                                                 const newItem = {
                                                                   id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
                                                                   text,
@@ -3238,9 +3291,9 @@ const AdminDashboard = ({
                                                                   doneAt: null,
                                                                   recurring: false,
                                                                   recurringId: null,
-                                                                  dueDate: parseDateInputToMs(todoAddDueDraft[catKey] || ''),
+                                                                  dueDate,
                                                                   assigneeEmails: (todoAddAssigneesDraft[catKey] || [String(user?.email || '').toLowerCase()]).filter(Boolean),
-                                                                  recurrence: null,
+                                                                  recurrence: getDraftRecurrence(catKey, dueDate),
                                                                 };
                                                                 await updateClientTodo(c, cycleStart, catKey, {
                                                                   ...catTodo,
@@ -3254,6 +3307,10 @@ const AdminDashboard = ({
                                                                 setTodoAddDueDraft((prev) => ({
                                                                   ...prev,
                                                                   [catKey]: '',
+                                                                }));
+                                                                setTodoAddRecurrenceDraft((prev) => ({
+                                                                  ...prev,
+                                                                  [catKey]: 'none',
                                                                 }));
                                                               } finally {
                                                                 setTodoSaving(false);

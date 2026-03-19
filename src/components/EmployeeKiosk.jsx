@@ -50,6 +50,7 @@ const EmployeeKiosk = ({
   const [todoSaving, setTodoSaving] = React.useState(false);
   const [todoDueDate, setTodoDueDate] = React.useState('');
   const [todoMineOnly, setTodoMineOnly] = React.useState(true);
+  const [todoRecurrenceMode, setTodoRecurrenceMode] = React.useState('none');
 
   const safeCategoryKey = (category) =>
     String(category)
@@ -85,6 +86,14 @@ const EmployeeKiosk = ({
     if (due - now <= fiveDays)
       return 'bg-emerald-600 border border-emerald-700 text-white';
     return 'bg-white border border-slate-100 text-slate-800';
+  };
+
+  const getDraftRecurrence = (dueDateMs) => {
+    if (todoRecurrenceMode !== 'monthly') return null;
+    return {
+      type: 'monthly_fixed_day',
+      dayOfMonth: new Date(dueDateMs || Date.now()).getDate(),
+    };
   };
 
   // When a task is actively running, use the active task's client/category
@@ -543,11 +552,17 @@ const EmployeeKiosk = ({
                                         if (e.key === 'Enter') {
                                           e.preventDefault();
                                           if (todoNewText.trim()) {
+                                            const dueDate = parseDateInputToMs(todoDueDate);
                                             const newItem = {
                                               id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
                                               text: todoNewText.trim(),
                                               done: false,
                                               doneAt: null,
+                                              recurring: false,
+                                              recurringId: null,
+                                              dueDate,
+                                              assigneeEmails: [String(user?.email || '').toLowerCase()].filter(Boolean),
+                                              recurrence: getDraftRecurrence(dueDate),
                                             };
                                             setTodoSaving(true);
                                             updateClientTodo(selectedClientObj, cycleStart, catKey, {
@@ -557,6 +572,8 @@ const EmployeeKiosk = ({
                                             }).finally(() => {
                                               setTodoSaving(false);
                                               setTodoNewText('');
+                                              setTodoDueDate('');
+                                              setTodoRecurrenceMode('none');
                                             });
                                           }
                                         }
@@ -568,11 +585,20 @@ const EmployeeKiosk = ({
                                       onChange={(e) => setTodoDueDate(e.target.value)}
                                       className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414] w-[150px]"
                                     />
+                                    <select
+                                      value={todoRecurrenceMode}
+                                      onChange={(e) => setTodoRecurrenceMode(e.target.value)}
+                                      className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                    >
+                                      <option value="none">No repeat</option>
+                                      <option value="monthly">Monthly</option>
+                                    </select>
                                     <button
                                       type="button"
                                       disabled={!todoNewText.trim() || todoSaving}
                                       onClick={async () => {
                                         if (!todoNewText.trim()) return;
+                                        const dueDate = parseDateInputToMs(todoDueDate);
                                         const newItem = {
                                           id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
                                           text: todoNewText.trim(),
@@ -580,9 +606,9 @@ const EmployeeKiosk = ({
                                           doneAt: null,
                                           recurring: false,
                                           recurringId: null,
-                                          dueDate: parseDateInputToMs(todoDueDate),
+                                          dueDate,
                                           assigneeEmails: [String(user?.email || '').toLowerCase()].filter(Boolean),
-                                          recurrence: null,
+                                          recurrence: getDraftRecurrence(dueDate),
                                         };
                                         setTodoSaving(true);
                                         try {
@@ -592,6 +618,8 @@ const EmployeeKiosk = ({
                                             items: [...(catTodo.items || []), newItem],
                                           });
                                           setTodoNewText('');
+                                          setTodoDueDate('');
+                                          setTodoRecurrenceMode('none');
                                         } finally {
                                           setTodoSaving(false);
                                         }
@@ -942,6 +970,7 @@ const EmployeeKiosk = ({
                                         if (e.key === 'Enter') {
                                           e.preventDefault();
                                           if (todoNewText.trim()) {
+                                            const dueDate = parseDateInputToMs(todoDueDate);
                                             const newItem = {
                                               id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
                                               text: todoNewText.trim(),
@@ -949,9 +978,9 @@ const EmployeeKiosk = ({
                                               doneAt: null,
                                               recurring: false,
                                               recurringId: null,
-                                              dueDate: parseDateInputToMs(todoDueDate),
+                                              dueDate,
                                               assigneeEmails: [String(user?.email || '').toLowerCase()].filter(Boolean),
-                                              recurrence: null,
+                                              recurrence: getDraftRecurrence(dueDate),
                                             };
                                             setTodoSaving(true);
                                             updateClientTodo(selectedClientObj, cycleStart, catKey, {
@@ -962,6 +991,7 @@ const EmployeeKiosk = ({
                                               setTodoSaving(false);
                                               setTodoNewText('');
                                               setTodoDueDate('');
+                                              setTodoRecurrenceMode('none');
                                             });
                                           }
                                         }
@@ -973,11 +1003,20 @@ const EmployeeKiosk = ({
                                       onChange={(e) => setTodoDueDate(e.target.value)}
                                       className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414] w-[150px]"
                                     />
+                                    <select
+                                      value={todoRecurrenceMode}
+                                      onChange={(e) => setTodoRecurrenceMode(e.target.value)}
+                                      className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                    >
+                                      <option value="none">No repeat</option>
+                                      <option value="monthly">Monthly</option>
+                                    </select>
                                     <button
                                       type="button"
                                       disabled={!todoNewText.trim() || todoSaving}
                                       onClick={async () => {
                                         if (!todoNewText.trim()) return;
+                                        const dueDate = parseDateInputToMs(todoDueDate);
                                         const newItem = {
                                           id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
                                           text: todoNewText.trim(),
@@ -985,9 +1024,9 @@ const EmployeeKiosk = ({
                                           doneAt: null,
                                           recurring: false,
                                           recurringId: null,
-                                          dueDate: parseDateInputToMs(todoDueDate),
+                                          dueDate,
                                           assigneeEmails: [String(user?.email || '').toLowerCase()].filter(Boolean),
-                                          recurrence: null,
+                                          recurrence: getDraftRecurrence(dueDate),
                                         };
                                         setTodoSaving(true);
                                         try {
@@ -998,6 +1037,7 @@ const EmployeeKiosk = ({
                                           });
                                           setTodoNewText('');
                                           setTodoDueDate('');
+                                          setTodoRecurrenceMode('none');
                                         } finally {
                                           setTodoSaving(false);
                                         }
