@@ -1443,6 +1443,83 @@ const AdminDashboard = ({
                   </div>
 
                   <div className="p-6 flex-1 bg-white space-y-6">
+                    {isClientPage && (
+                      <div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setClientNotesOpen((prev) => ({
+                              ...prev,
+                              [c.id]: !prev[c.id],
+                            }));
+                            setClientNotesDraft((prev) => ({
+                              ...prev,
+                              [c.id]:
+                                prev[c.id] !== undefined
+                                  ? prev[c.id]
+                                  : c.generalNotes || '',
+                            }));
+                          }}
+                          className="text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-700 inline-flex items-center gap-2"
+                        >
+                          <FileText className="w-3 h-3" />
+                          {clientNotesOpen[c.id] ? 'Hide' : 'Show'} Client Notes
+                        </button>
+
+                        {clientNotesOpen[c.id] && (
+                          <div className="mt-3 bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
+                            <textarea
+                              value={clientNotesDraft[c.id] ?? ''}
+                              onChange={(e) =>
+                                setClientNotesDraft((prev) => ({
+                                  ...prev,
+                                  [c.id]: e.target.value,
+                                }))
+                              }
+                              className="w-full bg-white border border-slate-200 p-4 rounded-2xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[110px]"
+                              placeholder="Brand voice, important links, access details, preferences, etc."
+                            />
+                            <div className="flex justify-end">
+                              <button
+                                onClick={async () => {
+                                  setClientNotesSaving((prev) => ({
+                                    ...prev,
+                                    [c.id]: true,
+                                  }));
+                                  try {
+                                    await updateDoc(doc('clients', c.id), {
+                                      generalNotes:
+                                        clientNotesDraft[c.id] ?? '',
+                                    });
+                                    logAudit?.({
+                                      type: 'client_notes_saved',
+                                      entityType: 'client',
+                                      entityId: c.id,
+                                      clientId: c.id,
+                                    });
+                                  } catch (err) {
+                                    window.alert(
+                                      `Could not save client notes: ${
+                                        err?.message || String(err)
+                                      }`,
+                                    );
+                                  } finally {
+                                    setClientNotesSaving((prev) => ({
+                                      ...prev,
+                                      [c.id]: false,
+                                    }));
+                                  }
+                                }}
+                                disabled={!!clientNotesSaving[c.id]}
+                                className="bg-black hover:bg-slate-800 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-30"
+                              >
+                                Save Notes
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div>
                       <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center justify-between">
                         <span>Global Retainer Progress</span>
@@ -1629,82 +1706,6 @@ const AdminDashboard = ({
                           )}
                         </div>
                       </h5>
-
-                      {isClientPage && (<div className="mt-3">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setClientNotesOpen((prev) => ({
-                              ...prev,
-                              [c.id]: !prev[c.id],
-                            }));
-                            setClientNotesDraft((prev) => ({
-                              ...prev,
-                              [c.id]:
-                                prev[c.id] !== undefined
-                                  ? prev[c.id]
-                                  : c.generalNotes || '',
-                            }));
-                          }}
-                          className="text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-700 inline-flex items-center gap-2"
-                        >
-                          <FileText className="w-3 h-3" />
-                          {clientNotesOpen[c.id] ? 'Hide' : 'Show'} Client Notes
-                        </button>
-
-                        {clientNotesOpen[c.id] && (
-                          <div className="mt-3 bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
-                            <textarea
-                              value={clientNotesDraft[c.id] ?? ''}
-                              onChange={(e) =>
-                                setClientNotesDraft((prev) => ({
-                                  ...prev,
-                                  [c.id]: e.target.value,
-                                }))
-                              }
-                              className="w-full bg-white border border-slate-200 p-4 rounded-2xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[110px]"
-                              placeholder="Brand voice, important links, access details, preferences, etc."
-                            />
-                            <div className="flex justify-end">
-                              <button
-                                onClick={async () => {
-                                  setClientNotesSaving((prev) => ({
-                                    ...prev,
-                                    [c.id]: true,
-                                  }));
-                                  try {
-                                    await updateDoc(doc('clients', c.id), {
-                                      generalNotes:
-                                        clientNotesDraft[c.id] ?? '',
-                                    });
-                                    logAudit?.({
-                                      type: 'client_notes_saved',
-                                      entityType: 'client',
-                                      entityId: c.id,
-                                      clientId: c.id,
-                                    });
-                                  } catch (err) {
-                                    window.alert(
-                                      `Could not save client notes: ${
-                                        err?.message || String(err)
-                                      }`,
-                                    );
-                                  } finally {
-                                    setClientNotesSaving((prev) => ({
-                                      ...prev,
-                                      [c.id]: false,
-                                    }));
-                                  }
-                                }}
-                                disabled={!!clientNotesSaving[c.id]}
-                                className="bg-black hover:bg-slate-800 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-30"
-                              >
-                                Save Notes
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>)}
 
                       {!stats || stats.base === 0 ? (
                         <p className="text-xs italic text-slate-400">
