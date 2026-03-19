@@ -46,9 +46,9 @@ service cloud.firestore {
 
     match /clients/{clientId} {
       allow read: if clientAllowsEmail(clientId);
-      // Allow staff to create clients (admin/billing or Ignite staff email).
-      // Exclude kiosk role from creating clients.
-      allow create: if isSignedIn() && (isBilling() || (isIgniteStaff() && !isKiosk()));
+      // Allow any staff (admin/billing/etc) to create clients, but exclude kiosk.
+      // This avoids role-string mismatches (e.g. "super_admin") blocking client creation.
+      allow create: if isSignedIn() && isAnyStaff() && !isKiosk();
       // Billing can update billing related fields; keep simple: admin/billing can update.
       // Staff can update notes/cycle notes as part of kiosk/admin workflows.
       allow update: if isSignedIn() && isAnyStaff();
