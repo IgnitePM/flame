@@ -48,11 +48,44 @@ const EmployeeKiosk = ({
   const [socialAdSubmitting, setSocialAdSubmitting] = React.useState(false);
   const [todoNewText, setTodoNewText] = React.useState('');
   const [todoSaving, setTodoSaving] = React.useState(false);
+  const [todoDueDate, setTodoDueDate] = React.useState('');
+  const [todoMineOnly, setTodoMineOnly] = React.useState(true);
 
   const safeCategoryKey = (category) =>
     String(category)
       .replace(/[~*[\]/]/g, '_')
       .replace(/\./g, '_');
+
+  const parseDateInputToMs = (value) => {
+    if (!value) return null;
+    const [y, m, d] = value.split('-').map(Number);
+    if (!y || !m || !d) return null;
+    return new Date(y, m - 1, d, 12, 0, 0, 0).getTime();
+  };
+
+  const asDateInput = (ms) => {
+    if (!ms) return '';
+    const d = new Date(ms);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  const normalizeAssignees = (item) => {
+    const raw = Array.isArray(item?.assigneeEmails) ? item.assigneeEmails : [];
+    const cleaned = raw.map((e) => String(e || '').trim().toLowerCase()).filter(Boolean);
+    if (cleaned.length > 0) return cleaned;
+    return user?.email ? [String(user.email).trim().toLowerCase()] : [];
+  };
+
+  const getUrgencyClass = (item) => {
+    const due = Number(item?.dueDate || 0);
+    if (!due) return 'bg-white border border-slate-100 text-slate-800';
+    const now = Date.now();
+    const fiveDays = 5 * 24 * 60 * 60 * 1000;
+    if (due < now) return 'bg-red-600 border border-red-700 text-white';
+    if (due - now <= fiveDays)
+      return 'bg-emerald-600 border border-emerald-700 text-white';
+    return 'bg-white border border-slate-100 text-slate-800';
+  };
 
   // When a task is actively running, use the active task's client/category
   // so the retainer progress bar doesn't lag behind when switching tasks.
@@ -374,7 +407,11 @@ const EmployeeKiosk = ({
                           const catKey = todoCategoryKey ? todoCategoryKey(selectedRetainerCategory) : safeCategoryKey(selectedRetainerCategory);
                           const todoState = getTodoStateForCycle(selectedClientObj, cycleStart);
                           const catTodo = todoState[catKey] || { closed: false, items: [] };
-                          const items = catTodo.items || [];
+                          const items = (catTodo.items || []).filter((item) => {
+                            if (!todoMineOnly) return true;
+                            const me = String(user?.email || '').trim().toLowerCase();
+                            return normalizeAssignees(item).includes(me);
+                          });
                           return (
                             <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
                               <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
@@ -385,6 +422,14 @@ const EmployeeKiosk = ({
                                   </span>
                                 )}
                               </div>
+                              <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600 mb-2">
+                                <input
+                                  type="checkbox"
+                                  checked={todoMineOnly}
+                                  onChange={(e) => setTodoMineOnly(e.target.checked)}
+                                />
+                                Show only tasks assigned to me
+                              </label>
                               {!catTodo.closed && (
                                 <>
                                   {items.length === 0 ? (
@@ -394,7 +439,7 @@ const EmployeeKiosk = ({
                                       {items.map((item) => (
                                         <li
                                           key={item.id}
-                                          className="flex items-center gap-2 bg-slate-50 rounded-lg p-2"
+                                          className={`flex items-center gap-2 rounded-lg p-2 ${getUrgencyClass(item)}`}
                                         >
                                           <input
                                             type="checkbox"
@@ -415,9 +460,35 @@ const EmployeeKiosk = ({
                                             disabled={todoSaving}
                                             className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
                                           />
-                                          <span className={`text-sm flex-1 ${item.done ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+                                          <span className={`text-sm flex-1 ${item.done ? 'line-through opacity-70' : ''}`}>
                                             {item.text || '(no text)'}
+                                            {item.dueDate && (
+                                              <span className="ml-2 text-[10px] font-black uppercase tracking-widest">
+                                                Due {new Date(item.dueDate).toLocaleDateString()}
+                                              </span>
+                                            )}
                                           </span>
+                                          <input
+                                            type="date"
+                                            value={asDateInput(item.dueDate)}
+                                            onChange={async (e) => {
+                                              setTodoSaving(true);
+                                              try {
+                                                const dueDate = parseDateInputToMs(e.target.value);
+                                                const next = catTodo.items.map((i) =>
+                                                  i.id === item.id ? { ...i, dueDate } : i,
+                                                );
+                                                await updateClientTodo(selectedClientObj, cycleStart, catKey, {
+                                                  ...catTodo,
+                                                  items: next,
+                                                });
+                                              } finally {
+                                                setTodoSaving(false);
+                                              }
+                                            }}
+                                            disabled={todoSaving}
+                                            className="bg-white border border-slate-200 rounded px-1.5 py-1 text-[10px]"
+                                          />
                                           <button
                                             type="button"
                                             disabled={todoSaving}
@@ -432,6 +503,14 @@ const EmployeeKiosk = ({
                                                     recurring: nextRecurring,
                                                     recurringId: nextRecurring
                                                       ? (i.recurringId || i.id)
+                                                      : null,
+                                                    recurrence: nextRecurring
+                                                      ? {
+                                                          type: 'monthly_fixed_day',
+                                                          dayOfMonth: new Date(
+                                                            i.dueDate || Date.now(),
+                                                          ).getDate(),
+                                                        }
                                                       : null,
                                                   };
                                                 });
@@ -474,7 +553,7 @@ const EmployeeKiosk = ({
                                             updateClientTodo(selectedClientObj, cycleStart, catKey, {
                                               ...catTodo,
                                               closed: false,
-                                              items: [...items, newItem],
+                                              items: [...(catTodo.items || []), newItem],
                                             }).finally(() => {
                                               setTodoSaving(false);
                                               setTodoNewText('');
@@ -482,6 +561,12 @@ const EmployeeKiosk = ({
                                           }
                                         }
                                       }}
+                                    />
+                                    <input
+                                      type="date"
+                                      value={todoDueDate}
+                                      onChange={(e) => setTodoDueDate(e.target.value)}
+                                      className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414] w-[150px]"
                                     />
                                     <button
                                       type="button"
@@ -493,13 +578,18 @@ const EmployeeKiosk = ({
                                           text: todoNewText.trim(),
                                           done: false,
                                           doneAt: null,
+                                          recurring: false,
+                                          recurringId: null,
+                                          dueDate: parseDateInputToMs(todoDueDate),
+                                          assigneeEmails: [String(user?.email || '').toLowerCase()].filter(Boolean),
+                                          recurrence: null,
                                         };
                                         setTodoSaving(true);
                                         try {
                                           await updateClientTodo(selectedClientObj, cycleStart, catKey, {
                                             ...catTodo,
                                             closed: false,
-                                            items: [...items, newItem],
+                                            items: [...(catTodo.items || []), newItem],
                                           });
                                           setTodoNewText('');
                                         } finally {
@@ -716,7 +806,11 @@ const EmployeeKiosk = ({
                           const catKey = todoCategoryKey ? todoCategoryKey(selectedRetainerCategory) : safeCategoryKey(selectedRetainerCategory);
                           const todoState = getTodoStateForCycle(selectedClientObj, cycleStart);
                           const catTodo = todoState[catKey] || { closed: false, items: [] };
-                          const items = catTodo.items || [];
+                          const items = (catTodo.items || []).filter((item) => {
+                            if (!todoMineOnly) return true;
+                            const me = String(user?.email || '').trim().toLowerCase();
+                            return normalizeAssignees(item).includes(me);
+                          });
                           return (
                             <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
                               <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
@@ -727,6 +821,14 @@ const EmployeeKiosk = ({
                                   </span>
                                 )}
                               </div>
+                              <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600 mb-2">
+                                <input
+                                  type="checkbox"
+                                  checked={todoMineOnly}
+                                  onChange={(e) => setTodoMineOnly(e.target.checked)}
+                                />
+                                Show only tasks assigned to me
+                              </label>
                               {!catTodo.closed && (
                                 <>
                                   {items.length === 0 ? (
@@ -736,7 +838,7 @@ const EmployeeKiosk = ({
                                       {items.map((item) => (
                                         <li
                                           key={item.id}
-                                          className="flex items-center gap-2 bg-slate-50 rounded-lg p-2"
+                                          className={`flex items-center gap-2 rounded-lg p-2 ${getUrgencyClass(item)}`}
                                         >
                                           <input
                                             type="checkbox"
@@ -757,9 +859,35 @@ const EmployeeKiosk = ({
                                             disabled={todoSaving}
                                             className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
                                           />
-                                          <span className={`text-sm flex-1 ${item.done ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+                                          <span className={`text-sm flex-1 ${item.done ? 'line-through opacity-70' : ''}`}>
                                             {item.text || '(no text)'}
+                                            {item.dueDate && (
+                                              <span className="ml-2 text-[10px] font-black uppercase tracking-widest">
+                                                Due {new Date(item.dueDate).toLocaleDateString()}
+                                              </span>
+                                            )}
                                           </span>
+                                          <input
+                                            type="date"
+                                            value={asDateInput(item.dueDate)}
+                                            onChange={async (e) => {
+                                              setTodoSaving(true);
+                                              try {
+                                                const dueDate = parseDateInputToMs(e.target.value);
+                                                const next = catTodo.items.map((i) =>
+                                                  i.id === item.id ? { ...i, dueDate } : i,
+                                                );
+                                                await updateClientTodo(selectedClientObj, cycleStart, catKey, {
+                                                  ...catTodo,
+                                                  items: next,
+                                                });
+                                              } finally {
+                                                setTodoSaving(false);
+                                              }
+                                            }}
+                                            disabled={todoSaving}
+                                            className="bg-white border border-slate-200 rounded px-1.5 py-1 text-[10px]"
+                                          />
                                           <button
                                             type="button"
                                             disabled={todoSaving}
@@ -774,6 +902,14 @@ const EmployeeKiosk = ({
                                                     recurring: nextRecurring,
                                                     recurringId: nextRecurring
                                                       ? (i.recurringId || i.id)
+                                                      : null,
+                                                    recurrence: nextRecurring
+                                                      ? {
+                                                          type: 'monthly_fixed_day',
+                                                          dayOfMonth: new Date(
+                                                            i.dueDate || Date.now(),
+                                                          ).getDate(),
+                                                        }
                                                       : null,
                                                   };
                                                 });
@@ -811,19 +947,31 @@ const EmployeeKiosk = ({
                                               text: todoNewText.trim(),
                                               done: false,
                                               doneAt: null,
+                                              recurring: false,
+                                              recurringId: null,
+                                              dueDate: parseDateInputToMs(todoDueDate),
+                                              assigneeEmails: [String(user?.email || '').toLowerCase()].filter(Boolean),
+                                              recurrence: null,
                                             };
                                             setTodoSaving(true);
                                             updateClientTodo(selectedClientObj, cycleStart, catKey, {
                                               ...catTodo,
                                               closed: false,
-                                              items: [...items, newItem],
+                                              items: [...(catTodo.items || []), newItem],
                                             }).finally(() => {
                                               setTodoSaving(false);
                                               setTodoNewText('');
+                                              setTodoDueDate('');
                                             });
                                           }
                                         }
                                       }}
+                                    />
+                                    <input
+                                      type="date"
+                                      value={todoDueDate}
+                                      onChange={(e) => setTodoDueDate(e.target.value)}
+                                      className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414] w-[150px]"
                                     />
                                     <button
                                       type="button"
@@ -835,15 +983,21 @@ const EmployeeKiosk = ({
                                           text: todoNewText.trim(),
                                           done: false,
                                           doneAt: null,
+                                          recurring: false,
+                                          recurringId: null,
+                                          dueDate: parseDateInputToMs(todoDueDate),
+                                          assigneeEmails: [String(user?.email || '').toLowerCase()].filter(Boolean),
+                                          recurrence: null,
                                         };
                                         setTodoSaving(true);
                                         try {
                                           await updateClientTodo(selectedClientObj, cycleStart, catKey, {
                                             ...catTodo,
                                             closed: false,
-                                            items: [...items, newItem],
+                                            items: [...(catTodo.items || []), newItem],
                                           });
                                           setTodoNewText('');
+                                          setTodoDueDate('');
                                         } finally {
                                           setTodoSaving(false);
                                         }

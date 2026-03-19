@@ -725,6 +725,18 @@ export default function App() {
   const todoCategoryKey = (cat) =>
     String(cat ?? '').replace(/[~*[\]/]/g, '_').replace(/\./g, '_');
 
+  const computeRecurringDueDate = (recurrence, cycleStart) => {
+    if (!recurrence || recurrence.type !== 'monthly_fixed_day') return null;
+    const day = Number(recurrence.dayOfMonth || 0);
+    if (!day) return null;
+    const base = new Date(cycleStart);
+    const y = base.getFullYear();
+    const m = base.getMonth();
+    const lastDay = new Date(y, m + 1, 0).getDate();
+    const clamped = Math.min(Math.max(day, 1), lastDay);
+    return new Date(y, m, clamped, 12, 0, 0, 0).getTime();
+  };
+
   const carryoverCategoryKey = (cat) =>
     String(cat ?? '').replace(/[~*[\]/]/g, '_').replace(/\./g, '_');
 
@@ -746,7 +758,13 @@ export default function App() {
       const prevItems = prevCat?.items || [];
       const carried = prevItems
         .filter((i) => !i.done && !i.recurring)
-        .map((i) => ({ ...i, done: false }));
+        .map((i) => ({
+          ...i,
+          done: false,
+          assigneeEmails: Array.isArray(i.assigneeEmails)
+            ? i.assigneeEmails.filter(Boolean)
+            : [],
+        }));
       const recurring = prevItems
         .filter((i) => !!i.recurring)
         .map((i) => ({
@@ -756,6 +774,11 @@ export default function App() {
           doneAt: null,
           recurring: true,
           recurringId: i.recurringId || i.id,
+          assigneeEmails: Array.isArray(i.assigneeEmails)
+            ? i.assigneeEmails.filter(Boolean)
+            : [],
+          recurrence: i.recurrence || null,
+          dueDate: computeRecurringDueDate(i.recurrence, cycleStart),
         }));
       result[ck] = { closed: false, items: [...carried, ...recurring] };
     });
@@ -779,7 +802,13 @@ export default function App() {
       const prevItems = prevCat?.items || [];
       const carried = prevItems
         .filter((i) => !i.done && !i.recurring)
-        .map((i) => ({ ...i, done: false }));
+        .map((i) => ({
+          ...i,
+          done: false,
+          assigneeEmails: Array.isArray(i.assigneeEmails)
+            ? i.assigneeEmails.filter(Boolean)
+            : [],
+        }));
       const recurring = prevItems
         .filter((i) => !!i.recurring)
         .map((i) => ({
@@ -789,6 +818,11 @@ export default function App() {
           doneAt: null,
           recurring: true,
           recurringId: i.recurringId || i.id,
+          assigneeEmails: Array.isArray(i.assigneeEmails)
+            ? i.assigneeEmails.filter(Boolean)
+            : [],
+          recurrence: i.recurrence || null,
+          dueDate: computeRecurringDueDate(i.recurrence, cycleStart),
         }));
       cycles[String(cycleStart)][ck] = { closed: false, items: [...carried, ...recurring] };
     });

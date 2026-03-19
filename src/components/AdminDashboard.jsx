@@ -148,6 +148,12 @@ const AdminDashboard = ({
   const [todoEditText, setTodoEditText] = useState('');
   const [todoSaving, setTodoSaving] = useState(false);
   const [todoAddTextDraft, setTodoAddTextDraft] = useState({});
+  const [todoAddDueDraft, setTodoAddDueDraft] = useState({});
+  const [todoAddAssigneesDraft, setTodoAddAssigneesDraft] = useState({});
+  const [todoAddRecurrenceDraft, setTodoAddRecurrenceDraft] = useState({});
+  const [taskClientFilter, setTaskClientFilter] = useState('all');
+  const [taskCategoryFilter, setTaskCategoryFilter] = useState('all');
+  const [taskAssigneeFilter, setTaskAssigneeFilter] = useState('me');
   const [estimateModal, setEstimateModal] = useState(null);
   const [estimateValues, setEstimateValues] = useState({
     hours: '',
@@ -599,12 +605,116 @@ const AdminDashboard = ({
   const isCycleLocked = (client, cycleStart) =>
     !!client?.cycleLocks?.[String(cycleStart)]?.locked;
 
+  const globalTodoRows = clients.flatMap((c) => {
+    const cycleStart = getBillingPeriod(c.billingDay || 1, 0).start;
+    const todoState = getTodoStateForCycle ? getTodoStateForCycle(c, cycleStart) : {};
+    const keyOf = (category) =>
+      String(category)
+        .replace(/[~*[\]/]/g, '_')
+        .replace(/\./g, '_');
+    const labelMap = {};
+    Object.keys(c.retainers || {}).forEach((cat) => {
+      labelMap[keyOf(cat)] = cat;
+    });
+    labelMap[keyOf('General / Unclassified')] = 'General / Unclassified';
+
+    return Object.entries(todoState || {}).flatMap(([catKey, catTodo]) => {
+      const items = catTodo?.items || [];
+      return items.map((item) => ({
+        clientId: c.id,
+        clientName: c.name,
+        cycleStart,
+        categoryKey: catKey,
+        categoryLabel: labelMap[catKey] || catKey,
+        catTodo,
+        item,
+      }));
+    });
+  });
+
+  const assignableEmails = Array.from(
+    new Set([
+      ...(adminUsers || [])
+        .map((a) => String(a?.email || '').trim().toLowerCase())
+        .filter(Boolean),
+      String(user?.email || '').trim().toLowerCase(),
+    ]),
+  ).filter(Boolean);
+
+  const asDateInput = (ms) => {
+    if (!ms) return '';
+    const d = new Date(ms);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const parseDateInputToMs = (value) => {
+    if (!value) return null;
+    const [y, m, d] = value.split('-').map(Number);
+    if (!y || !m || !d) return null;
+    return new Date(y, m - 1, d, 12, 0, 0, 0).getTime();
+  };
+
+  const normalizeTodoAssignees = (item) => {
+    const raw = Array.isArray(item?.assigneeEmails)
+      ? item.assigneeEmails
+      : [];
+    const cleaned = raw
+      .map((e) => String(e || '').trim().toLowerCase())
+      .filter(Boolean);
+    if (cleaned.length > 0) return cleaned;
+    return user?.email ? [String(user.email).trim().toLowerCase()] : [];
+  };
+
+  const getTodoUrgencyStyles = (item) => {
+    const due = Number(item?.dueDate || 0);
+    if (!due) {
+      return {
+        rowClass: 'bg-white border border-slate-100',
+        textClass: item?.done
+          ? 'line-through text-slate-400 opacity-70'
+          : 'text-slate-800',
+        metaClass: 'text-slate-500',
+      };
+    }
+    const now = Date.now();
+    const fiveDaysMs = 5 * 24 * 60 * 60 * 1000;
+    if (due < now) {
+      return {
+        rowClass: 'bg-red-600 border border-red-700',
+        textClass: item?.done
+          ? 'line-through text-white/80'
+          : 'text-white',
+        metaClass: 'text-white/90',
+      };
+    }
+    if (due - now <= fiveDaysMs) {
+      return {
+        rowClass: 'bg-emerald-600 border border-emerald-700',
+        textClass: item?.done
+          ? 'line-through text-white/80'
+          : 'text-white',
+        metaClass: 'text-white/90',
+      };
+    }
+    return {
+      rowClass: 'bg-white border border-slate-100',
+      textClass: item?.done
+        ? 'line-through text-slate-400 opacity-70'
+        : 'text-slate-800',
+      metaClass: 'text-slate-500',
+    };
+  };
+
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 flex flex-col lg:flex-row justify-between items-center gap-6">
         <div className="flex bg-slate-100 p-1 rounded-2xl w-full lg:w-auto overflow-x-auto no-scrollbar">
           {[
             { id: 'timesheets', label: 'Timesheets', icon: List },
+            { id: 'tasks_global', label: 'Tasks', icon: CheckSquare },
             { id: 'clients', label: 'Clients', icon: History },
             ...(canBilling
               ? [
@@ -947,6 +1057,160 @@ const AdminDashboard = ({
                 No timesheets match your active filters.
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Global Tasks Tab */}
+      {adminTab === 'tasks_global' && (
+        <div className="space-y-6">
+          <div className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-sm grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2 mb-2 block">
+                Client
+              </label>
+              <select
+                value={taskClientFilter}
+                onChange={(e) => setTaskClientFilter(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 p-3.5 rounded-2xl outline-none focus:ring-2 focus:ring-[#fd7414]/50 transition-all font-bold text-sm"
+              >
+                <option value="all">All Clients</option>
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2 mb-2 block">
+                Category
+              </label>
+              <select
+                value={taskCategoryFilter}
+                onChange={(e) => setTaskCategoryFilter(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 p-3.5 rounded-2xl outline-none focus:ring-2 focus:ring-[#fd7414]/50 transition-all font-bold text-sm"
+              >
+                <option value="all">All Categories</option>
+                {Array.from(new Set(globalTodoRows.map((r) => r.categoryLabel))).sort().map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2 mb-2 block">
+                Assignee
+              </label>
+              <select
+                value={taskAssigneeFilter}
+                onChange={(e) => setTaskAssigneeFilter(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 p-3.5 rounded-2xl outline-none focus:ring-2 focus:ring-[#fd7414]/50 transition-all font-bold text-sm"
+              >
+                <option value="me">Assigned to me</option>
+                <option value="all">All assignees</option>
+                {assignableEmails.map((email) => (
+                  <option key={email} value={email}>
+                    {email}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm p-6 space-y-3">
+            {(() => {
+              const filtered = globalTodoRows.filter((row) => {
+                if (taskClientFilter !== 'all' && row.clientId !== taskClientFilter) {
+                  return false;
+                }
+                if (taskCategoryFilter !== 'all' && row.categoryLabel !== taskCategoryFilter) {
+                  return false;
+                }
+                const assignees = normalizeTodoAssignees(row.item);
+                if (taskAssigneeFilter === 'me') {
+                  const me = String(user?.email || '').trim().toLowerCase();
+                  return !!me && assignees.includes(me);
+                }
+                if (taskAssigneeFilter !== 'all') {
+                  return assignees.includes(taskAssigneeFilter);
+                }
+                return true;
+              });
+
+              filtered.sort((a, b) => {
+                const ad = Number(a.item?.dueDate || 0);
+                const bd = Number(b.item?.dueDate || 0);
+                if (ad && bd) return ad - bd;
+                if (ad && !bd) return -1;
+                if (!ad && bd) return 1;
+                return String(a.clientName).localeCompare(String(b.clientName));
+              });
+
+              if (filtered.length === 0) {
+                return (
+                  <div className="p-8 text-center text-slate-400 font-bold italic">
+                    No tasks match these filters.
+                  </div>
+                );
+              }
+
+              return filtered.map((row) => {
+                const styles = getTodoUrgencyStyles(row.item);
+                const assignees = normalizeTodoAssignees(row.item);
+                return (
+                  <div
+                    key={`${row.clientId}__${row.categoryKey}__${row.item.id}`}
+                    className={`flex items-center gap-3 rounded-2xl p-3 ${styles.rowClass}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!!row.item.done}
+                      onChange={async () => {
+                        setTodoSaving(true);
+                        try {
+                          const items = row.catTodo.items || [];
+                          const next = items.map((i) =>
+                            i.id === row.item.id
+                              ? {
+                                  ...i,
+                                  done: !i.done,
+                                  doneAt: !i.done ? Date.now() : null,
+                                }
+                              : i,
+                          );
+                          await updateClientTodo(
+                            clients.find((c) => c.id === row.clientId),
+                            row.cycleStart,
+                            row.categoryKey,
+                            { ...row.catTodo, items: next },
+                          );
+                        } finally {
+                          setTodoSaving(false);
+                        }
+                      }}
+                      disabled={todoSaving}
+                      className="w-4 h-4"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className={`font-black text-sm ${styles.textClass}`}>
+                        {row.item.text}
+                      </div>
+                      <div className={`text-[10px] font-bold uppercase tracking-widest ${styles.metaClass}`}>
+                        {row.clientName} • {row.categoryLabel}
+                        {row.item.dueDate
+                          ? ` • Due ${new Date(row.item.dueDate).toLocaleDateString()}`
+                          : ' • No due date'}
+                      </div>
+                      <div className={`text-[10px] font-bold ${styles.metaClass}`}>
+                        Assigned: {assignees.join(', ') || 'Unassigned'}
+                      </div>
+                    </div>
+                  </div>
+                );
+              });
+            })()}
           </div>
         </div>
       )}
@@ -1844,10 +2108,13 @@ const AdminDashboard = ({
                                   </p>
                                 ) : (
                                   <ul className="space-y-2 mb-3">
-                                    {items.map((item) => (
+                                    {items.map((item) => {
+                                      const urgency = getTodoUrgencyStyles(item);
+                                      const assignees = normalizeTodoAssignees(item);
+                                      return (
                                       <li
                                         key={item.id}
-                                        className="flex items-center gap-2 bg-white border border-slate-100 rounded-lg p-2"
+                                        className={`flex items-center gap-2 rounded-lg p-2 ${urgency.rowClass}`}
                                       >
                                         <input
                                           type="checkbox"
@@ -1881,14 +2148,73 @@ const AdminDashboard = ({
                                           disabled={todoSaving}
                                           className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
                                         />
-                                        <span className={`flex items-center gap-2 flex-1 ${item.done ? 'line-through text-slate-400 opacity-70' : 'text-slate-800'}`}>
-                                          <span>{item.text || '(no text)'}</span>
+                                        <span className="flex items-center gap-2 flex-1 min-w-0">
+                                          <span className={`${urgency.textClass} truncate`}>
+                                            {item.text || '(no text)'}
+                                          </span>
                                           {item.recurring && (
-                                            <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[9px] font-black uppercase tracking-widest">
+                                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${urgency.metaClass}`}>
                                               Recurring
                                             </span>
                                           )}
+                                          {item.dueDate && (
+                                            <span className={`text-[10px] font-black uppercase tracking-widest ${urgency.metaClass}`}>
+                                              Due {new Date(item.dueDate).toLocaleDateString()}
+                                            </span>
+                                          )}
                                         </span>
+                                        <input
+                                          type="date"
+                                          value={asDateInput(item.dueDate)}
+                                          onChange={async (e) => {
+                                            if (isCycleLocked(c, cycleStart)) return;
+                                            setTodoSaving(true);
+                                            try {
+                                              const dueDate = parseDateInputToMs(e.target.value);
+                                              const next = items.map((i) =>
+                                                i.id === item.id ? { ...i, dueDate } : i,
+                                              );
+                                              await updateClientTodo(c, cycleStart, catKey, {
+                                                ...catTodo,
+                                                items: next,
+                                              });
+                                            } finally {
+                                              setTodoSaving(false);
+                                            }
+                                          }}
+                                          disabled={todoSaving}
+                                          className="bg-white/90 border border-slate-200 rounded px-1.5 py-1 text-[10px] font-bold"
+                                          title="Optional due date"
+                                        />
+                                        <select
+                                          multiple
+                                          value={assignees}
+                                          onChange={async (e) => {
+                                            if (isCycleLocked(c, cycleStart)) return;
+                                            const selected = Array.from(e.target.selectedOptions).map((o) => o.value);
+                                            setTodoSaving(true);
+                                            try {
+                                              const next = items.map((i) =>
+                                                i.id === item.id ? { ...i, assigneeEmails: selected } : i,
+                                              );
+                                              await updateClientTodo(c, cycleStart, catKey, {
+                                                ...catTodo,
+                                                items: next,
+                                              });
+                                            } finally {
+                                              setTodoSaving(false);
+                                            }
+                                          }}
+                                          disabled={todoSaving}
+                                          className="bg-white/90 border border-slate-200 rounded px-1.5 py-1 text-[10px] font-bold min-w-[120px] h-12"
+                                          title="Assign to one or more users"
+                                        >
+                                          {assignableEmails.map((email) => (
+                                            <option key={email} value={email}>
+                                              {email}
+                                            </option>
+                                          ))}
+                                        </select>
                                         <button
                                           type="button"
                                           disabled={todoSaving}
@@ -1907,6 +2233,14 @@ const AdminDashboard = ({
                                                   recurring: nextRecurring,
                                                   recurringId: nextRecurring
                                                     ? i.recurringId || i.id
+                                                    : null,
+                                                  recurrence: nextRecurring
+                                                    ? {
+                                                        type: 'monthly_fixed_day',
+                                                        dayOfMonth: new Date(
+                                                          i.dueDate || Date.now(),
+                                                        ).getDate(),
+                                                      }
                                                     : null,
                                                 };
                                               });
@@ -1930,11 +2264,11 @@ const AdminDashboard = ({
                                           Recurring
                                         </button>
                                       </li>
-                                    ))}
+                                    )})}
                                   </ul>
                                 )}
 
-                                <div className="flex gap-2">
+                                <div className="grid grid-cols-1 lg:grid-cols-4 gap-2">
                                   <input
                                     type="text"
                                     value={todoAddTextDraft[catKey] || ''}
@@ -1945,7 +2279,7 @@ const AdminDashboard = ({
                                       }))
                                     }
                                     placeholder="New to-do..."
-                                    className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                    className="lg:col-span-2 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
                                     onKeyDown={(e) => {
                                       if (e.key !== 'Enter') return;
                                       e.preventDefault();
@@ -1965,6 +2299,9 @@ const AdminDashboard = ({
                                             doneAt: null,
                                             recurring: false,
                                             recurringId: null,
+                                            dueDate: parseDateInputToMs(todoAddDueDraft[catKey] || ''),
+                                            assigneeEmails: (todoAddAssigneesDraft[catKey] || [String(user?.email || '').toLowerCase()]).filter(Boolean),
+                                            recurrence: null,
                                           };
                                           await updateClientTodo(c, cycleStart, catKey, {
                                             ...catTodo,
@@ -1975,12 +2312,46 @@ const AdminDashboard = ({
                                             ...prev,
                                             [catKey]: '',
                                           }));
+                                          setTodoAddDueDraft((prev) => ({
+                                            ...prev,
+                                            [catKey]: '',
+                                          }));
                                         } finally {
                                           setTodoSaving(false);
                                         }
                                       })();
                                     }}
                                   />
+                                  <input
+                                    type="date"
+                                    value={todoAddDueDraft[catKey] || ''}
+                                    onChange={(e) =>
+                                      setTodoAddDueDraft((prev) => ({
+                                        ...prev,
+                                        [catKey]: e.target.value,
+                                      }))
+                                    }
+                                    className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                    title="Optional due date"
+                                  />
+                                  <select
+                                    multiple
+                                    value={todoAddAssigneesDraft[catKey] || [String(user?.email || '').toLowerCase()].filter(Boolean)}
+                                    onChange={(e) =>
+                                      setTodoAddAssigneesDraft((prev) => ({
+                                        ...prev,
+                                        [catKey]: Array.from(e.target.selectedOptions).map((o) => o.value),
+                                      }))
+                                    }
+                                    className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px]"
+                                    title="Assign to one or more users"
+                                  >
+                                    {assignableEmails.map((email) => (
+                                      <option key={email} value={email}>
+                                        {email}
+                                      </option>
+                                    ))}
+                                  </select>
                                   <button
                                     type="button"
                                     disabled={
@@ -2003,6 +2374,9 @@ const AdminDashboard = ({
                                           doneAt: null,
                                           recurring: false,
                                           recurringId: null,
+                                          dueDate: parseDateInputToMs(todoAddDueDraft[catKey] || ''),
+                                          assigneeEmails: (todoAddAssigneesDraft[catKey] || [String(user?.email || '').toLowerCase()]).filter(Boolean),
+                                          recurrence: null,
                                         };
                                         await updateClientTodo(c, cycleStart, catKey, {
                                           ...catTodo,
@@ -2010,6 +2384,10 @@ const AdminDashboard = ({
                                           items: [...items, newItem],
                                         });
                                         setTodoAddTextDraft((prev) => ({
+                                          ...prev,
+                                          [catKey]: '',
+                                        }));
+                                        setTodoAddDueDraft((prev) => ({
                                           ...prev,
                                           [catKey]: '',
                                         }));
@@ -2292,6 +2670,9 @@ const AdminDashboard = ({
                                             doneAt: null,
                                             recurring: false,
                                             recurringId: null,
+                                            dueDate: null,
+                                            assigneeEmails: [String(user?.email || '').toLowerCase()].filter(Boolean),
+                                            recurrence: null,
                                           };
                                         })
                                         .filter(Boolean);
@@ -2574,10 +2955,13 @@ const AdminDashboard = ({
                                                         <p className="text-xs italic text-slate-400 mb-2">No to-do items yet.</p>
                                                       ) : (
                                                         <ul className="space-y-2 mb-2">
-                                                          {items.map((item) => (
+                                                          {items.map((item) => {
+                                                            const urgency = getTodoUrgencyStyles(item);
+                                                            const assignees = normalizeTodoAssignees(item);
+                                                            return (
                                                             <li
                                                               key={item.id}
-                                                              className="flex items-center gap-2 bg-white border border-slate-100 rounded-lg p-2"
+                                                              className={`flex items-center gap-2 rounded-lg p-2 ${urgency.rowClass}`}
                                                             >
                                                               <input
                                                                 type="checkbox"
@@ -2628,11 +3012,7 @@ const AdminDashboard = ({
                                                                 />
                                                               ) : (
                                                                 <span
-                                                                  className={`flex-1 text-sm ${
-                                                                    item.done
-                                                                      ? 'line-through text-slate-400 opacity-70'
-                                                                      : 'text-slate-800'
-                                                                  }`}
+                                                                  className={`flex-1 text-sm ${urgency.textClass}`}
                                                                   onDoubleClick={() => {
                                                                     if (isCycleLocked(c, cycleStart)) return;
                                                                     setTodoEditId(item.id);
@@ -2644,13 +3024,62 @@ const AdminDashboard = ({
                                                                       {item.text || '(no text)'}
                                                                     </span>
                                                                     {item.recurring && (
-                                                                      <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[9px] font-black uppercase tracking-widest">
+                                                                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${urgency.metaClass}`}>
                                                                         Recurring
+                                                                      </span>
+                                                                    )}
+                                                                    {item.dueDate && (
+                                                                      <span className={`text-[10px] font-black uppercase tracking-widest ${urgency.metaClass}`}>
+                                                                        Due {new Date(item.dueDate).toLocaleDateString()}
                                                                       </span>
                                                                     )}
                                                                   </span>
                                                                 </span>
                                                               )}
+                                                              <input
+                                                                type="date"
+                                                                value={asDateInput(item.dueDate)}
+                                                                onChange={async (e) => {
+                                                                  if (isCycleLocked(c, cycleStart)) return;
+                                                                  setTodoSaving(true);
+                                                                  try {
+                                                                    const dueDate = parseDateInputToMs(e.target.value);
+                                                                    const next = items.map((i) =>
+                                                                      i.id === item.id ? { ...i, dueDate } : i
+                                                                    );
+                                                                    await updateClientTodo(c, cycleStart, catKey, { ...catTodo, items: next });
+                                                                  } finally {
+                                                                    setTodoSaving(false);
+                                                                  }
+                                                                }}
+                                                                disabled={todoSaving}
+                                                                className="bg-white/90 border border-slate-200 rounded px-1.5 py-1 text-[10px] font-bold"
+                                                              />
+                                                              <select
+                                                                multiple
+                                                                value={assignees}
+                                                                onChange={async (e) => {
+                                                                  if (isCycleLocked(c, cycleStart)) return;
+                                                                  const selected = Array.from(e.target.selectedOptions).map((o) => o.value);
+                                                                  setTodoSaving(true);
+                                                                  try {
+                                                                    const next = items.map((i) =>
+                                                                      i.id === item.id ? { ...i, assigneeEmails: selected } : i
+                                                                    );
+                                                                    await updateClientTodo(c, cycleStart, catKey, { ...catTodo, items: next });
+                                                                  } finally {
+                                                                    setTodoSaving(false);
+                                                                  }
+                                                                }}
+                                                                disabled={todoSaving}
+                                                                className="bg-white/90 border border-slate-200 rounded px-1.5 py-1 text-[10px] font-bold min-w-[120px] h-12"
+                                                              >
+                                                                {assignableEmails.map((email) => (
+                                                                  <option key={email} value={email}>
+                                                                    {email}
+                                                                  </option>
+                                                                ))}
+                                                              </select>
                                                               <button
                                                                 type="button"
                                                                 onClick={async () => {
@@ -2664,6 +3093,14 @@ const AdminDashboard = ({
                                                                         ...i,
                                                                         recurring: nextRecurring,
                                                                         recurringId: nextRecurring ? (i.recurringId || i.id) : null,
+                                                                        recurrence: nextRecurring
+                                                                          ? {
+                                                                              type: 'monthly_fixed_day',
+                                                                              dayOfMonth: new Date(
+                                                                                i.dueDate || Date.now(),
+                                                                              ).getDate(),
+                                                                            }
+                                                                          : null,
                                                                       };
                                                                     });
                                                                     await updateClientTodo(c, cycleStart, catKey, { ...catTodo, items: next });
@@ -2699,11 +3136,11 @@ const AdminDashboard = ({
                                                                 <Trash2 className="w-4 h-4" />
                                                               </button>
                                                             </li>
-                                                          ))}
+                                                          )})}
                                                         </ul>
                                                       )}
                                                       <div className="space-y-2">
-                                                        <div className="flex gap-2">
+                                                        <div className="grid grid-cols-1 lg:grid-cols-4 gap-2">
                                                           <input
                                                             type="text"
                                                             value={todoAddTextDraft[catKey] || ''}
@@ -2714,7 +3151,7 @@ const AdminDashboard = ({
                                                               }))
                                                             }
                                                             placeholder="New to-do..."
-                                                            className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                                            className="lg:col-span-2 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
                                                             onKeyDown={(e) => {
                                                               if (e.key !== 'Enter') return;
                                                               e.preventDefault();
@@ -2729,6 +3166,11 @@ const AdminDashboard = ({
                                                                     text,
                                                                     done: false,
                                                                     doneAt: null,
+                                                                    recurring: false,
+                                                                    recurringId: null,
+                                                                    dueDate: parseDateInputToMs(todoAddDueDraft[catKey] || ''),
+                                                                    assigneeEmails: (todoAddAssigneesDraft[catKey] || [String(user?.email || '').toLowerCase()]).filter(Boolean),
+                                                                    recurrence: null,
                                                                   };
                                                                   await updateClientTodo(c, cycleStart, catKey, {
                                                                     ...catTodo,
@@ -2739,12 +3181,44 @@ const AdminDashboard = ({
                                                                     ...prev,
                                                                     [catKey]: '',
                                                                   }));
+                                                                  setTodoAddDueDraft((prev) => ({
+                                                                    ...prev,
+                                                                    [catKey]: '',
+                                                                  }));
                                                                 } finally {
                                                                   setTodoSaving(false);
                                                                 }
                                                               })();
                                                             }}
                                                           />
+                                                          <input
+                                                            type="date"
+                                                            value={todoAddDueDraft[catKey] || ''}
+                                                            onChange={(e) =>
+                                                              setTodoAddDueDraft((prev) => ({
+                                                                ...prev,
+                                                                [catKey]: e.target.value,
+                                                              }))
+                                                            }
+                                                            className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                                          />
+                                                          <select
+                                                            multiple
+                                                            value={todoAddAssigneesDraft[catKey] || [String(user?.email || '').toLowerCase()].filter(Boolean)}
+                                                            onChange={(e) =>
+                                                              setTodoAddAssigneesDraft((prev) => ({
+                                                                ...prev,
+                                                                [catKey]: Array.from(e.target.selectedOptions).map((o) => o.value),
+                                                              }))
+                                                            }
+                                                            className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px]"
+                                                          >
+                                                            {assignableEmails.map((email) => (
+                                                              <option key={email} value={email}>
+                                                                {email}
+                                                              </option>
+                                                            ))}
+                                                          </select>
                                                           <button
                                                             type="button"
                                                             disabled={
@@ -2762,6 +3236,11 @@ const AdminDashboard = ({
                                                                   text,
                                                                   done: false,
                                                                   doneAt: null,
+                                                                  recurring: false,
+                                                                  recurringId: null,
+                                                                  dueDate: parseDateInputToMs(todoAddDueDraft[catKey] || ''),
+                                                                  assigneeEmails: (todoAddAssigneesDraft[catKey] || [String(user?.email || '').toLowerCase()]).filter(Boolean),
+                                                                  recurrence: null,
                                                                 };
                                                                 await updateClientTodo(c, cycleStart, catKey, {
                                                                   ...catTodo,
@@ -2769,6 +3248,10 @@ const AdminDashboard = ({
                                                                   items: [...items, newItem],
                                                                 });
                                                                 setTodoAddTextDraft((prev) => ({
+                                                                  ...prev,
+                                                                  [catKey]: '',
+                                                                }));
+                                                                setTodoAddDueDraft((prev) => ({
                                                                   ...prev,
                                                                   [catKey]: '',
                                                                 }));
