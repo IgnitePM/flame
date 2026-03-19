@@ -1868,16 +1868,24 @@ export default function App() {
                     Reset Carryover (All)
                   </button>
                 </div>
+                <p className="text-xs text-slate-400">
+                  Tip: each hourly retainer row has its own
+                  <span className="mx-1 font-black text-amber-700">
+                    Reset Carryover
+                  </span>
+                  button.
+                </p>
                 <div className="space-y-3">
                   {retainerConfigCategories.map((type) => {
                     const units = (editingClient.retainerUnits || {})[type] ?? (type === 'Social Ad Budget' ? 'dollar' : 'hours');
                     const unitLabel = units === 'dollar' ? '$' : 'hrs';
                     const step = units === 'dollar' ? 1 : 0.5;
                     const categoryResetKey = carryoverCategoryKey(type);
+                    const lastCategoryReset = editingClient.carryoverResetByCategory?.[categoryResetKey];
                     return (
                       <div
                         key={type}
-                        className="flex justify-between items-center bg-slate-50 p-4 rounded-2xl border border-slate-100"
+                        className="flex justify-between items-start bg-slate-50 p-4 rounded-2xl border border-slate-100 gap-3"
                       >
                         <div className="flex flex-col">
                           <span className="font-bold text-slate-700 text-sm">
@@ -1886,33 +1894,45 @@ export default function App() {
                           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                             {units === 'dollar' ? 'Per-cycle budget (dollars)' : 'Allocation in hours'}
                           </span>
+                          {units !== 'dollar' && (
+                            <div className="mt-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (
+                                    !confirm(
+                                      `Reset carryover for "${type}" only? This starts this category fresh from the current period.`,
+                                    )
+                                  ) {
+                                    return;
+                                  }
+                                  setEditingClient({
+                                    ...editingClient,
+                                    carryoverResetByCategory: {
+                                      ...(editingClient.carryoverResetByCategory || {}),
+                                      [categoryResetKey]: Date.now(),
+                                    },
+                                  });
+                                }}
+                                className="text-[10px] bg-amber-100 text-amber-800 hover:bg-amber-200 px-3 py-1.5 rounded-lg font-black uppercase tracking-widest transition-all"
+                                title="Reset this category carryover only"
+                              >
+                                Reset Carryover
+                              </button>
+                              {lastCategoryReset ? (
+                                <div className="mt-1 text-[10px] font-bold text-slate-400">
+                                  Last reset:{' '}
+                                  {new Date(lastCategoryReset).toLocaleDateString()}
+                                </div>
+                              ) : (
+                                <div className="mt-1 text-[10px] font-bold text-slate-400">
+                                  Last reset: never
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                         <div className="flex items-center gap-2">
-                          {units !== 'dollar' && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (
-                                  !confirm(
-                                    `Reset carryover for "${type}" only? This starts this category fresh from the current period.`,
-                                  )
-                                ) {
-                                  return;
-                                }
-                                setEditingClient({
-                                  ...editingClient,
-                                  carryoverResetByCategory: {
-                                    ...(editingClient.carryoverResetByCategory || {}),
-                                    [categoryResetKey]: Date.now(),
-                                  },
-                                });
-                              }}
-                              className="text-[10px] bg-amber-50 text-amber-700 hover:bg-amber-100 px-2.5 py-1.5 rounded-lg font-bold uppercase tracking-widest transition-all"
-                              title="Reset this category carryover only"
-                            >
-                              Reset
-                            </button>
-                          )}
                           <select
                             value={units}
                             onChange={(e) =>
