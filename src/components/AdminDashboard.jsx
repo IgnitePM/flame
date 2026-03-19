@@ -26,6 +26,9 @@ import {
 const AdminDashboard = ({
   adminTab,
   setAdminTab,
+  clientId,
+  navigateToClient,
+  navigateToClientsList,
   currentUserRole,
   user,
   clients,
@@ -117,6 +120,7 @@ const AdminDashboard = ({
     .sort((a, b) => a.email.localeCompare(b.email));
   const [clientCycleOffsets, setClientCycleOffsets] = useState({});
   const [clientStatusFilter, setClientStatusFilter] = useState('all');
+  const [clientSearchQuery, setClientSearchQuery] = useState('');
   const [clientNotesOpen, setClientNotesOpen] = useState({});
   const [clientNotesDraft, setClientNotesDraft] = useState({});
   const [clientNotesSaving, setClientNotesSaving] = useState({});
@@ -934,6 +938,22 @@ const AdminDashboard = ({
       {/* Clients Tab */}
       {adminTab === 'clients' && (
         <div className="space-y-6">
+          {clientId && (
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => navigateToClientsList?.()}
+                className="px-4 py-2 rounded-2xl font-black text-slate-600 bg-white border border-slate-100 shadow-sm hover:bg-slate-50 transition-colors flex items-center gap-2"
+                title="Back to Clients"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                Back to Clients
+              </button>
+              <div className="text-xs font-black text-slate-400 uppercase tracking-widest">
+                Client details
+              </div>
+            </div>
+          )}
+
           <div className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-sm">
             <h3 className="font-black text-xl mb-4">Add Client Account</h3>
             <div className="flex flex-col sm:flex-row gap-4">
@@ -970,33 +990,65 @@ const AdminDashboard = ({
           </div>
 
           <div className="bg-white p-4 rounded-[32px] border border-slate-100 shadow-sm">
-            <div className="flex bg-slate-100 p-1 rounded-2xl w-full sm:w-auto">
-              {[
-                { id: 'all', label: 'All' },
-                { id: 'active', label: 'Active' },
-                { id: 'inactive', label: 'Inactive' },
-              ].map((opt) => (
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              <div className="flex bg-slate-100 p-1 rounded-2xl w-full sm:w-auto">
+                {[
+                  { id: 'all', label: 'All' },
+                  { id: 'active', label: 'Active' },
+                  { id: 'inactive', label: 'Inactive' },
+                ].map((opt) => (
+                  <button
+                    key={opt.id}
+                    onClick={() => setClientStatusFilter(opt.id)}
+                    className={`flex-1 sm:flex-none px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                      clientStatusFilter === opt.id
+                        ? 'bg-white shadow-md text-[#fd7414]'
+                        : 'text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              <input
+                type="text"
+                value={clientSearchQuery}
+                onChange={(e) => setClientSearchQuery(e.target.value)}
+                className="flex-1 bg-slate-50 border-slate-200 border px-4 py-3 rounded-2xl font-bold outline-none placeholder:text-slate-300"
+                placeholder="Search clients (name or email)…"
+              />
+
+              {clientSearchQuery.trim() !== '' && (
                 <button
-                  key={opt.id}
-                  onClick={() => setClientStatusFilter(opt.id)}
-                  className={`flex-1 sm:flex-none px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap ${
-                    clientStatusFilter === opt.id
-                      ? 'bg-white shadow-md text-[#fd7414]'
-                      : 'text-slate-400 hover:text-slate-600'
-                  }`}
+                  onClick={() => setClientSearchQuery('')}
+                  className="px-4 py-3 rounded-2xl font-black text-slate-500 bg-slate-100 hover:bg-slate-200 transition-colors"
+                  title="Clear search"
                 >
-                  {opt.label}
+                  Clear
                 </button>
-              ))}
+              )}
             </div>
           </div>
 
           <div className="grid grid-cols-1 gap-6">
             {clients
+              .filter((c) => (!clientId ? true : c.id === clientId))
               .filter((c) => {
                 if (clientStatusFilter === 'active') return c.status !== 'paused';
                 if (clientStatusFilter === 'inactive') return c.status === 'paused';
                 return true;
+              })
+              .filter((c) => {
+                if (clientId) return true;
+                const q = clientSearchQuery.trim().toLowerCase();
+                if (!q) return true;
+                const name = String(c?.name || '').toLowerCase();
+                const emails = Array.isArray(c?.clientEmails) ? c.clientEmails : [];
+                const emailMatch = emails.some((e) =>
+                  String(e || '').toLowerCase().includes(q),
+                );
+                return name.includes(q) || emailMatch;
               })
               .filter((c) => !c.archived)
               .map((c) => {
@@ -1015,7 +1067,7 @@ const AdminDashboard = ({
               const period = getBillingPeriod(c.billingDay || 1, effectiveOffset);
               const mStart = period.start;
               const mEnd = period.end;
-              const isExpanded = expandedClients[c.id];
+              const isExpanded = clientId ? true : expandedClients[c.id];
 
               const periodTasks = taskLogs.filter(
                 (t) =>
@@ -1079,6 +1131,13 @@ const AdminDashboard = ({
                       className="flex gap-1"
                       onClick={(e) => e.stopPropagation()}
                     >
+                      <button
+                        onClick={() => navigateToClient?.(c.id)}
+                        className="p-2 text-slate-700 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors"
+                        title="Open client page"
+                      >
+                        <ArrowRight className="w-5 h-5" />
+                      </button>
                       <button
                         onClick={() => {
                           setProjectModal({ ...c, lockClient: true });

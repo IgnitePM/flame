@@ -4,8 +4,9 @@ service cloud.firestore {
     function isSignedIn() { return request.auth != null; }
     function emailLower() { return request.auth.token.email.lower(); }
     function adminDoc() { return get(/databases/$(database)/documents/admins/$(emailLower())); }
+    function adminExists() { return exists(/databases/$(database)/documents/admins/$(emailLower())); }
     function safeAdminRole() {
-      return adminDoc().exists() && (adminDoc().data.role is string) ? adminDoc().data.role : '';
+      return adminExists() && (adminDoc().data.role is string) ? adminDoc().data.role : '';
     }
     function isAdmin() { return isSignedIn() && safeAdminRole() == 'admin'; }
     function isBilling() { return isSignedIn() && (safeAdminRole() in ['admin','billing']); }
@@ -16,7 +17,7 @@ service cloud.firestore {
     function isAnyStaff() {
       // Treat anyone with an admin doc as staff, regardless of role string,
       // so role naming like "super_admin" doesn't accidentally lose permissions.
-      return isSignedIn() && (isIgniteStaff() || adminDoc().exists());
+      return isSignedIn() && (isIgniteStaff() || adminExists());
     }
 
     function clientDoc(clientId) {
