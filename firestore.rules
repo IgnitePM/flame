@@ -4,14 +4,17 @@ service cloud.firestore {
     function isSignedIn() { return request.auth != null; }
     function emailLower() { return request.auth.token.email.lower(); }
     function adminDoc() { return get(/databases/$(database)/documents/admins/$(emailLower())); }
-    function isAdmin() { return isSignedIn() && adminDoc().data.role == 'admin'; }
-    function isBilling() { return isSignedIn() && (adminDoc().data.role in ['admin','billing']); }
-    function isKiosk() { return isSignedIn() && adminDoc().data.role == 'kiosk'; }
+    function safeAdminRole() {
+      return adminDoc().exists && (adminDoc().data.role is string) ? adminDoc().data.role : '';
+    }
+    function isAdmin() { return isSignedIn() && safeAdminRole() == 'admin'; }
+    function isBilling() { return isSignedIn() && (safeAdminRole() in ['admin','billing']); }
+    function isKiosk() { return isSignedIn() && safeAdminRole() == 'kiosk'; }
     function isIgniteStaff() {
       return isSignedIn() && request.auth.token.email.matches('.*@ignitepm\\.com$');
     }
     function isAnyStaff() {
-      return isSignedIn() && (isIgniteStaff() || adminDoc().data.role in ['admin','billing','kiosk']);
+      return isSignedIn() && (isIgniteStaff() || safeAdminRole() in ['admin','billing','kiosk']);
     }
 
     function clientDoc(clientId) {
@@ -43,7 +46,9 @@ service cloud.firestore {
 
     match /clients/{clientId} {
       allow read: if clientAllowsEmail(clientId);
-      allow create: if isBilling();
+      // Allow staff to create clients (admin/billing or Ignite staff email).
+      // Exclude kiosk role from creating clients.
+      allow create: if isSignedIn() && (isBilling() || (isIgniteStaff() && !isKiosk()));
       // Billing can update billing related fields; keep simple: admin/billing can update.
       // Staff can update notes/cycle notes as part of kiosk/admin workflows.
       allow update: if isSignedIn() && isAnyStaff();
