@@ -90,25 +90,38 @@ const EmployeeKiosk = ({
   };
 
   const getDraftRecurrence = (dueDateMs) => {
-    if (todoRecurrenceMode !== 'monthly') return null;
-    return {
-      type: 'monthly_fixed_day',
-      dayOfMonth: new Date(dueDateMs || Date.now()).getDate(),
-    };
+    const m = String(todoRecurrenceMode || 'none');
+    if (m === 'none') return null;
+    const hasMs = dueDateMs != null && !Number.isNaN(Number(dueDateMs));
+    const src = hasMs ? new Date(dueDateMs) : new Date();
+    if (Number.isNaN(src.getTime())) return null;
+    src.setHours(12, 0, 0, 0);
+    if (m === 'weekly') {
+      return { type: 'weekly_weekday', weekday: src.getDay() };
+    }
+    if (m === 'monthly') {
+      return { type: 'monthly_fixed_day', dayOfMonth: src.getDate() };
+    }
+    if (m === 'annual') {
+      return { type: 'annual_fixed', month: src.getMonth(), day: src.getDate() };
+    }
+    return null;
   };
 
   const buildNewTodoItem = (text) => {
     const dueDate = parseDateInputToMs(todoDueDate);
+    const recurrence = getDraftRecurrence(dueDate);
+    const id = `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     return {
-      id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      id,
       text: String(text || '').trim(),
       done: false,
       doneAt: null,
-      recurring: false,
-      recurringId: null,
+      recurring: !!recurrence,
+      recurringId: recurrence ? id : null,
       dueDate,
       assigneeEmails: [String(user?.email || '').toLowerCase()].filter(Boolean),
-      recurrence: getDraftRecurrence(dueDate),
+      recurrence,
     };
   };
 
@@ -1193,7 +1206,9 @@ const EmployeeKiosk = ({
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
                 >
                   <option value="none">No repeat</option>
-                  <option value="monthly">Monthly</option>
+                  <option value="weekly">Weekly (same weekday)</option>
+                  <option value="monthly">Monthly (same day of month)</option>
+                  <option value="annual">Annually (same calendar date)</option>
                 </select>
               </div>
               <div className="flex justify-end gap-2 pt-1">

@@ -3,6 +3,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  ListChecks,
   Plus,
   FolderGit2,
   LogOut,
@@ -55,7 +56,29 @@ const ClientPortal = ({
       e.date >= mStart &&
       e.date <= mEnd,
   );
+  const retainerTasksThisCycle = cTasks.filter((t) => !t.projectId);
+  const projectTasksThisCycle = cTasks.filter((t) => t.projectId);
+  const retainerExpsThisCycle = cExps.filter((e) => !e.projectId);
+  const projectExpsThisCycle = cExps.filter((e) => e.projectId);
   const cProjects = projects.filter((p) => p.clientId === clientProfile.id);
+
+  const todoState =
+    getTodoStateForCycle && todoCategoryKey
+      ? getTodoStateForCycle(clientProfile, mStart) || {}
+      : {};
+  const labelForTodoCategoryKey = (key) => {
+    const hit = Object.keys(clientProfile.retainers || {}).find(
+      (cat) => todoCategoryKey(cat) === key,
+    );
+    if (hit) return hit;
+    if (key === todoCategoryKey('General / Unclassified')) {
+      return 'General / Unclassified';
+    }
+    return key;
+  };
+  const hasTodosForCycle = Object.values(todoState).some(
+    (cat) => (cat?.items || []).length > 0,
+  );
 
   const pendingRequests = cProjects.filter((p) =>
     ['requested', 'estimate_sent', 'approved', 'active'].includes(p.status),
@@ -438,25 +461,97 @@ const ClientPortal = ({
           </div>
         )}
 
+        {getTodoStateForCycle && todoCategoryKey && (
+          <div className="bg-white p-8 sm:p-10 rounded-[40px] shadow-sm border border-slate-100 space-y-6">
+            <div className="flex items-center gap-3">
+              <ListChecks className="w-6 h-6 text-[#fd7414]" />
+              <div>
+                <h3 className="font-black text-xl text-slate-900">
+                  Tasks this billing cycle
+                </h3>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                  Shared by your team — view only
+                </p>
+              </div>
+            </div>
+            {!hasTodosForCycle ? (
+              <p className="text-slate-400 italic text-sm">
+                No tasks listed for this cycle yet.
+              </p>
+            ) : (
+              <div className="space-y-6">
+                {Object.entries(todoState).map(([catKey, catTodo]) => {
+                  const items = catTodo?.items || [];
+                  if (!items.length) return null;
+                  const closed = !!catTodo?.closed;
+                  return (
+                    <div
+                      key={catKey}
+                      className="rounded-2xl border border-slate-100 bg-slate-50/80 p-5 space-y-3"
+                    >
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest">
+                          {labelForTodoCategoryKey(catKey)}
+                        </h4>
+                        {closed && (
+                          <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                            Closed for cycle
+                          </span>
+                        )}
+                      </div>
+                      <ul className="space-y-2">
+                        {items.map((item) => (
+                          <li
+                            key={item.id}
+                            className={`flex flex-wrap items-baseline gap-2 text-sm ${
+                              item.done
+                                ? 'text-slate-400 line-through'
+                                : 'text-slate-800 font-medium'
+                            }`}
+                          >
+                            <span>{item.text || '(No description)'}</span>
+                            {item.recurring && (
+                              <span className="text-[9px] font-black uppercase tracking-widest text-[#fd7414] bg-orange-50 px-1.5 py-0.5 rounded">
+                                Recurring
+                              </span>
+                            )}
+                            {item.dueDate && (
+                              <span className="text-[10px] font-bold text-slate-400">
+                                Due{' '}
+                                {new Date(item.dueDate).toLocaleDateString()}
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="bg-white p-8 sm:p-10 rounded-[40px] shadow-sm border border-slate-100 space-y-6">
           <h3 className="font-black text-xl text-slate-900 mb-2">
-            Activity Log
+            Activity — retainer (this cycle)
           </h3>
-          {cTasks.length === 0 && cExps.length === 0 ? (
-            <p className="text-slate-400 italic">
-              No activity recorded for this cycle.
+          {retainerTasksThisCycle.length === 0 &&
+          retainerExpsThisCycle.length === 0 ? (
+            <p className="text-slate-400 italic text-sm">
+              No retainer time or expenses in this period.
             </p>
           ) : (
             <div className="space-y-4">
-              {cTasks.map((t) => (
+              {retainerTasksThisCycle.map((t) => (
                 <div
                   key={t.id}
-                  className="p-5 bg-slate-50 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+                  className="p-5 bg-slate-50 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-l-4 border-[#fd7414]/40"
                 >
                   <div>
                     <div className="flex items-center gap-2 mb-1">
                       <span className="font-black text-slate-800">
-                        {t.projectName}
+                        {t.projectName || 'Retainer'}
                       </span>
                       <span className="text-[10px] text-slate-400 font-bold">
                         {new Date(t.clockInTime).toLocaleDateString()}
@@ -468,12 +563,12 @@ const ClientPortal = ({
                       </p>
                     )}
                   </div>
-                  <div className="font-black text-[#fd7414] shrink-0">
-                    {formatTime(t.duration)}
+                  <div className="font-black text-[#fd7414] shrink-0 font-mono">
+                    {formatTime(getTaskDuration(t))}
                   </div>
                 </div>
               ))}
-              {cExps.map((e) => (
+              {retainerExpsThisCycle.map((e) => (
                 <div
                   key={e.id}
                   className="p-5 bg-slate-50 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-l-4 border-blue-400"
@@ -481,7 +576,7 @@ const ClientPortal = ({
                   <div>
                     <div className="flex items-center gap-2 mb-1">
                       <span className="font-black text-slate-800">
-                        {e.category} (Expense)
+                        {e.category || 'Expense'}
                       </span>
                       <span className="text-[10px] text-slate-400 font-bold">
                         {new Date(e.date).toLocaleDateString()}
@@ -495,14 +590,94 @@ const ClientPortal = ({
                   </div>
                   <div className="text-right">
                     <div className="font-black text-blue-500">
-                      ${e.finalCost.toFixed(2)}
+                      ${Number(e.finalCost || 0).toFixed(2)}
                     </div>
                     <div className="text-[10px] text-slate-400 font-bold uppercase mt-0.5">
-                      {e.equivalentHours.toFixed(2)} hrs deducted
+                      {(e.equivalentHours ?? 0).toFixed(2)} hrs deducted
                     </div>
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white p-8 sm:p-10 rounded-[40px] shadow-sm border border-slate-100 space-y-6">
+          <h3 className="font-black text-xl text-slate-900 mb-2">
+            Activity — custom projects (this cycle)
+          </h3>
+          {projectTasksThisCycle.length === 0 &&
+          projectExpsThisCycle.length === 0 ? (
+            <p className="text-slate-400 italic text-sm">
+              No project time or expenses logged in this period.
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {projectTasksThisCycle.map((t) => {
+                const pTitle =
+                  cProjects.find((p) => p.id === t.projectId)?.title ||
+                  'Project';
+                return (
+                  <div
+                    key={t.id}
+                    className="p-5 bg-slate-50 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-l-4 border-violet-400"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-black text-slate-800">
+                          {pTitle}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-bold">
+                          {new Date(t.clockInTime).toLocaleDateString()}
+                        </span>
+                      </div>
+                      {t.notes && (
+                        <p className="text-sm text-slate-500 font-medium">
+                          &quot;{t.notes}&quot;
+                        </p>
+                      )}
+                    </div>
+                    <div className="font-black text-[#fd7414] shrink-0 font-mono">
+                      {formatTime(getTaskDuration(t))}
+                    </div>
+                  </div>
+                );
+              })}
+              {projectExpsThisCycle.map((e) => {
+                const pTitle =
+                  cProjects.find((p) => p.id === e.projectId)?.title ||
+                  'Project';
+                return (
+                  <div
+                    key={e.id}
+                    className="p-5 bg-slate-50 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-l-4 border-violet-500"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-black text-slate-800">
+                          {pTitle}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-bold">
+                          {new Date(e.date).toLocaleDateString()}
+                        </span>
+                      </div>
+                      {e.description && (
+                        <p className="text-sm text-slate-500 font-medium">
+                          &quot;{e.description}&quot;
+                        </p>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <div className="font-black text-blue-500">
+                        ${Number(e.finalCost || 0).toFixed(2)}
+                      </div>
+                      <div className="text-[10px] text-slate-400 font-bold uppercase mt-0.5">
+                        {(e.equivalentHours ?? 0).toFixed(2)} hrs deducted
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

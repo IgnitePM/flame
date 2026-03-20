@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Clock,
   User,
@@ -62,7 +62,15 @@ import {
 import ClientPortal from './components/ClientPortal.jsx';
 import EmployeeKiosk from './components/EmployeeKiosk.jsx';
 import AdminDashboard from './components/AdminDashboard.jsx';
-import { Routes, Route, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
+import {
+  Routes,
+  Route,
+  Navigate,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from 'react-router-dom';
 
 const DEFAULT_PROJECT_CATEGORIES = [
   'SEO',
@@ -92,13 +100,49 @@ const IgniteLogo = ({ className }) => (
 
 const KioskRouteView = (props) => <EmployeeKiosk {...props} />;
 
+const CLIENT_PAGE_TABS = ['summary', 'tasks', 'projects', 'timesheets'];
+
 const AdminDashboardRouteView = ({ adminDashboardProps, navigate }) => {
   const params = useParams();
   const clientId = params?.clientId || null;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawTab = searchParams.get('tab');
+  const clientPageTab =
+    clientId && CLIENT_PAGE_TABS.includes(rawTab) ? rawTab : 'summary';
+  const clientUrlCycle = clientId ? searchParams.get('cycle') : null;
+
+  const mergeClientSearchParams = useCallback(
+    (patch) => {
+      if (!clientId) return;
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (patch.tab !== undefined) {
+            if (patch.tab === 'summary') next.delete('tab');
+            else next.set('tab', patch.tab);
+          }
+          if (patch.cycle !== undefined) {
+            if (patch.cycle == null || patch.cycle === '') next.delete('cycle');
+            else next.set('cycle', String(patch.cycle));
+          }
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [clientId, setSearchParams],
+  );
+
+  const setClientPageTab = (tab) => mergeClientSearchParams({ tab });
+
   return (
     <AdminDashboard
       {...adminDashboardProps}
       clientId={clientId}
+      clientPageTab={clientId ? clientPageTab : null}
+      setClientPageTab={setClientPageTab}
+      clientUrlCycle={clientUrlCycle}
+      mergeClientSearchParams={mergeClientSearchParams}
       navigateToClient={(id) => navigate(`/admin/clients/${id}`)}
       navigateToClientsList={() => navigate('/admin')}
     />
@@ -726,15 +770,55 @@ export default function App() {
     String(cat ?? '').replace(/[~*[\]/]/g, '_').replace(/\./g, '_');
 
   const computeRecurringDueDate = (recurrence, cycleStart) => {
-    if (!recurrence || recurrence.type !== 'monthly_fixed_day') return null;
-    const day = Number(recurrence.dayOfMonth || 0);
-    if (!day) return null;
+    if (!recurrence || !recurrence.type) return null;
     const base = new Date(cycleStart);
-    const y = base.getFullYear();
-    const m = base.getMonth();
-    const lastDay = new Date(y, m + 1, 0).getDate();
-    const clamped = Math.min(Math.max(day, 1), lastDay);
-    return new Date(y, m, clamped, 12, 0, 0, 0).getTime();
+    base.setHours(12, 0, 0, 0);
+    const cycleStartMs = base.getTime();
+
+    if (recurrence.type === 'monthly_fixed_day') {
+      const day = Number(recurrence.dayOfMonth || 0);
+      if (!day) return null;
+      const y = base.getFullYear();
+      const m = base.getMonth();
+      const lastDay = new Date(y, m + 1, 0).getDate();
+      const clamped = Math.min(Math.max(day, 1), lastDay);
+      return new Date(y, m, clamped, 12, 0, 0, 0).getTime();
+    }
+
+    if (recurrence.type === 'weekly_weekday') {
+      const wd = Number(recurrence.weekday);
+      if (!Number.isFinite(wd) || wd < 0 || wd > 6) return null;
+      const d = new Date(base);
+      for (let step = 0; step < 7; step++) {
+        if (d.getDay() === wd) return d.getTime();
+        d.setDate(d.getDate() + 1);
+      }
+      return null;
+    }
+
+    if (recurrence.type === 'annual_fixed') {
+      const month = Number(recurrence.month);
+      const day = Number(recurrence.day);
+      if (
+        !Number.isFinite(month) ||
+        month < 0 ||
+        month > 11 ||
+        !Number.isFinite(day) ||
+        day < 1
+      ) {
+        return null;
+      }
+      const tryYear = (y) => {
+        const last = new Date(y, month + 1, 0).getDate();
+        const dd = Math.min(Math.max(day, 1), last);
+        return new Date(y, month, dd, 12, 0, 0, 0).getTime();
+      };
+      let t = tryYear(base.getFullYear());
+      if (t < cycleStartMs) t = tryYear(base.getFullYear() + 1);
+      return t;
+    }
+
+    return null;
   };
 
   const carryoverCategoryKey = (cat) =>
@@ -767,19 +851,29 @@ export default function App() {
         }));
       const recurring = prevItems
         .filter((i) => !!i.recurring)
-        .map((i) => ({
-          id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-          text: i.text,
-          done: false,
-          doneAt: null,
-          recurring: true,
-          recurringId: i.recurringId || i.id,
-          assigneeEmails: Array.isArray(i.assigneeEmails)
-            ? i.assigneeEmails.filter(Boolean)
-            : [],
-          recurrence: i.recurrence || null,
-          dueDate: computeRecurringDueDate(i.recurrence, cycleStart),
-        }));
+        .map((i) => {
+          const effectiveRecurrence =
+            i.recurrence ||
+            (i.dueDate
+              ? {
+                  type: 'monthly_fixed_day',
+                  dayOfMonth: new Date(i.dueDate).getDate(),
+                }
+              : null);
+          return {
+            id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+            text: i.text,
+            done: false,
+            doneAt: null,
+            recurring: true,
+            recurringId: i.recurringId || i.id,
+            assigneeEmails: Array.isArray(i.assigneeEmails)
+              ? i.assigneeEmails.filter(Boolean)
+              : [],
+            recurrence: i.recurrence || effectiveRecurrence,
+            dueDate: computeRecurringDueDate(effectiveRecurrence, cycleStart),
+          };
+        });
       result[ck] = { closed: false, items: [...carried, ...recurring] };
     });
     return result;
@@ -811,19 +905,29 @@ export default function App() {
         }));
       const recurring = prevItems
         .filter((i) => !!i.recurring)
-        .map((i) => ({
-          id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-          text: i.text,
-          done: false,
-          doneAt: null,
-          recurring: true,
-          recurringId: i.recurringId || i.id,
-          assigneeEmails: Array.isArray(i.assigneeEmails)
-            ? i.assigneeEmails.filter(Boolean)
-            : [],
-          recurrence: i.recurrence || null,
-          dueDate: computeRecurringDueDate(i.recurrence, cycleStart),
-        }));
+        .map((i) => {
+          const effectiveRecurrence =
+            i.recurrence ||
+            (i.dueDate
+              ? {
+                  type: 'monthly_fixed_day',
+                  dayOfMonth: new Date(i.dueDate).getDate(),
+                }
+              : null);
+          return {
+            id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+            text: i.text,
+            done: false,
+            doneAt: null,
+            recurring: true,
+            recurringId: i.recurringId || i.id,
+            assigneeEmails: Array.isArray(i.assigneeEmails)
+              ? i.assigneeEmails.filter(Boolean)
+              : [],
+            recurrence: i.recurrence || effectiveRecurrence,
+            dueDate: computeRecurringDueDate(effectiveRecurrence, cycleStart),
+          };
+        });
       cycles[String(cycleStart)][ck] = { closed: false, items: [...carried, ...recurring] };
     });
     return cycles;
@@ -1433,6 +1537,8 @@ export default function App() {
         }
         formatTime={formatTime}
         getTaskDuration={getTaskDuration}
+        getTodoStateForCycle={getTodoStateForCycle}
+        todoCategoryKey={todoCategoryKey}
         setAddonModal={setAddonModal}
         setProjectModal={setProjectModal}
         updateProject={(projectId, data) =>

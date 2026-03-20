@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Activity,
   ArrowRight,
@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  Copy,
   DollarSign,
   Edit3,
   FileDown,
@@ -24,10 +25,255 @@ import {
   X,
 } from 'lucide-react';
 
+/** Custom projects list used on client cards (list accordion + client detail Projects tab). */
+function ClientCustomProjectsPanel({
+  client,
+  clientProjects,
+  taskLogs,
+  cycleStartMs,
+  getTaskDuration,
+  isCycleLocked,
+  setProjectModal,
+  setProjectValues,
+  setProjectEditError,
+  setProjectEditModal,
+  setProjectEditValues,
+  setDeleteConfirm,
+  updateDoc,
+  doc,
+  logAudit,
+}) {
+  const c = client;
+  const mStart = cycleStartMs;
+  return (
+    <div className="bg-slate-50/50 p-6 border-t border-slate-100 animate-in slide-in-from-top-4 duration-300 space-y-6">
+      <div>
+        <div className="flex justify-between items-center mb-3">
+          <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+            Custom Projects
+          </h5>
+          <button
+            onClick={() => {
+              setProjectModal({ ...c, lockClient: true });
+              setProjectValues({
+                clientId: c.id,
+                clientName: c.name,
+                title: '',
+                description: '',
+                estimatedBudget: '',
+                estimatedHours: '',
+              });
+            }}
+            className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest"
+          >
+            + New Project
+          </button>
+        </div>
+        {clientProjects.length === 0 ? (
+          <p className="text-xs italic text-slate-400">No custom projects yet.</p>
+        ) : (
+          <div className="space-y-3">
+            {clientProjects
+              .filter((p) => !(p.status === 'closed' && p.invoiced))
+              .map((p) => {
+                const pTasks = taskLogs.filter((t) => t.projectId === p.id);
+                const totalHours =
+                  pTasks.reduce((a, b) => a + getTaskDuration(b), 0) / 3600000;
+                const estHours = Number(p.estimatedHours || 0);
+                const projectPercent =
+                  estHours > 0
+                    ? Math.min(100, (totalHours / estHours) * 100)
+                    : totalHours > 0
+                      ? 100
+                      : 0;
+                return (
+                  <div
+                    key={p.id}
+                    className="p-4 rounded-2xl border border-slate-100 bg-white flex flex-col sm:flex-row justify-between gap-4"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-black text-sm text-slate-800">
+                          {p.title}
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${
+                            p.status === 'requested'
+                              ? 'bg-orange-100 text-orange-600'
+                              : p.status === 'active'
+                                ? 'bg-emerald-100 text-emerald-600'
+                                : 'bg-slate-200 text-slate-500'
+                          }`}
+                        >
+                          {p.status}
+                        </span>
+                        {p.invoiced && (
+                          <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
+                            Invoiced
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-slate-500 mb-1">
+                        Est. Budget: ${Number(p.estimatedBudget || 0).toFixed(2)} • Est. Hours:{' '}
+                        {Number(p.estimatedHours || 0).toFixed(1)}h • Tracked:{' '}
+                        {totalHours.toFixed(2)}h
+                      </div>
+                      <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden mb-1">
+                        <div
+                          className={`h-2 rounded-full ${
+                            projectPercent > 100
+                              ? 'bg-red-500'
+                              : projectPercent > 85
+                                ? 'bg-orange-500'
+                                : 'bg-emerald-500'
+                          }`}
+                          style={{
+                            width: `${Math.min(projectPercent, 100)}%`,
+                          }}
+                        />
+                      </div>
+                      {p.description && (
+                        <p className="text-xs text-slate-600 italic">
+                          &quot;{p.description}&quot;
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-2 items-end">
+                      {(p.status === 'requested' || p.status === 'approved') && (
+                        <button
+                          onClick={async () => {
+                            if (isCycleLocked(c, mStart)) {
+                              window.alert(
+                                'This billing cycle is locked. Unlock to start projects.',
+                              );
+                              return;
+                            }
+                            try {
+                              await updateDoc(doc('projects', p.id), {
+                                status: 'active',
+                                startedAt: Date.now(),
+                                notificationState: {
+                                  ...(p.notificationState || {}),
+                                  adminApproved: false,
+                                },
+                              });
+                              await logAudit?.({
+                                type: 'project_started',
+                                entityType: 'project',
+                                entityId: p.id,
+                                clientId: c.id,
+                              });
+                            } catch (err) {
+                              window.alert(
+                                `Could not start project: ${err?.message || String(err)}`,
+                              );
+                            }
+                          }}
+                          className="px-3 py-1 rounded-xl bg-black text-white text-[10px] font-black uppercase tracking-widest hover:bg-slate-900"
+                        >
+                          Start Project
+                        </button>
+                      )}
+                      <button
+                        onClick={() => {
+                          setProjectEditError('');
+                          setProjectEditModal({ project: p, client: c });
+                          setProjectEditValues({
+                            estimatedBudget: String(p.estimatedBudget ?? ''),
+                            estimatedHours: String(p.estimatedHours ?? ''),
+                          });
+                        }}
+                        className="px-3 py-1 rounded-xl bg-white border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-600 hover:bg-slate-100"
+                      >
+                        Edit Estimates
+                      </button>
+                      {p.status !== 'closed' && (
+                        <button
+                          onClick={async () => {
+                            if (isCycleLocked(c, mStart)) {
+                              window.alert(
+                                'This billing cycle is locked. Unlock to close projects.',
+                              );
+                              return;
+                            }
+                            try {
+                              await updateDoc(doc('projects', p.id), {
+                                status: 'closed',
+                                closedAt: Date.now(),
+                              });
+                              await logAudit?.({
+                                type: 'project_closed',
+                                entityType: 'project',
+                                entityId: p.id,
+                                clientId: c.id,
+                              });
+                            } catch (err) {
+                              window.alert(
+                                `Could not close project: ${err?.message || String(err)}`,
+                              );
+                            }
+                          }}
+                          className="px-3 py-1 rounded-xl bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest hover:bg-black"
+                        >
+                          Mark Complete
+                        </button>
+                      )}
+                      {p.status === 'closed' && !p.invoiced && (
+                        <button
+                          onClick={() =>
+                            isCycleLocked(c, mStart)
+                              ? window.alert(
+                                  'This billing cycle is locked. Unlock to mark invoiced.',
+                                )
+                              : updateDoc(doc('projects', p.id), {
+                                  invoiced: true,
+                                }).then(() =>
+                                  logAudit?.({
+                                    type: 'project_marked_invoiced',
+                                    entityType: 'project',
+                                    entityId: p.id,
+                                    clientId: c.id,
+                                  }),
+                                )
+                          }
+                          className="px-3 py-1 rounded-xl bg-blue-500 text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-600"
+                        >
+                          Mark Invoiced
+                        </button>
+                      )}
+                      <button
+                        onClick={() =>
+                          setDeleteConfirm({
+                            collection: 'projects',
+                            id: p.id,
+                            title: `custom project "${p.title}" for ${c.name}`,
+                          })
+                        }
+                        className="px-3 py-1 rounded-xl bg-white border border-red-100 text-[10px] font-black uppercase tracking-widest text-red-400 hover:bg-red-50"
+                      >
+                        Delete Project
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const AdminDashboard = ({
   adminTab,
   setAdminTab,
   clientId,
+  /** Active sub-tab on client detail; null when not on a client page. Synced to ?tab= in the router. */
+  clientPageTab = null,
+  setClientPageTab = () => {},
+  /** Billing cycle start (ms) from ?cycle= on client detail URL */
+  clientUrlCycle = null,
+  mergeClientSearchParams = () => {},
   navigateToClient,
   navigateToClientsList,
   currentUserRole,
@@ -144,6 +390,8 @@ const AdminDashboard = ({
   const [aiTodoLoading, setAiTodoLoading] = useState(false);
   const [retainerCategoryOpen, setRetainerCategoryOpen] = useState({});
   const [expandedProjectsExpenses, setExpandedProjectsExpenses] = useState({});
+  const clientDetailSubTab =
+    clientId && clientPageTab != null ? clientPageTab : 'summary';
   const [todoEditId, setTodoEditId] = useState(null);
   const [todoEditText, setTodoEditText] = useState('');
   const [todoSaving, setTodoSaving] = useState(false);
@@ -181,6 +429,8 @@ const AdminDashboard = ({
     stats,
     periodTasks,
     periodExps,
+    periodProjectTasks,
+    periodProjectExps,
     clientProjects,
     taskLogs,
     expenses,
@@ -194,6 +444,9 @@ const AdminDashboard = ({
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       });
+
+    const projectTitle = (pid) =>
+      (clientProjects || []).find((p) => p.id === pid)?.title || 'Project';
 
     const projectRows = (clientProjects || []).map((p) => {
       const pTasks = (taskLogs || []).filter(
@@ -320,6 +573,70 @@ const AdminDashboard = ({
                 </table>`
           }
 
+          <h2>Custom Project Tasks (line items, this cycle)</h2>
+          ${
+            (periodProjectTasks || []).length === 0
+              ? `<div class="muted">No custom project time logged.</div>`
+              : `<table>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Project</th>
+                      <th>Duration</th>
+                      <th>Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${(periodProjectTasks || [])
+                      .slice()
+                      .sort((a, b) => a.clockInTime - b.clockInTime)
+                      .map(
+                        (t) => `
+                          <tr>
+                            <td>${fmtDate(t.clockInTime)}</td>
+                            <td>${projectTitle(t.projectId)}</td>
+                            <td>${formatTime(getTaskDuration(t))}</td>
+                            <td>${t.notes ? t.notes : ''}</td>
+                          </tr>
+                        `,
+                      )
+                      .join('')}
+                  </tbody>
+                </table>`
+          }
+
+          <h2>Custom Project Expenses (line items, this cycle)</h2>
+          ${
+            (periodProjectExps || []).length === 0
+              ? `<div class="muted">No custom project expenses.</div>`
+              : `<table>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Project</th>
+                      <th>Description</th>
+                      <th>Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${(periodProjectExps || [])
+                      .slice()
+                      .sort((a, b) => a.date - b.date)
+                      .map(
+                        (e) => `
+                          <tr>
+                            <td>${fmtDate(e.date)}</td>
+                            <td>${projectTitle(e.projectId)}</td>
+                            <td>${e.description || ''}</td>
+                            <td>$${fmtMoney(e.finalCost || e.amount || 0)}</td>
+                          </tr>
+                        `,
+                      )
+                      .join('')}
+                  </tbody>
+                </table>`
+          }
+
           <h2>Custom Projects (this cycle)</h2>
           ${
             projectRows.length === 0
@@ -369,6 +686,8 @@ const AdminDashboard = ({
     stats,
     periodTasks,
     periodExps,
+    periodProjectTasks,
+    periodProjectExps,
     clientProjects,
     taskLogs,
     expenses,
@@ -426,6 +745,37 @@ const AdminDashboard = ({
         cycleStartStr,
         cycleEndStr,
         e.description || '',
+        (e.equivalentHours || 0).toFixed(2),
+        (e.finalCost || e.amount || 0).toFixed(2),
+        '',
+        new Date(e.date).toLocaleDateString(),
+      ]);
+    });
+
+    const projTitle = (pid) =>
+      (clientProjects || []).find((p) => p.id === pid)?.title || 'Project';
+
+    (periodProjectTasks || []).forEach((t) => {
+      rows.push([
+        'ProjectTask',
+        client?.name || '',
+        cycleStartStr,
+        cycleEndStr,
+        projTitle(t.projectId),
+        (getTaskDuration(t) / 3600000).toFixed(2),
+        '',
+        t.notes ? String(t.notes).replace(/\n/g, ' ') : '',
+        new Date(t.clockInTime).toLocaleDateString(),
+      ]);
+    });
+
+    (periodProjectExps || []).forEach((e) => {
+      rows.push([
+        'ProjectExpense',
+        client?.name || '',
+        cycleStartStr,
+        cycleEndStr,
+        `${projTitle(e.projectId)} — ${e.description || ''}`,
         (e.equivalentHours || 0).toFixed(2),
         (e.finalCost || e.amount || 0).toFixed(2),
         '',
@@ -611,6 +961,48 @@ const AdminDashboard = ({
   const isCycleLocked = (client, cycleStart) =>
     !!client?.cycleLocks?.[String(cycleStart)]?.locked;
 
+  const findOffsetForBillingCycleStart = useCallback(
+    (client, targetStartMs) => {
+      const bd = client.billingDay || 1;
+      for (let o = 0; o >= -1200; o--) {
+        const p = getBillingPeriod(bd, o);
+        if (p.start === targetStartMs) return o;
+      }
+      for (let o = 1; o <= 120; o++) {
+        const p = getBillingPeriod(bd, o);
+        if (p.start === targetStartMs) return o;
+      }
+      return null;
+    },
+    [getBillingPeriod],
+  );
+
+  useEffect(() => {
+    if (!clientId || clientUrlCycle == null || clientUrlCycle === '') return;
+    const target = Number(clientUrlCycle);
+    if (!Number.isFinite(target)) {
+      mergeClientSearchParams({ cycle: null });
+      return;
+    }
+    const c = clients.find((cl) => cl.id === clientId);
+    if (!c) return;
+    const off = findOffsetForBillingCycleStart(c, target);
+    if (off === null) {
+      mergeClientSearchParams({ cycle: null });
+      return;
+    }
+    setClientCycleOffsets((prev) => {
+      if (prev[c.id] === off) return prev;
+      return { ...prev, [c.id]: off };
+    });
+  }, [
+    clientId,
+    clientUrlCycle,
+    clients,
+    findOffsetForBillingCycleStart,
+    mergeClientSearchParams,
+  ]);
+
   const globalTodoRows = clients.flatMap((c) => {
     const cycleStart = getBillingPeriod(c.billingDay || 1, 0).start;
     const todoState = getTodoStateForCycle ? getTodoStateForCycle(c, cycleStart) : {};
@@ -663,15 +1055,35 @@ const AdminDashboard = ({
     return new Date(y, m - 1, d, 12, 0, 0, 0).getTime();
   };
 
-  const getDraftRecurrence = (categoryKey, dueDateMs) => {
-    const mode = String(todoAddRecurrenceDraft?.[categoryKey] || 'none');
-    if (mode !== 'monthly') return null;
-    const source = dueDateMs || Date.now();
-    return {
-      type: 'monthly_fixed_day',
-      dayOfMonth: new Date(source).getDate(),
-    };
+  /** Map UI recurrence mode + anchor due date into stored `recurrence` object. */
+  const buildRecurrenceFromMode = (mode, dueDateMs) => {
+    const m = String(mode || 'none');
+    if (m === 'none') return null;
+    const hasMs = dueDateMs != null && !Number.isNaN(Number(dueDateMs));
+    const src = hasMs ? new Date(dueDateMs) : new Date();
+    if (Number.isNaN(src.getTime())) return null;
+    src.setHours(12, 0, 0, 0);
+    if (m === 'weekly') {
+      return { type: 'weekly_weekday', weekday: src.getDay() };
+    }
+    if (m === 'monthly') {
+      return { type: 'monthly_fixed_day', dayOfMonth: src.getDate() };
+    }
+    if (m === 'annual') {
+      return {
+        type: 'annual_fixed',
+        month: src.getMonth(),
+        day: src.getDate(),
+      };
+    }
+    return null;
   };
+
+  const getDraftRecurrence = (categoryKey, dueDateMs) =>
+    buildRecurrenceFromMode(
+      todoAddRecurrenceDraft?.[categoryKey] || 'none',
+      dueDateMs,
+    );
 
   const resetTodoAddDraftOptionsForCategory = (categoryKey) => {
     setTodoAddDueDraft((prev) => ({ ...prev, [categoryKey]: '' }));
@@ -687,9 +1099,13 @@ const AdminDashboard = ({
       itemId: item.id,
     });
     setTodoEditOptionsDue(asDateInput(item.dueDate));
-    const monthly =
-      item?.recurrence?.type === 'monthly_fixed_day' || !!item?.recurring;
-    setTodoEditOptionsRecurrence(monthly ? 'monthly' : 'none');
+    const t = item?.recurrence?.type;
+    let editMode = 'none';
+    if (t === 'weekly_weekday') editMode = 'weekly';
+    else if (t === 'annual_fixed') editMode = 'annual';
+    else if (t === 'monthly_fixed_day') editMode = 'monthly';
+    else if (item?.recurring) editMode = 'monthly';
+    setTodoEditOptionsRecurrence(editMode);
   };
 
   const applyTodoEditOptionsModal = async () => {
@@ -716,20 +1132,14 @@ const AdminDashboard = ({
       return;
     }
     const dueDate = parseDateInputToMs(todoEditOptionsDue);
-    const mode = todoEditOptionsRecurrence;
-    const nextItem = { ...item, dueDate };
-    if (mode === 'monthly') {
-      nextItem.recurring = true;
-      nextItem.recurringId = item.recurringId || item.id;
-      nextItem.recurrence = {
-        type: 'monthly_fixed_day',
-        dayOfMonth: new Date(dueDate || Date.now()).getDate(),
-      };
-    } else {
-      nextItem.recurring = false;
-      nextItem.recurringId = null;
-      nextItem.recurrence = null;
-    }
+    const recurrence = buildRecurrenceFromMode(todoEditOptionsRecurrence, dueDate);
+    const nextItem = {
+      ...item,
+      dueDate,
+      recurring: !!recurrence,
+      recurringId: recurrence ? item.recurringId || item.id : null,
+      recurrence,
+    };
     const nextList = list.map((i) => (i.id === itemId ? nextItem : i));
     setTodoSaving(true);
     try {
@@ -1624,6 +2034,14 @@ const AdminDashboard = ({
               .filter((c) => !c.archived)
               .map((c) => {
               const isClientPage = !!clientId;
+              const showClientSummary =
+                !isClientPage || clientDetailSubTab === 'summary';
+              const showClientTasks =
+                !isClientPage || clientDetailSubTab === 'tasks';
+              const showClientProjectsTab =
+                !isClientPage || clientDetailSubTab === 'projects';
+              const showClientTimesheets =
+                !isClientPage || clientDetailSubTab === 'timesheets';
               const offset = clientCycleOffsets[c.id] ?? 0;
               const minCycleOffset = (() => {
                 if (!c.clientStartDate) return -1e9;
@@ -1654,6 +2072,20 @@ const AdminDashboard = ({
                   e.date >= mStart &&
                   e.date <= mEnd &&
                   !e.projectId,
+              );
+              const periodProjectTasks = taskLogs.filter(
+                (t) =>
+                  t.clientName === c.name &&
+                  t.projectId &&
+                  t.clockInTime >= mStart &&
+                  t.clockInTime <= mEnd,
+              );
+              const periodProjectExps = expenses.filter(
+                (e) =>
+                  e.clientName === c.name &&
+                  e.projectId &&
+                  e.date >= mStart &&
+                  e.date <= mEnd,
               );
               const stats = getGlobalRetainerStats(
                 c,
@@ -1823,8 +2255,42 @@ const AdminDashboard = ({
                     </div>
                   </div>
 
+                  {isClientPage && (
+                    <div
+                      className="px-4 sm:px-6 pt-3 pb-0 bg-white border-b border-slate-100"
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      role="presentation"
+                    >
+                      <nav
+                        className="flex flex-wrap gap-2"
+                        aria-label="Client sections"
+                      >
+                        {[
+                          { id: 'summary', label: 'Summary' },
+                          { id: 'tasks', label: 'Tasks' },
+                          { id: 'projects', label: 'Custom projects' },
+                          { id: 'timesheets', label: 'Timesheets' },
+                        ].map((tab) => (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => setClientPageTab(tab.id)}
+                            className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                              clientDetailSubTab === tab.id
+                                ? 'bg-[#fd7414] text-white shadow-sm'
+                                : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'
+                            }`}
+                          >
+                            {tab.label}
+                          </button>
+                        ))}
+                      </nav>
+                    </div>
+                  )}
+
                   <div className="p-6 flex-1 bg-white space-y-6">
-                    {isClientPage && (
+                    {isClientPage && showClientSummary && (
                       <div>
                         <button
                           onClick={(e) => {
@@ -1901,6 +2367,7 @@ const AdminDashboard = ({
                         )}
                       </div>
                     )}
+                    {showClientSummary && (
                     <div>
                       <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center justify-between">
                         <span>Global Retainer Progress</span>
@@ -1912,14 +2379,24 @@ const AdminDashboard = ({
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setClientCycleOffsets((prev) => {
-                                const newOffset = (prev[c.id] ?? 0) - 1;
-                                if (c.clientStartDate) {
-                                  const p = getBillingPeriod(c.billingDay || 1, newOffset);
-                                  if (p.end < c.clientStartDate) return prev;
-                                }
-                                return { ...prev, [c.id]: newOffset };
-                              });
+                              const newOffset = offset - 1;
+                              const p = getBillingPeriod(
+                                c.billingDay || 1,
+                                newOffset,
+                              );
+                              if (
+                                c.clientStartDate &&
+                                p.end < c.clientStartDate
+                              ) {
+                                return;
+                              }
+                              if (isClientPage) {
+                                mergeClientSearchParams({ cycle: p.start });
+                              }
+                              setClientCycleOffsets((prev) => ({
+                                ...prev,
+                                [c.id]: newOffset,
+                              }));
                             }}
                             disabled={effectiveOffset <= minCycleOffset}
                             className={`p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors ${effectiveOffset <= minCycleOffset ? 'opacity-30 cursor-not-allowed' : 'hover:bg-slate-50'}`}
@@ -1930,10 +2407,18 @@ const AdminDashboard = ({
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setClientCycleOffsets((prev) => {
-                                const curr = prev[c.id] ?? 0;
-                                return { ...prev, [c.id]: Math.min(0, curr + 1) };
-                              });
+                              const newOffset = Math.min(0, offset + 1);
+                              const p = getBillingPeriod(
+                                c.billingDay || 1,
+                                newOffset,
+                              );
+                              if (isClientPage) {
+                                mergeClientSearchParams({ cycle: p.start });
+                              }
+                              setClientCycleOffsets((prev) => ({
+                                ...prev,
+                                [c.id]: newOffset,
+                              }));
                             }}
                             disabled={offset >= 0}
                             className={`p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors ${
@@ -1960,6 +2445,8 @@ const AdminDashboard = ({
                                     stats,
                                     periodTasks,
                                     periodExps,
+                                    periodProjectTasks,
+                                    periodProjectExps,
                                     clientProjects,
                                     taskLogs,
                                     expenses,
@@ -1981,6 +2468,8 @@ const AdminDashboard = ({
                                     stats,
                                     periodTasks,
                                     periodExps,
+                                    periodProjectTasks,
+                                    periodProjectExps,
                                     clientProjects,
                                     taskLogs,
                                     expenses,
@@ -2003,6 +2492,8 @@ const AdminDashboard = ({
                                     stats,
                                     periodTasks,
                                     periodExps,
+                                    periodProjectTasks,
+                                    periodProjectExps,
                                     clientProjects,
                                     taskLogs,
                                     expenses,
@@ -2014,6 +2505,8 @@ const AdminDashboard = ({
                                     stats,
                                     periodTasks,
                                     periodExps,
+                                    periodProjectTasks,
+                                    periodProjectExps,
                                     clientProjects,
                                     taskLogs,
                                     expenses,
@@ -2025,6 +2518,34 @@ const AdminDashboard = ({
                               >
                                 <FileText className="w-3 h-3" />
                                 Invoice Pack
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const u = new URL(
+                                    `${window.location.origin}/admin/clients/${c.id}`,
+                                  );
+                                  u.searchParams.set('tab', 'timesheets');
+                                  u.searchParams.set('cycle', String(mStart));
+                                  const text = u.toString();
+                                  if (navigator.clipboard?.writeText) {
+                                    navigator.clipboard
+                                      .writeText(text)
+                                      .then(() =>
+                                        window.alert(
+                                          'Link copied — opens this client on Timesheets for this billing cycle.',
+                                        ),
+                                      )
+                                      .catch(() => window.alert(text));
+                                  } else {
+                                    window.prompt('Copy this link:', text);
+                                  }
+                                }}
+                                className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
+                                title="Copy shareable link (tab + billing cycle)"
+                              >
+                                <Copy className="w-3 h-3" />
+                                Copy cycle link
                               </button>
                               <button
                                 onClick={async (e) => {
@@ -2141,9 +2662,239 @@ const AdminDashboard = ({
                         </div>
                       )}
                     </div>
+                    )}
+
+                    {isClientPage && showClientTimesheets && (
+                      <div className="space-y-4 pb-2 border-b border-slate-100">
+                        <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                          Timesheets — this billing cycle
+                        </h5>
+                        <p className="text-xs text-slate-500">
+                          Retainer and custom-project clock-ins and expenses for{' '}
+                          {new Date(mStart).toLocaleDateString()} –{' '}
+                          {new Date(mEnd).toLocaleDateString()}. Expand each
+                          retainer category below for per-category detail.
+                        </p>
+                        {periodTasks.length === 0 &&
+                        periodExps.length === 0 &&
+                        periodProjectTasks.length === 0 &&
+                        periodProjectExps.length === 0 ? (
+                          <p className="text-xs italic text-slate-400">
+                            No time or expenses logged this cycle.
+                          </p>
+                        ) : (
+                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            {periodTasks.length > 0 && (
+                              <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4 max-h-72 overflow-y-auto">
+                                <h6 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">
+                                  All retainer tasks ({periodTasks.length})
+                                </h6>
+                                <div className="space-y-2">
+                                  {[...periodTasks]
+                                    .sort((a, b) => a.clockInTime - b.clockInTime)
+                                    .map((task) => (
+                                      <div
+                                        key={task.id}
+                                        className="bg-white p-3 rounded-xl border border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2"
+                                      >
+                                        <div className="flex-1 min-w-0">
+                                          <span className="text-[10px] text-slate-400 font-bold">
+                                            {new Date(
+                                              task.clockInTime,
+                                            ).toLocaleDateString()}{' '}
+                                            • {task.projectName || '—'}
+                                          </span>
+                                          {task.notes && (
+                                            <p className="text-xs text-slate-600 italic line-clamp-2 mt-0.5">
+                                              &quot;{task.notes}&quot;
+                                            </p>
+                                          )}
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                          <span className="font-black text-sm text-[#fd7414] font-mono">
+                                            {formatTime(getTaskDuration(task))}
+                                          </span>
+                                          <button
+                                            onClick={() =>
+                                              setDeleteConfirm({
+                                                collection: 'taskLogs',
+                                                id: task.id,
+                                                title: 'this task record',
+                                              })
+                                            }
+                                            className="p-1.5 text-slate-300 hover:text-red-500 transition-colors"
+                                            type="button"
+                                          >
+                                            <Trash2 className="w-4 h-4" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                </div>
+                              </div>
+                            )}
+                            {periodExps.length > 0 && (
+                              <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4 max-h-72 overflow-y-auto">
+                                <h6 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">
+                                  All retainer expenses ({periodExps.length})
+                                </h6>
+                                <div className="space-y-2">
+                                  {[...periodExps]
+                                    .sort((a, b) => a.date - b.date)
+                                    .map((exp) => (
+                                      <div
+                                        key={exp.id}
+                                        className="bg-white p-3 rounded-xl border border-slate-100 border-l-4 border-l-blue-400 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2"
+                                      >
+                                        <div className="flex-1 min-w-0">
+                                          <span className="text-[10px] text-slate-400 font-bold">
+                                            {new Date(exp.date).toLocaleDateString()}{' '}
+                                            • {exp.category || '—'}
+                                          </span>
+                                          {exp.description && (
+                                            <p className="text-xs text-slate-600 italic line-clamp-2 mt-0.5">
+                                              &quot;{exp.description}&quot;
+                                            </p>
+                                          )}
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                          <span className="font-black text-sm text-blue-500">
+                                            ${exp.finalCost.toFixed(2)}
+                                          </span>
+                                          <button
+                                            onClick={() =>
+                                              setDeleteConfirm({
+                                                collection: 'expenses',
+                                                id: exp.id,
+                                                title: 'this expense',
+                                              })
+                                            }
+                                            className="p-1.5 text-slate-300 hover:text-red-500 transition-colors"
+                                            type="button"
+                                          >
+                                            <Trash2 className="w-4 h-4" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                </div>
+                              </div>
+                            )}
+                            {periodProjectTasks.length > 0 && (
+                              <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4 max-h-72 overflow-y-auto lg:col-span-2">
+                                <h6 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">
+                                  Custom project tasks ({periodProjectTasks.length})
+                                </h6>
+                                <div className="space-y-2">
+                                  {[...periodProjectTasks]
+                                    .sort((a, b) => a.clockInTime - b.clockInTime)
+                                    .map((task) => {
+                                      const projTitle =
+                                        clientProjects.find(
+                                          (p) => p.id === task.projectId,
+                                        )?.title || 'Project';
+                                      return (
+                                        <div
+                                          key={task.id}
+                                          className="bg-white p-3 rounded-xl border border-slate-100 border-l-4 border-l-violet-300 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2"
+                                        >
+                                          <div className="flex-1 min-w-0">
+                                            <span className="text-[10px] text-slate-400 font-bold">
+                                              {new Date(
+                                                task.clockInTime,
+                                              ).toLocaleDateString()}{' '}
+                                              • {projTitle}
+                                            </span>
+                                            {task.notes && (
+                                              <p className="text-xs text-slate-600 italic line-clamp-2 mt-0.5">
+                                                &quot;{task.notes}&quot;
+                                              </p>
+                                            )}
+                                          </div>
+                                          <div className="flex items-center gap-2 shrink-0">
+                                            <span className="font-black text-sm text-[#fd7414] font-mono">
+                                              {formatTime(getTaskDuration(task))}
+                                            </span>
+                                            <button
+                                              onClick={() =>
+                                                setDeleteConfirm({
+                                                  collection: 'taskLogs',
+                                                  id: task.id,
+                                                  title: 'this task record',
+                                                })
+                                              }
+                                              className="p-1.5 text-slate-300 hover:text-red-500 transition-colors"
+                                              type="button"
+                                            >
+                                              <Trash2 className="w-4 h-4" />
+                                            </button>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                </div>
+                              </div>
+                            )}
+                            {periodProjectExps.length > 0 && (
+                              <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4 max-h-72 overflow-y-auto lg:col-span-2">
+                                <h6 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">
+                                  Custom project expenses ({periodProjectExps.length})
+                                </h6>
+                                <div className="space-y-2">
+                                  {[...periodProjectExps]
+                                    .sort((a, b) => a.date - b.date)
+                                    .map((exp) => {
+                                      const projTitle =
+                                        clientProjects.find(
+                                          (p) => p.id === exp.projectId,
+                                        )?.title || 'Project';
+                                      return (
+                                        <div
+                                          key={exp.id}
+                                          className="bg-white p-3 rounded-xl border border-slate-100 border-l-4 border-l-violet-400 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2"
+                                        >
+                                          <div className="flex-1 min-w-0">
+                                            <span className="text-[10px] text-slate-400 font-bold">
+                                              {new Date(exp.date).toLocaleDateString()}{' '}
+                                              • {projTitle}
+                                            </span>
+                                            {exp.description && (
+                                              <p className="text-xs text-slate-600 italic line-clamp-2 mt-0.5">
+                                                &quot;{exp.description}&quot;
+                                              </p>
+                                            )}
+                                          </div>
+                                          <div className="flex items-center gap-2 shrink-0">
+                                            <span className="font-black text-sm text-blue-500">
+                                              ${exp.finalCost.toFixed(2)}
+                                            </span>
+                                            <button
+                                              onClick={() =>
+                                                setDeleteConfirm({
+                                                  collection: 'expenses',
+                                                  id: exp.id,
+                                                  title: 'this expense',
+                                                })
+                                              }
+                                              className="p-1.5 text-slate-300 hover:text-red-500 transition-colors"
+                                              type="button"
+                                            >
+                                              <Trash2 className="w-4 h-4" />
+                                            </button>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* General / Unclassified to-do bucket */}
-                    {isClientPage && getTodoStateForCycle && updateClientTodo && (
+                    {isClientPage && showClientTasks && getTodoStateForCycle && updateClientTodo && (
                       (() => {
                         const cycleStart = mStart;
                         const generalLabel = 'General / Unclassified';
@@ -2343,16 +3094,18 @@ const AdminDashboard = ({
                                       (async () => {
                                         try {
                                           const dueDate = parseDateInputToMs(todoAddDueDraft[catKey] || '');
+                                          const recurrence = getDraftRecurrence(catKey, dueDate);
+                                          const nid = `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`;
                                           const newItem = {
-                                            id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                                            id: nid,
                                             text,
                                             done: false,
                                             doneAt: null,
-                                            recurring: false,
-                                            recurringId: null,
+                                            recurring: !!recurrence,
+                                            recurringId: recurrence ? nid : null,
                                             dueDate,
                                             assigneeEmails: getDraftAssigneeEmails(catKey),
-                                            recurrence: getDraftRecurrence(catKey, dueDate),
+                                            recurrence,
                                           };
                                           await updateClientTodo(c, cycleStart, catKey, {
                                             ...catTodo,
@@ -2419,17 +3172,19 @@ const AdminDashboard = ({
                                       setTodoSaving(true);
                                       try {
                                           const dueDate = parseDateInputToMs(todoAddDueDraft[catKey] || '');
+                                          const recurrence = getDraftRecurrence(catKey, dueDate);
+                                          const nid = `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`;
                                           const newItem = {
-                                          id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-                                          text,
-                                          done: false,
-                                          doneAt: null,
-                                          recurring: false,
-                                          recurringId: null,
+                                            id: nid,
+                                            text,
+                                            done: false,
+                                            doneAt: null,
+                                            recurring: !!recurrence,
+                                            recurringId: recurrence ? nid : null,
                                             dueDate,
-                                          assigneeEmails: getDraftAssigneeEmails(catKey),
-                                            recurrence: getDraftRecurrence(catKey, dueDate),
-                                        };
+                                            assigneeEmails: getDraftAssigneeEmails(catKey),
+                                            recurrence,
+                                          };
                                         await updateClientTodo(c, cycleStart, catKey, {
                                           ...catTodo,
                                           closed: false,
@@ -2766,7 +3521,10 @@ const AdminDashboard = ({
                     {c.retainers &&
                       Object.keys(c.retainers).length > 0 &&
                       stats &&
-                      stats.categoryBreakdown && (
+                      stats.categoryBreakdown &&
+                      (showClientSummary ||
+                        showClientTasks ||
+                        showClientTimesheets) && (
                         <div className="pt-2 border-t border-slate-100">
                           <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
                             Retainer Categories
@@ -2813,19 +3571,26 @@ const AdminDashboard = ({
 
                               return (
                                 <div key={cat}>
+                                  {(showClientSummary ||
+                                    showClientTasks ||
+                                    showClientTimesheets) && (
                                   <div className="flex items-start justify-between gap-3 mb-1">
                                     <div className="min-w-0">
                                       <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest truncate">
                                         {cat}
                                       </div>
+                                      {(showClientSummary ||
+                                        showClientTimesheets) && (
                                       <div className="text-[10px] font-bold text-slate-400">
                                         {isDollarCategory
                                           ? `$${usedDisplay} / $${baseDisplay}`
                                           : `${usedDisplay}h / ${baseDisplay}h`}
                                       </div>
+                                      )}
                                     </div>
 
-                                    {hasLogged ? (
+                                    {showClientTimesheets &&
+                                      (hasLogged ? (
                                       <button
                                         type="button"
                                         aria-label="Toggle logged tasks and expenses"
@@ -2853,8 +3618,10 @@ const AdminDashboard = ({
                                       <div className="shrink-0 px-3 py-2 rounded-2xl bg-slate-50 text-slate-300 font-black text-[10px] uppercase tracking-widest border border-slate-100">
                                         No logged tasks/expenses
                                       </div>
-                                    )}
+                                    ))}
                                   </div>
+                                  )}
+                                  {showClientSummary && (
                                   <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
                                     <div
                                       className={`h-2 rounded-full ${
@@ -2865,13 +3632,17 @@ const AdminDashboard = ({
                                       style={{ width: `${pct}%` }}
                                     />
                                   </div>
+                                  )}
 
                                   <div className="mt-2 flex flex-col space-y-4">
                                       {(() => {
                                         const catIsDollar = cat === 'Social Ad Budget' || c?.retainerUnits?.[cat] === 'dollar';
                                         return (
                                           <>
-                                            {retainerCategoryOpen[`${c.id}__${cycleStart}__${catKey}`] && (<div style={{ order: 30 }}>
+                                            {showClientTimesheets &&
+                                              retainerCategoryOpen[
+                                                `${c.id}__${cycleStart}__${catKey}`
+                                              ] && (<div style={{ order: 30 }}>
                                               <h6 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
                                                 Logged tasks ({categoryTasks.length})
                                               </h6>
@@ -2916,7 +3687,10 @@ const AdminDashboard = ({
                                                 </div>
                                               )}
                                             </div>)}
-                                            {retainerCategoryOpen[`${c.id}__${cycleStart}__${catKey}`] && (<div style={{ order: 40 }}>
+                                            {showClientTimesheets &&
+                                              retainerCategoryOpen[
+                                                `${c.id}__${cycleStart}__${catKey}`
+                                              ] && (<div style={{ order: 40 }}>
                                               <h6 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
                                                 Logged expenses ({categoryExps.length})
                                               </h6>
@@ -2966,7 +3740,11 @@ const AdminDashboard = ({
                                                 </div>
                                               )}
                                             </div>)}
-                                            {isClientPage && getTodoStateForCycle && updateClientTodo && (() => {
+                                            {isClientPage &&
+                                              showClientTasks &&
+                                              getTodoStateForCycle &&
+                                              updateClientTodo &&
+                                              (() => {
                                               const todoState = getTodoStateForCycle(c, cycleStart);
                                               const catTodo = todoState[catKey] || { closed: false, items: [] };
                                               const items = catTodo.items || [];
@@ -3174,16 +3952,18 @@ const AdminDashboard = ({
                                                                 setTodoSaving(true);
                                                                 try {
                                                                   const dueDate = parseDateInputToMs(todoAddDueDraft[catKey] || '');
+                                                                  const recurrence = getDraftRecurrence(catKey, dueDate);
+                                                                  const nid = `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`;
                                                                   const newItem = {
-                                                                    id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                                                                    id: nid,
                                                                     text,
                                                                     done: false,
                                                                     doneAt: null,
-                                                                    recurring: false,
-                                                                    recurringId: null,
+                                                                    recurring: !!recurrence,
+                                                                    recurringId: recurrence ? nid : null,
                                                                     dueDate,
                                                                     assigneeEmails: getDraftAssigneeEmails(catKey),
-                                                                    recurrence: getDraftRecurrence(catKey, dueDate),
+                                                                    recurrence,
                                                                   };
                                                                   await updateClientTodo(c, cycleStart, catKey, {
                                                                     ...catTodo,
@@ -3246,16 +4026,18 @@ const AdminDashboard = ({
                                                               setTodoSaving(true);
                                                               try {
                                                                 const dueDate = parseDateInputToMs(todoAddDueDraft[catKey] || '');
+                                                                const recurrence = getDraftRecurrence(catKey, dueDate);
+                                                                const nid = `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`;
                                                                 const newItem = {
-                                                                  id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                                                                  id: nid,
                                                                   text,
                                                                   done: false,
                                                                   doneAt: null,
-                                                                  recurring: false,
-                                                                  recurringId: null,
+                                                                  recurring: !!recurrence,
+                                                                  recurringId: recurrence ? nid : null,
                                                                   dueDate,
                                                                   assigneeEmails: getDraftAssigneeEmails(catKey),
-                                                                  recurrence: getDraftRecurrence(catKey, dueDate),
+                                                                  recurrence,
                                                                 };
                                                                 await updateClientTodo(c, cycleStart, catKey, {
                                                                   ...catTodo,
@@ -3314,6 +4096,7 @@ const AdminDashboard = ({
                                                 </div>
                                               );
                                             })()}
+                                            {showClientSummary && (
                                             <div style={{ order: 20 }}>
                                               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
                                                 Cycle note
@@ -3384,6 +4167,9 @@ const AdminDashboard = ({
                                                     Save Note
                                                   </button>
                                                 </div>
+                                            </div>
+                                            )}
+                                            {showClientTimesheets && (
                                               <div style={{ order: 25, marginTop: 10 }}>
                                                 {hasLogged ? (
                                                   <button
@@ -3415,7 +4201,7 @@ const AdminDashboard = ({
                                                   </div>
                                                 )}
                                               </div>
-                                            </div>
+                                            )}
                                           </>
                                         );
                                       })()}
@@ -3426,8 +4212,28 @@ const AdminDashboard = ({
                           </div>
                         </div>
                       )}
+                  {isClientPage && showClientProjectsTab && (
+                    <ClientCustomProjectsPanel
+                      client={c}
+                      clientProjects={clientProjects}
+                      taskLogs={taskLogs}
+                      cycleStartMs={mStart}
+                      getTaskDuration={getTaskDuration}
+                      isCycleLocked={isCycleLocked}
+                      setProjectModal={setProjectModal}
+                      setProjectValues={setProjectValues}
+                      setProjectEditError={setProjectEditError}
+                      setProjectEditModal={setProjectEditModal}
+                      setProjectEditValues={setProjectEditValues}
+                      setDeleteConfirm={setDeleteConfirm}
+                      updateDoc={updateDoc}
+                      doc={doc}
+                      logAudit={logAudit}
+                    />
+                  )}
                   </div>
 
+                  {!isClientPage && (
                   <>
                     <button
                       type="button"
@@ -3451,251 +4257,26 @@ const AdminDashboard = ({
                       </span>
                     </button>
                     {expandedProjectsExpenses[c.id] && (
-                    <div className="bg-slate-50/50 p-6 border-t border-slate-100 animate-in slide-in-from-top-4 duration-300 space-y-6">
-                      <div>
-                        <div className="flex justify-between items-center mb-3">
-                          <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                            Custom Projects
-                          </h5>
-                          <button
-                            onClick={() => {
-                              setProjectModal({ ...c, lockClient: true });
-                              setProjectValues({
-                                clientId: c.id,
-                                clientName: c.name,
-                                title: '',
-                                description: '',
-                                estimatedBudget: '',
-                                estimatedHours: '',
-                              });
-                            }}
-                            className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest"
-                          >
-                            + New Project
-                          </button>
-                        </div>
-                        {clientProjects.length === 0 ? (
-                          <p className="text-xs italic text-slate-400">
-                            No custom projects yet.
-                          </p>
-                        ) : (
-                          <div className="space-y-3">
-                            {clientProjects
-                              .filter((p) => !(p.status === 'closed' && p.invoiced))
-                              .map((p) => {
-                                const pTasks = taskLogs.filter(
-                                  (t) => t.projectId === p.id,
-                                );
-                                const totalHours =
-                                  pTasks.reduce(
-                                    (a, b) => a + getTaskDuration(b),
-                                    0,
-                                  ) / 3600000;
-                                const estHours = Number(
-                                  p.estimatedHours || 0,
-                                );
-                                const projectPercent =
-                                  estHours > 0
-                                    ? Math.min(
-                                        100,
-                                        (totalHours / estHours) * 100,
-                                      )
-                                    : totalHours > 0
-                                    ? 100
-                                    : 0;
-                                return (
-                                  <div
-                                    key={p.id}
-                                    className="p-4 rounded-2xl border border-slate-100 bg-white flex flex-col sm:flex-row justify-between gap-4"
-                                  >
-                                    <div>
-                                      <div className="flex items-center gap-2 mb-1">
-                                        <span className="font-black text-sm text-slate-800">
-                                          {p.title}
-                                        </span>
-                                        <span
-                                          className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${
-                                            p.status === 'requested'
-                                              ? 'bg-orange-100 text-orange-600'
-                                              : p.status === 'active'
-                                              ? 'bg-emerald-100 text-emerald-600'
-                                              : 'bg-slate-200 text-slate-500'
-                                          }`}
-                                        >
-                                          {p.status}
-                                        </span>
-                                        {p.invoiced && (
-                                          <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
-                                            Invoiced
-                                          </span>
-                                        )}
-                                      </div>
-                                      <div className="text-xs text-slate-500 mb-1">
-                                        Est. Budget: $
-                                        {Number(
-                                          p.estimatedBudget || 0,
-                                        ).toFixed(2)}{' '}
-                                        • Est. Hours:{' '}
-                                        {Number(
-                                          p.estimatedHours || 0,
-                                        ).toFixed(1)}
-                                        h • Tracked:{' '}
-                                        {totalHours.toFixed(2)}h
-                                      </div>
-                                      <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden mb-1">
-                                        <div
-                                          className={`h-2 rounded-full ${
-                                            projectPercent > 100
-                                              ? 'bg-red-500'
-                                              : projectPercent > 85
-                                              ? 'bg-orange-500'
-                                              : 'bg-emerald-500'
-                                          }`}
-                                          style={{
-                                            width: `${Math.min(
-                                              projectPercent,
-                                              100,
-                                            )}%`,
-                                          }}
-                                        ></div>
-                                      </div>
-                                      {p.description && (
-                                        <p className="text-xs text-slate-600 italic">
-                                          &quot;{p.description}&quot;
-                                        </p>
-                                      )}
-                                    </div>
-                                    <div className="flex flex-col gap-2 items-end">
-                                      {(p.status === 'requested' ||
-                                        p.status === 'approved') && (
-                                        <button
-                                          onClick={async () => {
-                                            if (isCycleLocked(c, mStart)) {
-                                              window.alert(
-                                                'This billing cycle is locked. Unlock to start projects.',
-                                              );
-                                              return;
-                                            }
-                                            try {
-                                              await updateDoc(doc('projects', p.id), {
-                                                status: 'active',
-                                                startedAt: Date.now(),
-                                                notificationState: {
-                                                  ...(p.notificationState || {}),
-                                                  adminApproved: false,
-                                                },
-                                              });
-                                              await logAudit?.({
-                                                type: 'project_started',
-                                                entityType: 'project',
-                                                entityId: p.id,
-                                                clientId: c.id,
-                                              });
-                                            } catch (err) {
-                                              window.alert(
-                                                `Could not start project: ${
-                                                  err?.message || String(err)
-                                                }`,
-                                              );
-                                            }
-                                          }}
-                                          className="px-3 py-1 rounded-xl bg-black text-white text-[10px] font-black uppercase tracking-widest hover:bg-slate-900"
-                                        >
-                                          Start Project
-                                        </button>
-                                      )}
-                                      <button
-                                        onClick={() => {
-                                          setProjectEditError('');
-                                          setProjectEditModal({ project: p, client: c });
-                                          setProjectEditValues({
-                                            estimatedBudget: String(p.estimatedBudget ?? ''),
-                                            estimatedHours: String(p.estimatedHours ?? ''),
-                                          });
-                                        }}
-                                        className="px-3 py-1 rounded-xl bg-white border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-600 hover:bg-slate-100"
-                                      >
-                                        Edit Estimates
-                                      </button>
-                                      {p.status !== 'closed' && (
-                                        <button
-                                          onClick={async () => {
-                                            if (isCycleLocked(c, mStart)) {
-                                              window.alert(
-                                                'This billing cycle is locked. Unlock to close projects.',
-                                              );
-                                              return;
-                                            }
-                                            try {
-                                              await updateDoc(doc('projects', p.id), {
-                                                status: 'closed',
-                                                closedAt: Date.now(),
-                                              });
-                                              await logAudit?.({
-                                                type: 'project_closed',
-                                                entityType: 'project',
-                                                entityId: p.id,
-                                                clientId: c.id,
-                                              });
-                                            } catch (err) {
-                                              window.alert(
-                                                `Could not close project: ${
-                                                  err?.message || String(err)
-                                                }`,
-                                              );
-                                            }
-                                          }}
-                                          className="px-3 py-1 rounded-xl bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest hover:bg-black"
-                                        >
-                                          Mark Complete
-                                        </button>
-                                      )}
-                                      {p.status === 'closed' && !p.invoiced && (
-                                        <button
-                                          onClick={() =>
-                                            isCycleLocked(c, mStart)
-                                              ? window.alert(
-                                                  'This billing cycle is locked. Unlock to mark invoiced.',
-                                                )
-                                              : updateDoc(doc('projects', p.id), {
-                                              invoiced: true,
-                                                })
-                                              .then(() =>
-                                                logAudit?.({
-                                                  type: 'project_marked_invoiced',
-                                                  entityType: 'project',
-                                                  entityId: p.id,
-                                                  clientId: c.id,
-                                                }),
-                                              )
-                                          }
-                                          className="px-3 py-1 rounded-xl bg-blue-500 text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-600"
-                                        >
-                                          Mark Invoiced
-                                        </button>
-                                      )}
-                                      <button
-                                        onClick={() =>
-                                          setDeleteConfirm({
-                                            collection: 'projects',
-                                            id: p.id,
-                                            title: `custom project "${p.title}" for ${c.name}`,
-                                          })
-                                        }
-                                        className="px-3 py-1 rounded-xl bg-white border border-red-100 text-[10px] font-black uppercase tracking-widest text-red-400 hover:bg-red-50"
-                                      >
-                                        Delete Project
-                                      </button>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                    <ClientCustomProjectsPanel
+                      client={c}
+                      clientProjects={clientProjects}
+                      taskLogs={taskLogs}
+                      cycleStartMs={mStart}
+                      getTaskDuration={getTaskDuration}
+                      isCycleLocked={isCycleLocked}
+                      setProjectModal={setProjectModal}
+                      setProjectValues={setProjectValues}
+                      setProjectEditError={setProjectEditError}
+                      setProjectEditModal={setProjectEditModal}
+                      setProjectEditValues={setProjectEditValues}
+                      setDeleteConfirm={setDeleteConfirm}
+                      updateDoc={updateDoc}
+                      doc={doc}
+                      logAudit={logAudit}
+                    />
                     )}
                   </>
+                  )}
                 </div>
               );
             })}
@@ -4595,7 +5176,9 @@ const AdminDashboard = ({
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
               >
                 <option value="none">No repeat</option>
-                <option value="monthly">Monthly</option>
+                <option value="weekly">Weekly (same weekday)</option>
+                <option value="monthly">Monthly (same day of month)</option>
+                <option value="annual">Annually (same calendar date)</option>
               </select>
             </div>
             <div className="flex justify-end gap-2 pt-1">
@@ -4668,7 +5251,9 @@ const AdminDashboard = ({
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
               >
                 <option value="none">No repeat</option>
-                <option value="monthly">Monthly</option>
+                <option value="weekly">Weekly (same weekday)</option>
+                <option value="monthly">Monthly (same day of month)</option>
+                <option value="annual">Annually (same calendar date)</option>
               </select>
             </div>
             <div className="flex justify-end gap-2 pt-1">
