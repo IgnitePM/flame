@@ -26,18 +26,14 @@ service cloud.firestore {
 
     // Kiosk role: only clients explicitly shared via teamMemberAccessEmails (legacy clients
     // without the field remain visible to all staff). Empty list = no kiosk/workspace access.
+    // (Rules functions must be a single expression — no if/return blocks.)
     function kioskTeamClientReadOk(clientId) {
-      let c = clientDoc(clientId).data;
-      if (!c.keys().hasAll(['teamMemberAccessEmails'])) {
-        return true;
-      }
-      if (!(c.teamMemberAccessEmails is list)) {
-        return true;
-      }
-      if (c.teamMemberAccessEmails.size() == 0) {
-        return false;
-      }
-      return c.teamMemberAccessEmails.hasAny([emailLower()]);
+      return !clientDoc(clientId).data.keys().hasAll(['teamMemberAccessEmails'])
+        ? true
+        : (!(clientDoc(clientId).data.teamMemberAccessEmails is list))
+          ? true
+          : (clientDoc(clientId).data.teamMemberAccessEmails.size() > 0
+              && clientDoc(clientId).data.teamMemberAccessEmails.hasAny([emailLower()]));
     }
 
     function clientAllowsEmail(clientId) {
