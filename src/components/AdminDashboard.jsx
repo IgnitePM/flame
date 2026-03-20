@@ -2791,7 +2791,7 @@ const AdminDashboard = ({
                     )}
                     {(showClientSummary || showClientTimesheets) && (
                     <div>
-                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center justify-between">
+                      <h5 className="text-sm sm:text-base font-black text-slate-700 uppercase tracking-widest mb-2 flex items-center justify-between">
                         <span>Global Retainer Progress</span>
                         <div className="flex items-center gap-2">
                           <span className="bg-slate-100 text-slate-500 px-2 py-1 rounded-md">
@@ -4212,7 +4212,7 @@ const AdminDashboard = ({
                         showClientTasks ||
                         showClientTimesheets) && (
                         <div className="pt-2 border-t border-slate-100">
-                          <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
+                          <h5 className="text-sm sm:text-base font-black text-slate-700 uppercase tracking-widest mb-3">
                             Retainer Categories
                           </h5>
                           <div className="space-y-2">
@@ -4273,7 +4273,7 @@ const AdminDashboard = ({
                                         className={`truncate font-black ${
                                           isClientPage && showClientTasks
                                             ? 'text-sm sm:text-base text-slate-900 tracking-tight'
-                                            : 'text-[10px] text-slate-500 uppercase tracking-widest'
+                                            : 'text-sm sm:text-base text-slate-700 tracking-tight'
                                         }`}
                                       >
                                         {cat}
@@ -4288,7 +4288,7 @@ const AdminDashboard = ({
                                       )}
                                     </div>
 
-                                    {showClientTimesheets &&
+                                    {isClientPage && showClientTimesheets &&
                                       (hasLogged ? (
                                       <button
                                         type="button"
@@ -4338,7 +4338,7 @@ const AdminDashboard = ({
                                         const catIsDollar = cat === 'Social Ad Budget' || c?.retainerUnits?.[cat] === 'dollar';
                                         return (
                                           <>
-                                            {showClientTimesheets &&
+                                            {isClientPage && showClientTimesheets &&
                                               retainerCategoryOpen[
                                                 `${c.id}__${cycleStart}__${catKey}`
                                               ] && (<div style={{ order: 30 }}>
@@ -4386,7 +4386,7 @@ const AdminDashboard = ({
                                                 </div>
                                               )}
                                             </div>)}
-                                            {showClientTimesheets &&
+                                            {isClientPage && showClientTimesheets &&
                                               retainerCategoryOpen[
                                                 `${c.id}__${cycleStart}__${catKey}`
                                               ] && (<div style={{ order: 40 }}>
@@ -4986,7 +4986,7 @@ const AdminDashboard = ({
                                                 </div>
                                               );
                                             })()}
-                                            {showClientSummary && (
+                                            {isClientPage && showClientSummary && (
                                             <div style={{ order: 20 }}>
                                               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
                                                 Cycle note
@@ -5059,7 +5059,7 @@ const AdminDashboard = ({
                                                 </div>
                                             </div>
                                             )}
-                                            {showClientTimesheets && (
+                                            {isClientPage && showClientTimesheets && (
                                               <div style={{ order: 25, marginTop: 10 }}>
                                                 {hasLogged ? (
                                                   <button
@@ -5124,7 +5124,7 @@ const AdminDashboard = ({
                   )}
                   </div>
 
-                  {!isClientPage && (
+                  {false && (
                   <>
                     <button
                       type="button"
