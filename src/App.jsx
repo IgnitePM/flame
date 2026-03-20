@@ -851,6 +851,7 @@ export default function App() {
         .map((i) => ({
           ...i,
           done: false,
+          pinned: false,
           assigneeEmails: Array.isArray(i.assigneeEmails)
             ? i.assigneeEmails.filter(Boolean)
             : [],
@@ -871,6 +872,7 @@ export default function App() {
             text: i.text,
             done: false,
             doneAt: null,
+            pinned: false,
             recurring: true,
             recurringId: i.recurringId || i.id,
             assigneeEmails: Array.isArray(i.assigneeEmails)
@@ -905,6 +907,7 @@ export default function App() {
         .map((i) => ({
           ...i,
           done: false,
+          pinned: false,
           assigneeEmails: Array.isArray(i.assigneeEmails)
             ? i.assigneeEmails.filter(Boolean)
             : [],
@@ -925,6 +928,7 @@ export default function App() {
             text: i.text,
             done: false,
             doneAt: null,
+            pinned: false,
             recurring: true,
             recurringId: i.recurringId || i.id,
             assigneeEmails: Array.isArray(i.assigneeEmails)

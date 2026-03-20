@@ -1,4 +1,5 @@
 import React from 'react';
+import { orderTodosForDisplay } from '../utils/todoListOrder.js';
 import {
   ChevronLeft,
   ChevronRight,
@@ -481,7 +482,7 @@ const ClientPortal = ({
             ) : (
               <div className="space-y-6">
                 {Object.entries(todoState).map(([catKey, catTodo]) => {
-                  const items = catTodo?.items || [];
+                  const items = orderTodosForDisplay(catTodo?.items || []);
                   if (!items.length) return null;
                   const closed = !!catTodo?.closed;
                   return (
@@ -510,6 +511,11 @@ const ClientPortal = ({
                             }`}
                           >
                             <span>{item.text || '(No description)'}</span>
+                            {item.pinned && (
+                              <span className="text-[9px] font-black uppercase tracking-widest text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
+                                Pinned
+                              </span>
+                            )}
                             {item.recurring && (
                               <span className="text-[9px] font-black uppercase tracking-widest text-[#fd7414] bg-orange-50 px-1.5 py-0.5 rounded">
                                 Recurring

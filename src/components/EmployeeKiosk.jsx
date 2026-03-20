@@ -2,11 +2,18 @@ import React from 'react';
 import {
   Activity,
   Coffee,
+  GripVertical,
   History,
   LogOut,
   Pause,
+  Pin,
   Play,
 } from 'lucide-react';
+import {
+  orderTodosForDisplay,
+  reorderTodosDisplay,
+  toggleTodoPinnedById,
+} from '../utils/todoListOrder.js';
 
 const EmployeeKiosk = ({
   user,
@@ -111,6 +118,7 @@ const EmployeeKiosk = ({
       text: String(text || '').trim(),
       done: false,
       doneAt: null,
+      pinned: false,
       recurring: !!recurrence,
       recurringId: recurrence ? id : null,
       dueDate,
@@ -445,11 +453,13 @@ const EmployeeKiosk = ({
                           const catKey = todoCategoryKey ? todoCategoryKey(selectedRetainerCategory) : safeCategoryKey(selectedRetainerCategory);
                           const todoState = getTodoStateForCycle(selectedClientObj, cycleStart);
                           const catTodo = todoState[catKey] || { closed: false, items: [] };
-                          const items = (catTodo.items || []).filter((item) => {
+                          const allItems = catTodo.items || [];
+                          const meLower = String(user?.email || '').trim().toLowerCase();
+                          const displayItems = orderTodosForDisplay(allItems).filter((item) => {
                             if (!todoMineOnly) return true;
-                            const me = String(user?.email || '').trim().toLowerCase();
-                            return normalizeAssignees(item).includes(me);
+                            return normalizeAssignees(item).includes(meLower);
                           });
+                          const canDragReorder = !todoMineOnly;
                           return (
                             <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
                               <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
@@ -468,29 +478,102 @@ const EmployeeKiosk = ({
                                 />
                                 Show only tasks assigned to me
                               </label>
+                              {!catTodo.closed && canDragReorder && allItems.length > 0 && (
+                                <p className="text-[10px] text-slate-400 mb-2">
+                                  Drag the grip to reorder. Pin keeps tasks at the top of the list.
+                                </p>
+                              )}
+                              {!catTodo.closed && todoMineOnly && allItems.length > 0 && (
+                                <p className="text-[10px] text-amber-800/90 mb-2">
+                                  Uncheck &quot;only my tasks&quot; to drag-reorder the full list.
+                                </p>
+                              )}
                               {!catTodo.closed && (
                                 <>
-                                  {items.length === 0 ? (
+                                  {displayItems.length === 0 ? (
                                     <p className="text-xs italic text-slate-400 mb-2">No items yet.</p>
                                   ) : (
                                     <ul className="space-y-2 mb-3">
-                                      {items.map((item) => (
+                                      {displayItems.map((item) => (
                                         <li
                                           key={item.id}
                                           className={`flex items-center gap-2 rounded-lg p-2 ${getUrgencyClass(item)}`}
+                                          onDragOver={
+                                            canDragReorder
+                                              ? (e) => {
+                                                  e.preventDefault();
+                                                  e.dataTransfer.dropEffect = 'move';
+                                                }
+                                              : undefined
+                                          }
+                                          onDrop={
+                                            canDragReorder
+                                              ? (e) => {
+                                                  e.preventDefault();
+                                                  const draggedId = e.dataTransfer.getData('text/plain');
+                                                  if (!draggedId || draggedId === item.id) return;
+                                                  const disp = orderTodosForDisplay(allItems);
+                                                  const fromIdx = disp.findIndex((i) => i.id === draggedId);
+                                                  const toIdx = disp.findIndex((i) => i.id === item.id);
+                                                  if (fromIdx < 0 || toIdx < 0) return;
+                                                  const next = reorderTodosDisplay(allItems, fromIdx, toIdx);
+                                                  setTodoSaving(true);
+                                                  updateClientTodo(selectedClientObj, cycleStart, catKey, {
+                                                    ...catTodo,
+                                                    items: next,
+                                                  }).finally(() => setTodoSaving(false));
+                                                }
+                                              : undefined
+                                          }
                                         >
+                                          {canDragReorder && (
+                                            <span
+                                              draggable={!todoSaving}
+                                              onDragStart={(e) => {
+                                                e.dataTransfer.setData('text/plain', item.id);
+                                                e.dataTransfer.effectAllowed = 'move';
+                                              }}
+                                              className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0 select-none touch-none"
+                                              title="Drag to reorder"
+                                            >
+                                              <GripVertical className="w-4 h-4" aria-hidden />
+                                            </span>
+                                          )}
+                                          <button
+                                            type="button"
+                                            disabled={todoSaving}
+                                            title={item.pinned ? 'Unpin from top' : 'Pin to top'}
+                                            onClick={() => {
+                                              setTodoSaving(true);
+                                              const next = toggleTodoPinnedById(allItems, item.id);
+                                              updateClientTodo(selectedClientObj, cycleStart, catKey, {
+                                                ...catTodo,
+                                                items: next,
+                                              }).finally(() => setTodoSaving(false));
+                                            }}
+                                            className={`shrink-0 p-1.5 rounded-lg border transition-colors ${
+                                              item.pinned
+                                                ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                                : 'border-transparent text-slate-300 hover:text-amber-600 hover:bg-amber-50/80'
+                                            }`}
+                                          >
+                                            <Pin className="w-4 h-4" />
+                                          </button>
                                           <input
                                             type="checkbox"
                                             checked={!!item.done}
                                             onChange={async () => {
                                               setTodoSaving(true);
                                               try {
-                                                const next = items.map((i) =>
+                                                const next = allItems.map((i) =>
                                                   i.id === item.id
                                                     ? { ...i, done: !i.done, doneAt: !i.done ? Date.now() : null }
                                                     : i
                                                 );
-                                                await updateClientTodo(selectedClientObj, cycleStart, catKey, { ...catTodo, items: next });
+                                                await updateClientTodo(selectedClientObj, cycleStart, catKey, {
+                                                  ...catTodo,
+                                                  items: next,
+                                                });
                                               } finally {
                                                 setTodoSaving(false);
                                               }
@@ -531,7 +614,7 @@ const EmployeeKiosk = ({
                                             updateClientTodo(selectedClientObj, cycleStart, catKey, {
                                               ...catTodo,
                                               closed: false,
-                                              items: [...(catTodo.items || []), newItem],
+                                              items: [...allItems, newItem],
                                             }).finally(() => {
                                               setTodoSaving(false);
                                               setTodoNewText('');
@@ -559,7 +642,7 @@ const EmployeeKiosk = ({
                                           await updateClientTodo(selectedClientObj, cycleStart, catKey, {
                                             ...catTodo,
                                             closed: false,
-                                            items: [...(catTodo.items || []), newItem],
+                                            items: [...allItems, newItem],
                                           });
                                           setTodoNewText('');
                                           resetTodoDraftOptions();
@@ -777,11 +860,13 @@ const EmployeeKiosk = ({
                           const catKey = todoCategoryKey ? todoCategoryKey(selectedRetainerCategory) : safeCategoryKey(selectedRetainerCategory);
                           const todoState = getTodoStateForCycle(selectedClientObj, cycleStart);
                           const catTodo = todoState[catKey] || { closed: false, items: [] };
-                          const items = (catTodo.items || []).filter((item) => {
+                          const allItems = catTodo.items || [];
+                          const meLower = String(user?.email || '').trim().toLowerCase();
+                          const displayItems = orderTodosForDisplay(allItems).filter((item) => {
                             if (!todoMineOnly) return true;
-                            const me = String(user?.email || '').trim().toLowerCase();
-                            return normalizeAssignees(item).includes(me);
+                            return normalizeAssignees(item).includes(meLower);
                           });
+                          const canDragReorder = !todoMineOnly;
                           return (
                             <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
                               <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
@@ -800,29 +885,102 @@ const EmployeeKiosk = ({
                                 />
                                 Show only tasks assigned to me
                               </label>
+                              {!catTodo.closed && canDragReorder && allItems.length > 0 && (
+                                <p className="text-[10px] text-slate-400 mb-2">
+                                  Drag the grip to reorder. Pin keeps tasks at the top of the list.
+                                </p>
+                              )}
+                              {!catTodo.closed && todoMineOnly && allItems.length > 0 && (
+                                <p className="text-[10px] text-amber-800/90 mb-2">
+                                  Uncheck &quot;only my tasks&quot; to drag-reorder the full list.
+                                </p>
+                              )}
                               {!catTodo.closed && (
                                 <>
-                                  {items.length === 0 ? (
+                                  {displayItems.length === 0 ? (
                                     <p className="text-xs italic text-slate-400 mb-2">No items yet.</p>
                                   ) : (
                                     <ul className="space-y-2 mb-3">
-                                      {items.map((item) => (
+                                      {displayItems.map((item) => (
                                         <li
                                           key={item.id}
                                           className={`flex items-center gap-2 rounded-lg p-2 ${getUrgencyClass(item)}`}
+                                          onDragOver={
+                                            canDragReorder
+                                              ? (e) => {
+                                                  e.preventDefault();
+                                                  e.dataTransfer.dropEffect = 'move';
+                                                }
+                                              : undefined
+                                          }
+                                          onDrop={
+                                            canDragReorder
+                                              ? (e) => {
+                                                  e.preventDefault();
+                                                  const draggedId = e.dataTransfer.getData('text/plain');
+                                                  if (!draggedId || draggedId === item.id) return;
+                                                  const disp = orderTodosForDisplay(allItems);
+                                                  const fromIdx = disp.findIndex((i) => i.id === draggedId);
+                                                  const toIdx = disp.findIndex((i) => i.id === item.id);
+                                                  if (fromIdx < 0 || toIdx < 0) return;
+                                                  const next = reorderTodosDisplay(allItems, fromIdx, toIdx);
+                                                  setTodoSaving(true);
+                                                  updateClientTodo(selectedClientObj, cycleStart, catKey, {
+                                                    ...catTodo,
+                                                    items: next,
+                                                  }).finally(() => setTodoSaving(false));
+                                                }
+                                              : undefined
+                                          }
                                         >
+                                          {canDragReorder && (
+                                            <span
+                                              draggable={!todoSaving}
+                                              onDragStart={(e) => {
+                                                e.dataTransfer.setData('text/plain', item.id);
+                                                e.dataTransfer.effectAllowed = 'move';
+                                              }}
+                                              className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0 select-none touch-none"
+                                              title="Drag to reorder"
+                                            >
+                                              <GripVertical className="w-4 h-4" aria-hidden />
+                                            </span>
+                                          )}
+                                          <button
+                                            type="button"
+                                            disabled={todoSaving}
+                                            title={item.pinned ? 'Unpin from top' : 'Pin to top'}
+                                            onClick={() => {
+                                              setTodoSaving(true);
+                                              const next = toggleTodoPinnedById(allItems, item.id);
+                                              updateClientTodo(selectedClientObj, cycleStart, catKey, {
+                                                ...catTodo,
+                                                items: next,
+                                              }).finally(() => setTodoSaving(false));
+                                            }}
+                                            className={`shrink-0 p-1.5 rounded-lg border transition-colors ${
+                                              item.pinned
+                                                ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                                : 'border-transparent text-slate-300 hover:text-amber-600 hover:bg-amber-50/80'
+                                            }`}
+                                          >
+                                            <Pin className="w-4 h-4" />
+                                          </button>
                                           <input
                                             type="checkbox"
                                             checked={!!item.done}
                                             onChange={async () => {
                                               setTodoSaving(true);
                                               try {
-                                                const next = items.map((i) =>
+                                                const next = allItems.map((i) =>
                                                   i.id === item.id
                                                     ? { ...i, done: !i.done, doneAt: !i.done ? Date.now() : null }
                                                     : i
                                                 );
-                                                await updateClientTodo(selectedClientObj, cycleStart, catKey, { ...catTodo, items: next });
+                                                await updateClientTodo(selectedClientObj, cycleStart, catKey, {
+                                                  ...catTodo,
+                                                  items: next,
+                                                });
                                               } finally {
                                                 setTodoSaving(false);
                                               }
@@ -863,7 +1021,7 @@ const EmployeeKiosk = ({
                                             updateClientTodo(selectedClientObj, cycleStart, catKey, {
                                               ...catTodo,
                                               closed: false,
-                                              items: [...(catTodo.items || []), newItem],
+                                              items: [...allItems, newItem],
                                             }).finally(() => {
                                               setTodoSaving(false);
                                               setTodoNewText('');
@@ -891,7 +1049,7 @@ const EmployeeKiosk = ({
                                           await updateClientTodo(selectedClientObj, cycleStart, catKey, {
                                             ...catTodo,
                                             closed: false,
-                                            items: [...(catTodo.items || []), newItem],
+                                            items: [...allItems, newItem],
                                           });
                                           setTodoNewText('');
                                           resetTodoDraftOptions();

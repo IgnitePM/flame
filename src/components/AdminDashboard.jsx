@@ -14,10 +14,12 @@ import {
   FileDown,
   FileText,
   FolderGit2,
+  GripVertical,
   History,
   List,
   Lock,
   Pencil,
+  Pin,
   Search,
   Settings,
   ShoppingCart,
@@ -25,6 +27,11 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import {
+  orderTodosForDisplay,
+  reorderTodosDisplay,
+  toggleTodoPinnedById,
+} from '../utils/todoListOrder.js';
 
 /** Normalize ?tab= for /admin/clients/:id (supports legacy `projects`). */
 function parseClientSubTabFromSearch(search) {
@@ -1158,7 +1165,7 @@ const AdminDashboard = ({
 
     return Object.entries(todoState || {}).flatMap(([catKey, catTodo]) => {
       const items = catTodo?.items || [];
-      return items.map((item) => ({
+      return orderTodosForDisplay(items).map((item) => ({
         clientId: c.id,
         clientName: c.name,
         cycleStart,
@@ -3063,6 +3070,7 @@ const AdminDashboard = ({
                           items: [],
                         };
                         const items = catTodo.items || [];
+                        const displayItems = orderTodosForDisplay(items);
                         if (!items.length && !catTodo.closed) return null;
                         return (
                           <div className="pt-2 border-t border-slate-100">
@@ -3079,7 +3087,7 @@ const AdminDashboard = ({
                               </p>
                             ) : (
                               <ul className="space-y-2 mb-2">
-                                {items.map((item) => {
+                                {displayItems.map((item) => {
                                   const urgency = getTodoUrgencyStyles(item);
                                   return (
                                     <li
@@ -3123,6 +3131,11 @@ const AdminDashboard = ({
                                       >
                                         {item.text || '(no text)'}
                                       </span>
+                                      {item.pinned && (
+                                        <span className="text-[9px] font-black uppercase tracking-widest text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
+                                          Pinned
+                                        </span>
+                                      )}
                                       {item.recurring && (
                                         <span
                                           className={`text-[9px] font-black uppercase tracking-widest ${urgency.metaClass}`}
@@ -3161,6 +3174,7 @@ const AdminDashboard = ({
                           items: [],
                         };
                         const items = catTodo.items || [];
+                        const displayItems = orderTodosForDisplay(items);
                         const allDone =
                           items.length > 0 && items.every((i) => i.done);
 
@@ -3190,6 +3204,12 @@ const AdminDashboard = ({
                                 </span>
                               )}
                             </div>
+                            {!catTodo.closed && items.length > 0 && (
+                              <p className="text-[10px] text-slate-400 mb-2">
+                                Drag the grip to reorder. Pin keeps tasks at the top of the
+                                list.
+                              </p>
+                            )}
 
                             {catTodo.closed ? (
                               <button
@@ -3220,14 +3240,95 @@ const AdminDashboard = ({
                                   </p>
                                 ) : (
                                   <ul className="space-y-2 mb-3">
-                                    {items.map((item) => {
+                                    {displayItems.map((item) => {
                                       const urgency = getTodoUrgencyStyles(item);
                                       const assignees = normalizeTodoAssignees(item);
                                       return (
                                       <li
                                         key={item.id}
                                         className={`flex items-center gap-2 rounded-lg p-2 ${urgency.rowClass}`}
+                                        onDragOver={(e) => {
+                                          if (todoSaving || isCycleLocked(c, cycleStart))
+                                            return;
+                                          e.preventDefault();
+                                          e.dataTransfer.dropEffect = 'move';
+                                        }}
+                                        onDrop={(e) => {
+                                          e.preventDefault();
+                                          if (todoSaving || isCycleLocked(c, cycleStart))
+                                            return;
+                                          const draggedId =
+                                            e.dataTransfer.getData('text/plain');
+                                          if (!draggedId || draggedId === item.id) return;
+                                          const disp = orderTodosForDisplay(items);
+                                          const fromIdx = disp.findIndex(
+                                            (i) => i.id === draggedId,
+                                          );
+                                          const toIdx = disp.findIndex(
+                                            (i) => i.id === item.id,
+                                          );
+                                          if (fromIdx < 0 || toIdx < 0) return;
+                                          const next = reorderTodosDisplay(
+                                            items,
+                                            fromIdx,
+                                            toIdx,
+                                          );
+                                          setTodoSaving(true);
+                                          updateClientTodo(
+                                            c,
+                                            cycleStart,
+                                            catKey,
+                                            { ...catTodo, items: next },
+                                          ).finally(() => setTodoSaving(false));
+                                        }}
                                       >
+                                        <span
+                                          draggable={
+                                            !(todoSaving || isCycleLocked(c, cycleStart))
+                                          }
+                                          onDragStart={(e) => {
+                                            e.dataTransfer.setData('text/plain', item.id);
+                                            e.dataTransfer.effectAllowed = 'move';
+                                          }}
+                                          className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0 select-none touch-none"
+                                          title="Drag to reorder"
+                                        >
+                                          <GripVertical className="w-4 h-4" aria-hidden />
+                                        </span>
+                                        <button
+                                          type="button"
+                                          disabled={
+                                            todoSaving || isCycleLocked(c, cycleStart)
+                                          }
+                                          title={
+                                            item.pinned ? 'Unpin from top' : 'Pin to top'
+                                          }
+                                          onClick={async () => {
+                                            if (isCycleLocked(c, cycleStart)) return;
+                                            setTodoSaving(true);
+                                            try {
+                                              const next = toggleTodoPinnedById(
+                                                items,
+                                                item.id,
+                                              );
+                                              await updateClientTodo(
+                                                c,
+                                                cycleStart,
+                                                catKey,
+                                                { ...catTodo, items: next },
+                                              );
+                                            } finally {
+                                              setTodoSaving(false);
+                                            }
+                                          }}
+                                          className={`shrink-0 p-1.5 rounded-lg border transition-colors ${
+                                            item.pinned
+                                              ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                              : 'border-transparent text-slate-300 hover:text-amber-600 hover:bg-amber-50/80'
+                                          }`}
+                                        >
+                                          <Pin className="w-4 h-4" />
+                                        </button>
                                         <input
                                           type="checkbox"
                                           checked={!!item.done}
@@ -3357,6 +3458,7 @@ const AdminDashboard = ({
                                             text,
                                             done: false,
                                             doneAt: null,
+                                            pinned: false,
                                             recurring: !!recurrence,
                                             recurringId: recurrence ? nid : null,
                                             dueDate,
@@ -3435,6 +3537,7 @@ const AdminDashboard = ({
                                             text,
                                             done: false,
                                             doneAt: null,
+                                            pinned: false,
                                             recurring: !!recurrence,
                                             recurringId: recurrence ? nid : null,
                                             dueDate,
@@ -3728,6 +3831,7 @@ const AdminDashboard = ({
                                             text,
                                             done: false,
                                             doneAt: null,
+                                            pinned: false,
                                             recurring: false,
                                             recurringId: null,
                                             dueDate: null,
@@ -4011,6 +4115,8 @@ const AdminDashboard = ({
                                                   catKey
                                                 ] || { closed: false, items: [] };
                                                 const items = catTodo.items || [];
+                                                const displayItems =
+                                                  orderTodosForDisplay(items);
                                                 if (!items.length && !catTodo.closed)
                                                   return null;
                                                 return (
@@ -4028,7 +4134,7 @@ const AdminDashboard = ({
                                                       </p>
                                                     ) : (
                                                       <ul className="space-y-2 mb-1">
-                                                        {items.map((item) => {
+                                                        {displayItems.map((item) => {
                                                           const urgency =
                                                             getTodoUrgencyStyles(
                                                               item,
@@ -4090,6 +4196,11 @@ const AdminDashboard = ({
                                                                 {item.text ||
                                                                   '(no text)'}
                                                               </span>
+                                                              {item.pinned && (
+                                                                <span className="text-[9px] font-black uppercase tracking-widest text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
+                                                                  Pinned
+                                                                </span>
+                                                              )}
                                                               {item.recurring && (
                                                                 <span
                                                                   className={`text-[9px] font-black uppercase tracking-widest ${urgency.metaClass}`}
@@ -4123,6 +4234,7 @@ const AdminDashboard = ({
                                               const todoState = getTodoStateForCycle(c, cycleStart);
                                               const catTodo = todoState[catKey] || { closed: false, items: [] };
                                               const items = catTodo.items || [];
+                                              const displayItems = orderTodosForDisplay(items);
                                               const allDone = items.length > 0 && items.every((i) => i.done);
                                               return (
                                                 <div style={{ order: 10 }}>
@@ -4134,6 +4246,11 @@ const AdminDashboard = ({
                                                       </span>
                                                     )}
                                                   </h6>
+                                                  {!catTodo.closed && items.length > 0 && (
+                                                    <p className="text-[10px] text-slate-400 mb-2">
+                                                      Drag the grip to reorder. Pin keeps tasks at the top.
+                                                    </p>
+                                                  )}
                                                   {catTodo.closed ? (
                                                     <button
                                                       type="button"
@@ -4157,14 +4274,71 @@ const AdminDashboard = ({
                                                         <p className="text-xs italic text-slate-400 mb-2">No to-do items yet.</p>
                                                       ) : (
                                                         <ul className="space-y-2 mb-2">
-                                                          {items.map((item) => {
+                                                          {displayItems.map((item) => {
                                                             const urgency = getTodoUrgencyStyles(item);
                                                             const assignees = normalizeTodoAssignees(item);
                                                             return (
                                                             <li
                                                               key={item.id}
                                                               className={`flex items-center gap-2 rounded-lg p-2 ${urgency.rowClass}`}
+                                                              onDragOver={(e) => {
+                                                                if (todoSaving || isCycleLocked(c, cycleStart)) return;
+                                                                e.preventDefault();
+                                                                e.dataTransfer.dropEffect = 'move';
+                                                              }}
+                                                              onDrop={(e) => {
+                                                                e.preventDefault();
+                                                                if (todoSaving || isCycleLocked(c, cycleStart)) return;
+                                                                const draggedId = e.dataTransfer.getData('text/plain');
+                                                                if (!draggedId || draggedId === item.id) return;
+                                                                const disp = orderTodosForDisplay(items);
+                                                                const fromIdx = disp.findIndex((i) => i.id === draggedId);
+                                                                const toIdx = disp.findIndex((i) => i.id === item.id);
+                                                                if (fromIdx < 0 || toIdx < 0) return;
+                                                                const next = reorderTodosDisplay(items, fromIdx, toIdx);
+                                                                setTodoSaving(true);
+                                                                updateClientTodo(c, cycleStart, catKey, {
+                                                                  ...catTodo,
+                                                                  items: next,
+                                                                }).finally(() => setTodoSaving(false));
+                                                              }}
                                                             >
+                                                              <span
+                                                                draggable={!(todoSaving || isCycleLocked(c, cycleStart))}
+                                                                onDragStart={(e) => {
+                                                                  e.dataTransfer.setData('text/plain', item.id);
+                                                                  e.dataTransfer.effectAllowed = 'move';
+                                                                }}
+                                                                className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0 select-none touch-none"
+                                                                title="Drag to reorder"
+                                                              >
+                                                                <GripVertical className="w-4 h-4" aria-hidden />
+                                                              </span>
+                                                              <button
+                                                                type="button"
+                                                                disabled={todoSaving || isCycleLocked(c, cycleStart)}
+                                                                title={item.pinned ? 'Unpin from top' : 'Pin to top'}
+                                                                onClick={async () => {
+                                                                  if (isCycleLocked(c, cycleStart)) return;
+                                                                  setTodoSaving(true);
+                                                                  try {
+                                                                    const next = toggleTodoPinnedById(items, item.id);
+                                                                    await updateClientTodo(c, cycleStart, catKey, {
+                                                                      ...catTodo,
+                                                                      items: next,
+                                                                    });
+                                                                  } finally {
+                                                                    setTodoSaving(false);
+                                                                  }
+                                                                }}
+                                                                className={`shrink-0 p-1.5 rounded-lg border transition-colors ${
+                                                                  item.pinned
+                                                                    ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                                                    : 'border-transparent text-slate-300 hover:text-amber-600 hover:bg-amber-50/80'
+                                                                }`}
+                                                              >
+                                                                <Pin className="w-4 h-4" />
+                                                              </button>
                                                               <input
                                                                 type="checkbox"
                                                                 checked={!!item.done}
@@ -4334,6 +4508,7 @@ const AdminDashboard = ({
                                                                     text,
                                                                     done: false,
                                                                     doneAt: null,
+                                                                    pinned: false,
                                                                     recurring: !!recurrence,
                                                                     recurringId: recurrence ? nid : null,
                                                                     dueDate,
@@ -4408,6 +4583,7 @@ const AdminDashboard = ({
                                                                   text,
                                                                   done: false,
                                                                   doneAt: null,
+                                                                  pinned: false,
                                                                   recurring: !!recurrence,
                                                                   recurringId: recurrence ? nid : null,
                                                                   dueDate,
