@@ -190,6 +190,7 @@ export default function App() {
   const [expenses, setExpenses] = useState([]);
   const [projects, setProjects] = useState([]);
   const [addons, setAddons] = useState([]);
+  const [userTodos, setUserTodos] = useState([]);
   
   const [adminTab, setAdminTab] = useState('timesheets'); 
   const [searchQuery, setSearchQuery] = useState('');
@@ -306,9 +307,35 @@ export default function App() {
     const unsubExpenses = onSnapshot(collection(db, 'expenses'), (snapshot) => setExpenses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a,b) => b.date - a.date)));
     const unsubProjects = onSnapshot(collection(db, 'projects'), (snapshot) => setProjects(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a,b) => b.createdAt - a.createdAt)));
     const unsubAddons = onSnapshot(collection(db, 'addons'), (snapshot) => setAddons(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a,b) => b.date - a.date)));
+    const unsubUserTodos = onSnapshot(doc(db, 'userTodos', user.uid), (snapshot) => {
+      if (!snapshot.exists()) {
+        setUserTodos([]);
+        return;
+      }
+      const data = snapshot.data() || {};
+      const items = Array.isArray(data.items) ? data.items : [];
+      setUserTodos(items);
+    });
 
-    return () => { unsubTimesheets(); unsubClients(); unsubTasks(); unsubTaskTypes(); unsubAdmins(); unsubExpenses(); unsubProjects(); unsubAddons(); };
+    return () => {
+      unsubTimesheets();
+      unsubClients();
+      unsubTasks();
+      unsubTaskTypes();
+      unsubAdmins();
+      unsubExpenses();
+      unsubProjects();
+      unsubAddons();
+      unsubUserTodos();
+    };
   }, [user]);
+
+  const updateUserTodos = async (nextItems) => {
+    if (!user?.uid) return;
+    const items = Array.isArray(nextItems) ? nextItems : [];
+    setUserTodos(items);
+    await setDoc(doc(db, 'userTodos', user.uid), { items }, { merge: true });
+  };
 
   // Ensure admins are addressable by doc id (email)
   useEffect(() => {
@@ -854,12 +881,15 @@ export default function App() {
     if (cycleStart !== currentCycleStart) return {};
     const prevStart = getBillingPeriod(client.billingDay || 1, -1).start;
     const prevData = cycles[String(prevStart)] || {};
-    const categories = [
-      ...new Set([...Object.keys(client.retainers || {}), GENERAL_LABEL]),
-    ];
+    // Carry over *all* previously-existing category keys (including custom project
+    // task categories), not just retainer categories + General.
+    const categoryKeys = new Set([
+      ...Object.keys(client.retainers || {}).map((cat) => todoCategoryKey(cat)),
+      todoCategoryKey(GENERAL_LABEL),
+      ...Object.keys(prevData),
+    ]);
     const result = {};
-    categories.forEach((cat) => {
-      const ck = todoCategoryKey(cat);
+    Array.from(categoryKeys).forEach((ck) => {
       const prevCat = prevData[ck];
       const prevItems = prevCat?.items || [];
       const carried = prevItems
@@ -910,12 +940,15 @@ export default function App() {
     if (cycles[String(cycleStart)]) return cycles;
     const prevStart = getBillingPeriod(client.billingDay || 1, -1).start;
     const prevData = cycles[String(prevStart)] || {};
-    const categories = [
-      ...new Set([...Object.keys(client.retainers || {}), GENERAL_LABEL]),
-    ];
+    // Ensure we create the current-cycle objects for any category keys that
+    // existed in the previous cycle (again, includes custom project to-dos).
+    const categoryKeys = new Set([
+      ...Object.keys(client.retainers || {}).map((cat) => todoCategoryKey(cat)),
+      todoCategoryKey(GENERAL_LABEL),
+      ...Object.keys(prevData),
+    ]);
     cycles[String(cycleStart)] = {};
-    categories.forEach((cat) => {
-      const ck = todoCategoryKey(cat);
+    Array.from(categoryKeys).forEach((ck) => {
       const prevCat = prevData[ck];
       const prevItems = prevCat?.items || [];
       const carried = prevItems
@@ -1550,6 +1583,8 @@ export default function App() {
     updateClientTodo,
     updateClientTodosBatch,
     todoCategoryKey,
+    userTodos,
+    updateUserTodos,
     updatePolicy,
   };
 
@@ -2073,6 +2108,101 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Workspace access */}
+              {(() => {
+                const kioskEmails = Array.from(
+                  new Set(
+                    (adminUsers || [])
+                      .filter((u) => u?.role === 'kiosk')
+                      .map((u) =>
+                        String(u?.email || '').trim().toLowerCase(),
+                      )
+                      .filter(Boolean),
+                  ),
+                ).sort();
+
+                const current = editingClient.teamMemberAccessEmails;
+                const legacyOpen = current == null;
+
+                return (
+                  <div className="space-y-2 pt-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 block">
+                      Workspace access (Kiosk users)
+                    </label>
+                    <p className="text-xs text-slate-400">
+                      Until you set a list, every kiosk user can see this client
+                      (legacy). An explicit empty list blocks all kiosk access.
+                    </p>
+                    {legacyOpen ? (
+                      <button
+                        type="button"
+                        className="w-full px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-black uppercase tracking-widest"
+                        onClick={() => {
+                          if (kioskEmails.length === 0) {
+                            window.alert(
+                              'No users with the Kiosk role found. Add a kiosk user under Users first.',
+                            );
+                            return;
+                          }
+                          setEditingClient({
+                            ...editingClient,
+                            teamMemberAccessEmails: kioskEmails,
+                          });
+                        }}
+                      >
+                        Set access list (all kiosk users)
+                      </button>
+                    ) : (
+                      <div className="flex flex-wrap gap-x-4 gap-y-2">
+                        {kioskEmails.length === 0 ? (
+                          <p className="text-xs italic text-slate-400">
+                            No kiosk users exist yet.
+                          </p>
+                        ) : (
+                          kioskEmails.map((email) => {
+                            const normalized = String(email || '').trim().toLowerCase();
+                            const selected =
+                              Array.isArray(current) &&
+                              current
+                                .map((e) => String(e || '').trim().toLowerCase())
+                                .includes(normalized);
+                            return (
+                              <label
+                                key={normalized}
+                                className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selected}
+                                  onChange={() => {
+                                    const cur = Array.isArray(
+                                      editingClient.teamMemberAccessEmails,
+                                    )
+                                      ? editingClient.teamMemberAccessEmails
+                                          .map((e) => String(e || '').trim().toLowerCase())
+                                      : [];
+                                    const set = new Set(cur);
+                                    if (set.has(normalized)) set.delete(normalized);
+                                    else set.add(normalized);
+                                    const next = [...set].sort();
+                                    setEditingClient({
+                                      ...editingClient,
+                                      teamMemberAccessEmails: next,
+                                    });
+                                  }}
+                                  className="rounded border-slate-300"
+                                />
+                                <span>{email}</span>
+                              </label>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Retainers */}
               <div>
                 <div className="flex justify-between items-center mb-4">
@@ -2205,7 +2335,7 @@ export default function App() {
 
             <div className="p-8 border-t border-slate-100 bg-white shrink-0">
               <button 
-                onClick={async () => { await updateDoc(doc(db, 'clients', editingClient.id), { retainers: editingClient.retainers, retainerUnits: editingClient.retainerUnits || {}, hourlyRate: editingClient.hourlyRate || 0, clientEmails: editingClient.clientEmails || [], billingDay: editingClient.billingDay || 1, status: editingClient.status || 'active', lastCarryoverResetDate: editingClient.lastCarryoverResetDate || null, carryoverResetByCategory: editingClient.carryoverResetByCategory || {}, clientStartDate: editingClient.clientStartDate || null }); setEditingClient(null); }} 
+                onClick={async () => { await updateDoc(doc(db, 'clients', editingClient.id), { retainers: editingClient.retainers, retainerUnits: editingClient.retainerUnits || {}, hourlyRate: editingClient.hourlyRate || 0, clientEmails: editingClient.clientEmails || [], billingDay: editingClient.billingDay || 1, status: editingClient.status || 'active', teamMemberAccessEmails: editingClient.teamMemberAccessEmails === undefined ? null : editingClient.teamMemberAccessEmails, lastCarryoverResetDate: editingClient.lastCarryoverResetDate || null, carryoverResetByCategory: editingClient.carryoverResetByCategory || {}, clientStartDate: editingClient.clientStartDate || null }); setEditingClient(null); }} 
                 className="w-full bg-black hover:bg-slate-800 text-white p-5 rounded-2xl font-black text-lg shadow-xl flex items-center justify-center gap-3 transition-all active:scale-95"
               >
                 <Save className="w-5 h-5" /> Save Profile

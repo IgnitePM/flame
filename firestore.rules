@@ -49,9 +49,9 @@ service cloud.firestore {
         (clientDoc(clientId).data.cycleLocks[string(cycleStart)].locked == true);
     }
 
-    // Default: require auth to read; deny unknown writes.
+    // Default: deny unknown reads (must be explicitly allowed below).
     match /{document=**} {
-      allow read: if isSignedIn();
+      allow read: if false;
     }
 
     match /admins/{adminId} {
@@ -134,6 +134,16 @@ service cloud.firestore {
       allow read: if isBilling() || isAdmin();
       allow create: if isSignedIn(); // app writes audit logs; keep permissive
       allow update, delete: if isAdmin();
+    }
+
+    match /taskTypes/{taskTypeId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isBilling();
+    }
+
+    match /userTodos/{uid} {
+      allow read: if isSignedIn() && uid == request.auth.uid;
+      allow create, update, delete: if isSignedIn() && uid == request.auth.uid;
     }
   }
 }

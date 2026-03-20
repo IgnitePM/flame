@@ -126,6 +126,10 @@ function ClientCustomProjectsPanelInner({
   taskLogs,
   cycleStartMs,
   getTaskDuration,
+  getTodoStateForCycle,
+  updateClientTodo,
+  todoCategoryKey,
+  assignableEmails,
   isCycleLocked,
   setProjectModal,
   setProjectValues,
@@ -138,10 +142,18 @@ function ClientCustomProjectsPanelInner({
   firestoreDoc,
   logAudit,
   readOnly = false,
+  setManualTaskModal,
+  setManualTaskValues,
+  user,
 }) {
   const c = client;
   const mStart = cycleStartMs;
   const fd = firestoreDoc;
+  const [projectTodoDraft, setProjectTodoDraft] = useState({});
+  const [projectTodoAssigneeDraft, setProjectTodoAssigneeDraft] = useState({});
+  const [projectTodoSaving, setProjectTodoSaving] = useState(false);
+  const todoStateForCycle =
+    getTodoStateForCycle && c && mStart ? getTodoStateForCycle(c, mStart) : {};
   if (!c?.id) {
     return (
       <div className="bg-slate-50 text-slate-600 text-sm p-4 rounded-2xl border border-slate-100">
@@ -269,8 +281,307 @@ function ClientCustomProjectsPanelInner({
                           &quot;{descStr}&quot;
                         </p>
                       )}
+
+                      {/* Project to-do checklist (cycle-based like client Tasks) */}
+                      <div className="mt-3 pt-3 border-t border-slate-100">
+                        {(() => {
+                          const catKey = todoCategoryKey
+                            ? todoCategoryKey(`project_${p.id}`)
+                            : `project_${p.id}`;
+                          const catTodo = todoStateForCycle?.[catKey] || {
+                            closed: false,
+                            items: [],
+                          };
+                          const items = catTodo.items || [];
+                          const total = items.length;
+                          const done = items.filter((i) => !!i.done).length;
+                          const pct =
+                            total > 0 ? Math.min(100, (done / total) * 100) : 0;
+                          const barClass =
+                            total === 0
+                              ? 'bg-slate-200'
+                              : pct >= 100
+                                ? 'bg-emerald-500'
+                                : pct >= 85
+                                  ? 'bg-orange-500'
+                                  : 'bg-emerald-500';
+
+                          return (
+                            <>
+                              <div className="flex items-center justify-between gap-3 mb-2">
+                                <h6 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                                  To-dos
+                                </h6>
+                                <span className="text-[10px] font-black text-slate-400">
+                                  {done}/{total} done
+                                </span>
+                              </div>
+
+                              {total === 0 ? (
+                                <p className="text-xs italic text-slate-400 mb-3">
+                                  No to-dos yet.
+                                </p>
+                              ) : (
+                                <div className="space-y-2 mb-3">
+                                  {items.map((item) => (
+                                    <label
+                                      key={item.id}
+                                      className={`flex items-start gap-2 cursor-pointer ${
+                                        item.done ? 'opacity-70' : ''
+                                      }`}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={!!item.done}
+                                        disabled={projectTodoSaving || isCycleLocked(c, mStart)}
+                                        onChange={async () => {
+                                          if (!updateClientTodo || !getTodoStateForCycle)
+                                            return;
+                                          setProjectTodoSaving(true);
+                                          try {
+                                            const prev = todoStateForCycle?.[catKey] || {
+                                              closed: false,
+                                              items: [],
+                                            };
+                                            const nextItems = (prev.items || []).map(
+                                              (i) =>
+                                                i.id === item.id
+                                                  ? {
+                                                      ...i,
+                                                      done: !i.done,
+                                                      doneAt: !i.done
+                                                        ? Date.now()
+                                                        : null,
+                                                    }
+                                                  : i,
+                                            );
+                                            await updateClientTodo(
+                                              c,
+                                              mStart,
+                                              catKey,
+                                              { ...prev, items: nextItems },
+                                            );
+                                          } finally {
+                                            setProjectTodoSaving(false);
+                                          }
+                                        }}
+                                      />
+                                      <span
+                                        className={`text-sm ${
+                                          item.done
+                                            ? 'line-through text-slate-400'
+                                            : 'text-slate-800'
+                                        }`}
+                                      >
+                                        {item.text || '(no text)'}
+                                      </span>
+                                    </label>
+                                  ))}
+                                </div>
+                              )}
+
+                              <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden mb-3">
+                                <div
+                                  className={`h-2 rounded-full ${barClass}`}
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+
+                              {!readOnly && (
+                                <div className="space-y-2">
+                                  <input
+                                    type="text"
+                                    value={projectTodoDraft?.[p.id] || ''}
+                                    onChange={(e) =>
+                                      setProjectTodoDraft((prev) => ({
+                                        ...prev,
+                                        [p.id]: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="New to-do..."
+                                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                    onKeyDown={(e) => {
+                                      if (e.key !== 'Enter') return;
+                                      e.preventDefault();
+                                      (async () => {
+                                        if (!updateClientTodo) return;
+                                        if (isCycleLocked(c, mStart)) return;
+                                        const text = String(
+                                          projectTodoDraft?.[p.id] || '',
+                                        ).trim();
+                                        if (!text) return;
+                                        setProjectTodoSaving(true);
+                                        try {
+                                          const prev = todoStateForCycle?.[catKey] || {
+                                            closed: false,
+                                            items: [],
+                                          };
+                                          const items = prev.items || [];
+                                          const me = String(
+                                            user?.email || '',
+                                          )
+                                            .trim()
+                                            .toLowerCase();
+                                          const chosenAssignee =
+                                            projectTodoAssigneeDraft?.[p.id] || me;
+                                          const nid = `todo_${Date.now()}_${Math.random()
+                                            .toString(36)
+                                            .slice(2)}`;
+                                          const newItem = {
+                                            id: nid,
+                                            text,
+                                            done: false,
+                                            doneAt: null,
+                                            pinned: false,
+                                            recurring: false,
+                                            recurringId: null,
+                                            dueDate: null,
+                                            assigneeEmails: chosenAssignee
+                                              ? [chosenAssignee]
+                                              : [],
+                                          };
+                                          await updateClientTodo(c, mStart, catKey, {
+                                            ...prev,
+                                            closed: false,
+                                            items: [...items, newItem],
+                                          });
+                                          setProjectTodoDraft((prevDraft) => ({
+                                            ...prevDraft,
+                                            [p.id]: '',
+                                          }));
+                                          setProjectTodoAssigneeDraft((prevAss) => ({
+                                            ...prevAss,
+                                            [p.id]: me,
+                                          }));
+                                        } finally {
+                                          setProjectTodoSaving(false);
+                                        }
+                                      })();
+                                    }}
+                                  />
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <select
+                                      value={
+                                        projectTodoAssigneeDraft?.[p.id] ||
+                                        (user?.email
+                                          ? String(user.email).trim().toLowerCase()
+                                          : '')
+                                      }
+                                      onChange={(e) =>
+                                        setProjectTodoAssigneeDraft((prev) => ({
+                                          ...prev,
+                                          [p.id]: e.target.value,
+                                        }))
+                                      }
+                                      className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px]"
+                                      title="Assign to user"
+                                    >
+                                      {(assignableEmails || []).map((email) => (
+                                        <option key={email} value={email}>
+                                          {email}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <button
+                                      type="button"
+                                      disabled={projectTodoSaving || !String(projectTodoDraft?.[p.id] || '').trim()}
+                                      onClick={() => {
+                                        (async () => {
+                                          if (!updateClientTodo) return;
+                                          if (isCycleLocked(c, mStart)) return;
+                                          const text = String(projectTodoDraft?.[p.id] || '')
+                                            .trim();
+                                          if (!text) return;
+                                          setProjectTodoSaving(true);
+                                          try {
+                                            const prev = todoStateForCycle?.[catKey] || {
+                                              closed: false,
+                                              items: [],
+                                            };
+                                            const items = prev.items || [];
+                                            const me = String(user?.email || '')
+                                              .trim()
+                                              .toLowerCase();
+                                            const chosenAssignee =
+                                              projectTodoAssigneeDraft?.[p.id] || me;
+                                            const nid = `todo_${Date.now()}_${Math.random()
+                                              .toString(36)
+                                              .slice(2)}`;
+                                            const newItem = {
+                                              id: nid,
+                                              text,
+                                              done: false,
+                                              doneAt: null,
+                                              pinned: false,
+                                              recurring: false,
+                                              recurringId: null,
+                                              dueDate: null,
+                                              assigneeEmails: chosenAssignee
+                                                ? [chosenAssignee]
+                                                : [],
+                                            };
+                                            await updateClientTodo(c, mStart, catKey, {
+                                              ...prev,
+                                              closed: false,
+                                              items: [...items, newItem],
+                                            });
+                                            setProjectTodoDraft((prevDraft) => ({
+                                              ...prevDraft,
+                                              [p.id]: '',
+                                            }));
+                                            setProjectTodoAssigneeDraft((prevAss) => ({
+                                              ...prevAss,
+                                              [p.id]: me,
+                                            }));
+                                          } finally {
+                                            setProjectTodoSaving(false);
+                                          }
+                                        })();
+                                      }}
+                                      className="px-4 py-2 rounded-xl bg-[#fd7414] text-white font-bold text-sm disabled:opacity-40 shrink-0"
+                                      title="Add to-do"
+                                    >
+                                      Add
+                                    </button>
+                                  </div>
+                                  <p className="text-[10px] text-slate-400">
+                                    These to-dos appear in the global Tasks list.
+                                  </p>
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </div>
                     </div>
                     <div className="flex flex-col gap-2 items-end">
+                      <button
+                        type="button"
+                        disabled={readOnly}
+                        onClick={() => {
+                          if (readOnly) return;
+                          setManualTaskValues({
+                            clientName: c.name,
+                            billingTarget: `project_${p.id}`,
+                            date: '',
+                            hours: '',
+                            minutes: '',
+                            notes: '',
+                            employeeName:
+                              user?.displayName || user?.email || '',
+                            parsedExpense: 0,
+                          });
+                          setManualTaskModal(true);
+                        }}
+                        className={`px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors ${
+                          readOnly
+                            ? 'opacity-40 cursor-not-allowed bg-slate-100 text-slate-400'
+                            : 'bg-slate-800 text-white hover:bg-black'
+                        }`}
+                        title={readOnly ? 'Admin only' : `Log task for ${p.title}`}
+                      >
+                        Log Task
+                      </button>
                       {!readOnly && (
                         <>
                           {(statusStr === 'requested' || statusStr === 'approved') && (
@@ -484,6 +795,8 @@ const AdminDashboard = ({
   updateClientTodo,
   updateClientTodosBatch,
   todoCategoryKey,
+  userTodos = [],
+  updateUserTodos,
 }) => {
   const canBilling = currentUserRole === 'admin' || currentUserRole === 'billing';
   const isAdmin = currentUserRole === 'admin';
@@ -583,6 +896,8 @@ const AdminDashboard = ({
   const [taskClientFilter, setTaskClientFilter] = useState('all');
   const [taskCategoryFilter, setTaskCategoryFilter] = useState('all');
   const [taskAssigneeFilter, setTaskAssigneeFilter] = useState('me');
+  const [userTodoDraft, setUserTodoDraft] = useState('');
+  const [userTodoSaving, setUserTodoSaving] = useState(false);
 
   useEffect(() => {
     if (isRestrictedStaff) setTaskAssigneeFilter('all');
@@ -1209,6 +1524,15 @@ const AdminDashboard = ({
       labelMap[keyOf(cat)] = cat;
     });
     labelMap[keyOf('General / Unclassified')] = 'General / Unclassified';
+    // Custom project to-do categories are stored under `project_<id>` keys.
+    (projects || [])
+      .filter((p) => p && p.clientId === c.id && !p.archived)
+      .forEach((p) => {
+        const catKey = todoCategoryKey
+          ? todoCategoryKey(`project_${p.id}`)
+          : `project_${p.id}`;
+        labelMap[keyOf(catKey)] = p.title || 'Custom Project';
+      });
 
     return Object.entries(todoState || {}).flatMap(([catKey, catTodo]) => {
       const items = catTodo?.items || [];
@@ -1816,6 +2140,151 @@ const AdminDashboard = ({
       {/* Global Tasks Tab */}
       {adminTab === 'tasks_global' && (
         <div className="space-y-6">
+          {/* User-scoped tasks (not tied to a client / cycle) */}
+          <div className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-sm space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h4 className="font-black text-xl text-slate-900">Your Tasks</h4>
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                {Array.isArray(userTodos) ? userTodos.length : 0}
+              </span>
+            </div>
+
+            {(() => {
+              const sorted = [...(userTodos || [])].sort((a, b) => {
+                const ad = !!a?.done;
+                const bd = !!b?.done;
+                if (ad === bd) return 0;
+                return ad ? 1 : -1; // undone first
+              });
+
+              if (sorted.length === 0) {
+                return (
+                  <p className="text-sm italic text-slate-400">
+                    No personal tasks yet.
+                  </p>
+                );
+              }
+
+              return (
+                <div className="space-y-2">
+                  {sorted.map((t) => (
+                    <label
+                      key={t.id}
+                      className={`flex items-start gap-2 p-3 rounded-2xl border border-slate-100 bg-slate-50/50 cursor-pointer ${
+                        t.done ? 'opacity-70' : ''
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!!t.done}
+                        disabled={userTodoSaving || !updateUserTodos}
+                        onChange={async () => {
+                          if (!updateUserTodos) return;
+                          setUserTodoSaving(true);
+                          try {
+                            const next = (userTodos || []).map((x) =>
+                              x.id === t.id
+                                ? {
+                                    ...x,
+                                    done: !x.done,
+                                    doneAt: !x.done ? Date.now() : null,
+                                  }
+                                : x,
+                            );
+                            await updateUserTodos(next);
+                          } finally {
+                            setUserTodoSaving(false);
+                          }
+                        }}
+                        className="mt-1"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div
+                          className={`text-sm font-medium ${
+                            t.done ? 'line-through text-slate-400' : 'text-slate-800'
+                          }`}
+                        >
+                          {t.text || '(no text)'}
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              );
+            })()}
+
+            <div className="flex flex-wrap gap-2 items-center pt-2 border-t border-slate-100">
+              <input
+                type="text"
+                value={userTodoDraft}
+                onChange={(e) => setUserTodoDraft(e.target.value)}
+                placeholder="Add a personal task..."
+                className="flex-1 bg-slate-50 border border-slate-200 p-3 rounded-3xl font-bold outline-none placeholder:text-slate-300"
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return;
+                  e.preventDefault();
+                  (async () => {
+                    if (!updateUserTodos) return;
+                    const text = String(userTodoDraft || '').trim();
+                    if (!text) return;
+                    setUserTodoSaving(true);
+                    try {
+                      const nid = `user_todo_${Date.now()}_${Math.random()
+                        .toString(36)
+                        .slice(2)}`;
+                      const next = [
+                        ...(userTodos || []),
+                        {
+                          id: nid,
+                          text,
+                          done: false,
+                          doneAt: null,
+                          createdAt: Date.now(),
+                        },
+                      ];
+                      await updateUserTodos(next);
+                      setUserTodoDraft('');
+                    } finally {
+                      setUserTodoSaving(false);
+                    }
+                  })();
+                }}
+              />
+              <button
+                type="button"
+                disabled={userTodoSaving || !String(userTodoDraft || '').trim() || !updateUserTodos}
+                onClick={async () => {
+                  if (!updateUserTodos) return;
+                  const text = String(userTodoDraft || '').trim();
+                  if (!text) return;
+                  setUserTodoSaving(true);
+                  try {
+                    const nid = `user_todo_${Date.now()}_${Math.random()
+                      .toString(36)
+                      .slice(2)}`;
+                    const next = [
+                      ...(userTodos || []),
+                      {
+                        id: nid,
+                        text,
+                        done: false,
+                        doneAt: null,
+                        createdAt: Date.now(),
+                      },
+                    ];
+                    await updateUserTodos(next);
+                    setUserTodoDraft('');
+                  } finally {
+                    setUserTodoSaving(false);
+                  }
+                }}
+                className="bg-black text-white px-10 py-5 rounded-3xl font-black shadow-2xl active:scale-95 transition-all disabled:opacity-40"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+
           <div className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-sm grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2 mb-2 block">
@@ -2600,107 +3069,6 @@ const AdminDashboard = ({
                     </div>
                   )}
 
-                  {isClientPage && !isRestrictedStaff && (
-                    <div
-                      className="px-4 sm:px-6 pb-4 bg-white border-b border-slate-100"
-                      onClick={(e) => e.stopPropagation()}
-                      role="presentation"
-                    >
-                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
-                        Workspace access (Kiosk)
-                      </h5>
-                      <p className="text-xs text-slate-500 mb-3">
-                        Control which team accounts can open this client in Workspace. Until
-                        you set a list, every kiosk user can see this client (legacy). An
-                        explicit empty list blocks all kiosk access.
-                      </p>
-                      {c.teamMemberAccessEmails == null ? (
-                        <button
-                          type="button"
-                          className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-black uppercase tracking-widest"
-                          onClick={async () => {
-                            const kioskEmails = dedupedAdminUsers
-                              .filter((u) => u.role === 'kiosk')
-                              .map((u) => String(u.email || '').trim().toLowerCase())
-                              .filter(Boolean);
-                            if (kioskEmails.length === 0) {
-                              window.alert(
-                                'No users with the Kiosk role found. Add a kiosk user under Users first.',
-                              );
-                              return;
-                            }
-                            try {
-                              await updateDoc(doc('clients', c.id), {
-                                teamMemberAccessEmails: [...new Set(kioskEmails)].sort(),
-                              });
-                              logAudit?.({
-                                type: 'client_workspace_access_initialized',
-                                entityType: 'client',
-                                entityId: c.id,
-                                clientId: c.id,
-                              });
-                            } catch (err) {
-                              window.alert(
-                                `Could not update access: ${err?.message || String(err)}`,
-                              );
-                            }
-                          }}
-                        >
-                          Set access list (start with all Kiosk users)
-                        </button>
-                      ) : (
-                      <div className="flex flex-wrap gap-x-4 gap-y-2">
-                        {dedupedAdminUsers.map(({ email }) => {
-                          const lower = String(email || '').trim().toLowerCase();
-                          if (!lower) return null;
-                          const selected = normalizeEmailList(
-                            c.teamMemberAccessEmails,
-                          ).includes(lower);
-                          return (
-                            <label
-                              key={lower}
-                              className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={selected}
-                                onChange={async () => {
-                                  const cur = normalizeEmailList(
-                                    c.teamMemberAccessEmails,
-                                  );
-                                  const set = new Set(cur);
-                                  if (set.has(lower)) set.delete(lower);
-                                  else set.add(lower);
-                                  const next = [...set].sort();
-                                  try {
-                                    await updateDoc(doc('clients', c.id), {
-                                      teamMemberAccessEmails: next,
-                                    });
-                                    logAudit?.({
-                                      type: 'client_workspace_access_updated',
-                                      entityType: 'client',
-                                      entityId: c.id,
-                                      clientId: c.id,
-                                    });
-                                  } catch (err) {
-                                    window.alert(
-                                      `Could not update access: ${
-                                        err?.message || String(err)
-                                      }`,
-                                    );
-                                  }
-                                }}
-                                className="rounded border-slate-300"
-                              />
-                              <span>{email}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                      )}
-                    </div>
-                  )}
-
                   <div className="p-6 flex-1 bg-white space-y-6">
                     {isClientPage && showClientSummary && (
                       <div>
@@ -2791,10 +3159,10 @@ const AdminDashboard = ({
                     )}
                     {(showClientSummary || showClientTimesheets) && (
                     <div>
-                      <h5 className="text-sm sm:text-base font-black text-slate-700 uppercase tracking-widest mb-2 flex items-center justify-between">
+                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center justify-between">
                         <span>Global Retainer Progress</span>
                         <div className="flex items-center gap-2">
-                          <span className="bg-slate-100 text-slate-500 px-2 py-1 rounded-md">
+                          <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md">
                             {new Date(mStart).toLocaleDateString()} -{' '}
                             {new Date(mEnd).toLocaleDateString()}
                           </span>
@@ -3140,6 +3508,74 @@ const AdminDashboard = ({
                           )}
                         </div>
                       )}
+                  {isClientPage &&
+                    showClientSummary &&
+                    clientProjects &&
+                    clientProjects.length > 0 && (
+                      <div className="pt-3 border-t border-slate-100">
+                        <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                          Custom Projects
+                        </h5>
+                        <div className="space-y-3">
+                          {(() => {
+                            const todoStateForProjects = getTodoStateForCycle
+                              ? getTodoStateForCycle(c, mStart)
+                              : {};
+                            return clientProjects
+                              .filter(
+                                (p) =>
+                                  p &&
+                                  !(
+                                    safeProjectStatus(p) === 'closed' &&
+                                    p.invoiced
+                                  ),
+                              )
+                              .map((p) => {
+                                const catKey = todoCategoryKey
+                                  ? todoCategoryKey(`project_${p.id}`)
+                                  : `project_${p.id}`;
+                                const catTodo =
+                                  todoStateForProjects?.[catKey] || {
+                                    closed: false,
+                                    items: [],
+                                  };
+                                const items = catTodo.items || [];
+                                const total = items.length;
+                                const done = items.filter((i) => !!i.done).length;
+                                const pct =
+                                  total > 0 ? Math.min(100, (done / total) * 100) : 0;
+                                const barClass =
+                                  total === 0
+                                    ? 'bg-slate-200'
+                                    : done === total
+                                      ? 'bg-emerald-500'
+                                      : pct > 85
+                                        ? 'bg-orange-500'
+                                        : 'bg-emerald-500';
+
+                                return (
+                                  <div key={p.id}>
+                                    <div className="flex justify-between items-end mb-1 gap-3">
+                                      <span className="font-black text-[12px] text-slate-800 truncate">
+                                        {p.title}
+                                      </span>
+                                      <span className="text-[10px] font-black text-slate-500">
+                                        {done}/{total} done
+                                      </span>
+                                    </div>
+                                    <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden mb-1">
+                                      <div
+                                        className={`h-2 rounded-full ${barClass}`}
+                                        style={{ width: `${pct}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              });
+                          })()}
+                        </div>
+                      </div>
+                    )}
                     </div>
                     )}
 
@@ -5109,6 +5545,10 @@ const AdminDashboard = ({
                       taskLogs={taskLogs}
                       cycleStartMs={mStart}
                       getTaskDuration={getTaskDuration}
+                      getTodoStateForCycle={getTodoStateForCycle}
+                      updateClientTodo={updateClientTodo}
+                      todoCategoryKey={todoCategoryKey}
+                      assignableEmails={assignableEmails}
                       isCycleLocked={isCycleLocked}
                       setProjectModal={setProjectModal}
                       setProjectValues={setProjectValues}
@@ -5120,6 +5560,9 @@ const AdminDashboard = ({
                       firestoreDoc={doc}
                       logAudit={logAudit}
                       readOnly={isRestrictedStaff}
+                      setManualTaskModal={setManualTaskModal}
+                      setManualTaskValues={setManualTaskValues}
+                      user={user}
                     />
                   )}
                   </div>
@@ -5154,6 +5597,10 @@ const AdminDashboard = ({
                       taskLogs={taskLogs}
                       cycleStartMs={mStart}
                       getTaskDuration={getTaskDuration}
+                      getTodoStateForCycle={getTodoStateForCycle}
+                      updateClientTodo={updateClientTodo}
+                      todoCategoryKey={todoCategoryKey}
+                      assignableEmails={assignableEmails}
                       isCycleLocked={isCycleLocked}
                       setProjectModal={setProjectModal}
                       setProjectValues={setProjectValues}
