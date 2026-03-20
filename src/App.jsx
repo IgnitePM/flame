@@ -100,15 +100,20 @@ const IgniteLogo = ({ className }) => (
 
 const KioskRouteView = (props) => <EmployeeKiosk {...props} />;
 
-const CLIENT_PAGE_TABS = ['summary', 'tasks', 'projects', 'timesheets'];
+// Use `custom_projects` (not `projects`) for ?tab= to avoid clashes with routers/proxies treating "projects" specially.
+const CLIENT_PAGE_TABS = ['summary', 'tasks', 'custom_projects', 'timesheets'];
 
 const AdminDashboardRouteView = ({ adminDashboardProps, navigate }) => {
   const params = useParams();
   const clientId = params?.clientId || null;
   const [searchParams, setSearchParams] = useSearchParams();
   const rawTab = searchParams.get('tab');
+  const normalizedTab =
+    rawTab === 'projects' ? 'custom_projects' : rawTab;
   const clientPageTab =
-    clientId && CLIENT_PAGE_TABS.includes(rawTab) ? rawTab : 'summary';
+    clientId && CLIENT_PAGE_TABS.includes(normalizedTab)
+      ? normalizedTab
+      : 'summary';
   const clientUrlCycle = clientId ? searchParams.get('cycle') : null;
 
   const mergeClientSearchParams = useCallback(
@@ -748,6 +753,7 @@ export default function App() {
   };
 
   const getTaskDuration = (task) => {
+    if (task == null || typeof task !== 'object') return 0;
     if (task.status === 'completed') return task.duration || 0;
     return (task.totalSavedDuration || 0) + (Date.now() - (task.lastResumeTime || task.clockInTime));
   };

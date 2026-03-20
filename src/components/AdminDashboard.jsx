@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Component } from 'react';
 import {
   Activity,
   ArrowRight,
@@ -25,8 +25,76 @@ import {
   X,
 } from 'lucide-react';
 
+/** Avoid React child errors when Firestore stored a map/object in a text field. */
+function safeDisplayForReact(v) {
+  if (v == null) return '';
+  const t = typeof v;
+  if (t === 'string' || t === 'number' || t === 'boolean') return String(v);
+  if (t === 'object') {
+    try {
+      return JSON.stringify(v);
+    } catch {
+      return '[Invalid value]';
+    }
+  }
+  return String(v);
+}
+
+function safeProjectStatus(p) {
+  const s = p?.status;
+  return typeof s === 'string' ? s : '';
+}
+
+function safeTaskDurationMs(getTaskDuration, task) {
+  try {
+    if (typeof getTaskDuration !== 'function' || task == null) return 0;
+    const n = Number(getTaskDuration(task));
+    return Number.isFinite(n) ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+class ClientProjectsPanelErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error('ClientCustomProjectsPanel crashed:', error, info?.componentStack);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="bg-red-50 border border-red-200 text-red-900 text-sm p-4 rounded-2xl min-h-[120px]">
+          <p className="font-black mb-2">Custom projects couldn&apos;t load</p>
+          <p className="text-xs opacity-90 mb-3 break-words">
+            {String(this.state.error?.message || this.state.error)}
+          </p>
+          <button
+            type="button"
+            className="px-3 py-1.5 rounded-xl bg-red-700 text-white text-[10px] font-black uppercase tracking-widest hover:bg-red-800"
+            onClick={() => {
+              this.props.onRetry?.();
+            }}
+          >
+            Try again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 /** Custom projects list used on client cards (list accordion + client detail Projects tab). */
-function ClientCustomProjectsPanel({
+function ClientCustomProjectsPanelInner({
   client,
   clientProjects,
   taskLogs,
@@ -47,7 +115,14 @@ function ClientCustomProjectsPanel({
   const c = client;
   const mStart = cycleStartMs;
   const fd = firestoreDoc;
-  if (typeof fd !== 'function') {
+  if (!c?.id) {
+    return (
+      <div className="bg-slate-50 text-slate-600 text-sm p-4 rounded-2xl border border-slate-100">
+        Client data is missing; custom projects can&apos;t be shown.
+      </div>
+    );
+  }
+  if (typeof fd !== 'function' || typeof updateDoc !== 'function') {
     return (
       <div className="bg-amber-50 border border-amber-200 text-amber-900 text-sm p-4 rounded-2xl">
         Custom projects can&apos;t load (missing Firestore helper). Refresh the page or contact support.
@@ -83,11 +158,20 @@ function ClientCustomProjectsPanel({
         ) : (
           <div className="space-y-3">
             {(clientProjects || [])
-              .filter((p) => !(p.status === 'closed' && p.invoiced))
+              .filter(
+                (p) =>
+                  p != null &&
+                  p.id != null &&
+                  String(p.id).length > 0 &&
+                  !(safeProjectStatus(p) === 'closed' && p.invoiced),
+              )
               .map((p) => {
-                const pTasks = (taskLogs || []).filter((t) => t.projectId === p.id);
+                const pTasks = (taskLogs || []).filter((t) => t?.projectId === p.id);
                 const totalHours =
-                  pTasks.reduce((a, b) => a + getTaskDuration(b), 0) / 3600000;
+                  pTasks.reduce(
+                    (a, b) => a + safeTaskDurationMs(getTaskDuration, b),
+                    0,
+                  ) / 3600000;
                 const estHours = Number(p.estimatedHours || 0);
                 const projectPercent =
                   estHours > 0
@@ -95,26 +179,29 @@ function ClientCustomProjectsPanel({
                     : totalHours > 0
                       ? 100
                       : 0;
+                const statusStr = safeProjectStatus(p);
+                const titleStr = safeDisplayForReact(p.title) || '(Untitled project)';
+                const descStr = safeDisplayForReact(p.description);
                 return (
                   <div
-                    key={p.id}
+                    key={String(p.id)}
                     className="p-4 rounded-2xl border border-slate-100 bg-white flex flex-col sm:flex-row justify-between gap-4"
                   >
                     <div>
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-black text-sm text-slate-800">
-                          {p.title}
+                          {titleStr}
                         </span>
                         <span
                           className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${
-                            p.status === 'requested'
+                            statusStr === 'requested'
                               ? 'bg-orange-100 text-orange-600'
-                              : p.status === 'active'
+                              : statusStr === 'active'
                                 ? 'bg-emerald-100 text-emerald-600'
                                 : 'bg-slate-200 text-slate-500'
                           }`}
                         >
-                          {p.status}
+                          {statusStr || '—'}
                         </span>
                         {p.invoiced && (
                           <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
@@ -141,14 +228,14 @@ function ClientCustomProjectsPanel({
                           }}
                         />
                       </div>
-                      {p.description && (
+                      {descStr && (
                         <p className="text-xs text-slate-600 italic">
-                          &quot;{p.description}&quot;
+                          &quot;{descStr}&quot;
                         </p>
                       )}
                     </div>
                     <div className="flex flex-col gap-2 items-end">
-                      {(p.status === 'requested' || p.status === 'approved') && (
+                      {(statusStr === 'requested' || statusStr === 'approved') && (
                         <button
                           onClick={async () => {
                             if (isCycleLocked(c, mStart)) {
@@ -196,7 +283,7 @@ function ClientCustomProjectsPanel({
                       >
                         Edit Estimates
                       </button>
-                      {p.status !== 'closed' && (
+                      {statusStr !== 'closed' && (
                         <button
                           onClick={async () => {
                             if (isCycleLocked(c, mStart)) {
@@ -227,7 +314,7 @@ function ClientCustomProjectsPanel({
                           Mark Complete
                         </button>
                       )}
-                      {p.status === 'closed' && !p.invoiced && (
+                      {statusStr === 'closed' && !p.invoiced && (
                         <button
                           onClick={() =>
                             isCycleLocked(c, mStart)
@@ -255,7 +342,7 @@ function ClientCustomProjectsPanel({
                           setDeleteConfirm({
                             collection: 'projects',
                             id: p.id,
-                            title: `custom project "${p.title}" for ${c.name}`,
+                            title: `custom project "${titleStr}" for ${c.name}`,
                           })
                         }
                         className="px-3 py-1 rounded-xl bg-white border border-red-100 text-[10px] font-black uppercase tracking-widest text-red-400 hover:bg-red-50"
@@ -270,6 +357,18 @@ function ClientCustomProjectsPanel({
         )}
       </div>
     </div>
+  );
+}
+
+function ClientCustomProjectsPanel(props) {
+  const [crashKey, setCrashKey] = useState(0);
+  return (
+    <ClientProjectsPanelErrorBoundary
+      key={crashKey}
+      onRetry={() => setCrashKey((k) => k + 1)}
+    >
+      <ClientCustomProjectsPanelInner {...props} />
+    </ClientProjectsPanelErrorBoundary>
   );
 }
 
@@ -399,8 +498,13 @@ const AdminDashboard = ({
   const [aiTodoLoading, setAiTodoLoading] = useState(false);
   const [retainerCategoryOpen, setRetainerCategoryOpen] = useState({});
   const [expandedProjectsExpenses, setExpandedProjectsExpenses] = useState({});
-  const clientDetailSubTab =
+  const clientDetailSubTabRaw =
     clientId && clientPageTab != null ? clientPageTab : 'summary';
+  /** Legacy ?tab=projects URLs normalize to custom_projects (see App.jsx CLIENT_PAGE_TABS). */
+  const clientDetailSubTab =
+    clientDetailSubTabRaw === 'projects'
+      ? 'custom_projects'
+      : clientDetailSubTabRaw;
   const [todoEditId, setTodoEditId] = useState(null);
   const [todoEditText, setTodoEditText] = useState('');
   const [todoSaving, setTodoSaving] = useState(false);
@@ -2057,7 +2161,7 @@ const AdminDashboard = ({
               const showClientTasks =
                 !isClientPage || clientDetailSubTab === 'tasks';
               const showClientProjectsTab =
-                !isClientPage || clientDetailSubTab === 'projects';
+                !isClientPage || clientDetailSubTab === 'custom_projects';
               const showClientTimesheets =
                 !isClientPage || clientDetailSubTab === 'timesheets';
               const offset = clientCycleOffsets[c.id] ?? 0;
@@ -2287,7 +2391,7 @@ const AdminDashboard = ({
                         {[
                           { id: 'summary', label: 'Summary' },
                           { id: 'tasks', label: 'Tasks' },
-                          { id: 'projects', label: 'Custom projects' },
+                          { id: 'custom_projects', label: 'Custom projects' },
                           { id: 'timesheets', label: 'Timesheets' },
                         ].map((tab) => (
                           <button
