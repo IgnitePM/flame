@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, Component } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Activity,
   ArrowRight,
@@ -376,7 +377,7 @@ const AdminDashboard = ({
   adminTab,
   setAdminTab,
   clientId,
-  /** Active sub-tab on client detail; null when not on a client page. Synced to ?tab= in the router. */
+  /** @deprecated Sub-tab is read from ?tab= via useSearchParams when clientId is set (avoids blank UI if prop/URL drift). */
   clientPageTab = null,
   setClientPageTab = () => {},
   /** Billing cycle start (ms) from ?cycle= on client detail URL */
@@ -498,13 +499,22 @@ const AdminDashboard = ({
   const [aiTodoLoading, setAiTodoLoading] = useState(false);
   const [retainerCategoryOpen, setRetainerCategoryOpen] = useState({});
   const [expandedProjectsExpenses, setExpandedProjectsExpenses] = useState({});
-  const clientDetailSubTabRaw =
-    clientId && clientPageTab != null ? clientPageTab : 'summary';
-  /** Legacy ?tab=projects URLs normalize to custom_projects (see App.jsx CLIENT_PAGE_TABS). */
-  const clientDetailSubTab =
-    clientDetailSubTabRaw === 'projects'
-      ? 'custom_projects'
-      : clientDetailSubTabRaw;
+  const [searchParams] = useSearchParams();
+  /**
+   * Client sub-tab must come from the URL, not only from the parent prop. Otherwise a cached
+   * JS chunk can leave ?tab=custom_projects in the address bar while the dashboard still thinks
+   * the active tab is "summary" — every section (summary/tasks/timesheets/projects) stays hidden
+   * and the main area looks blank.
+   */
+  const clientDetailSubTab = !clientId
+    ? 'summary'
+    : (() => {
+        const t = searchParams.get('tab');
+        if (t === 'projects' || t === 'custom_projects') return 'custom_projects';
+        if (t === 'tasks') return 'tasks';
+        if (t === 'timesheets') return 'timesheets';
+        return 'summary';
+      })();
   const [todoEditId, setTodoEditId] = useState(null);
   const [todoEditText, setTodoEditText] = useState('');
   const [todoSaving, setTodoSaving] = useState(false);
