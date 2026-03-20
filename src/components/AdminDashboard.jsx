@@ -40,13 +40,22 @@ function ClientCustomProjectsPanel({
   setProjectEditValues,
   setDeleteConfirm,
   updateDoc,
-  doc,
+  /** Firestore doc ref helper — named to avoid shadowing the `doc` import */
+  firestoreDoc,
   logAudit,
 }) {
   const c = client;
   const mStart = cycleStartMs;
+  const fd = firestoreDoc;
+  if (typeof fd !== 'function') {
+    return (
+      <div className="bg-amber-50 border border-amber-200 text-amber-900 text-sm p-4 rounded-2xl">
+        Custom projects can&apos;t load (missing Firestore helper). Refresh the page or contact support.
+      </div>
+    );
+  }
   return (
-    <div className="bg-slate-50/50 p-6 border-t border-slate-100 animate-in slide-in-from-top-4 duration-300 space-y-6">
+    <div className="bg-slate-50/50 p-6 border-t border-slate-100 animate-in slide-in-from-top-4 duration-300 space-y-6 min-h-[120px]">
       <div>
         <div className="flex justify-between items-center mb-3">
           <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
@@ -69,14 +78,14 @@ function ClientCustomProjectsPanel({
             + New Project
           </button>
         </div>
-        {clientProjects.length === 0 ? (
+        {(clientProjects || []).length === 0 ? (
           <p className="text-xs italic text-slate-400">No custom projects yet.</p>
         ) : (
           <div className="space-y-3">
-            {clientProjects
+            {(clientProjects || [])
               .filter((p) => !(p.status === 'closed' && p.invoiced))
               .map((p) => {
-                const pTasks = taskLogs.filter((t) => t.projectId === p.id);
+                const pTasks = (taskLogs || []).filter((t) => t.projectId === p.id);
                 const totalHours =
                   pTasks.reduce((a, b) => a + getTaskDuration(b), 0) / 3600000;
                 const estHours = Number(p.estimatedHours || 0);
@@ -149,7 +158,7 @@ function ClientCustomProjectsPanel({
                               return;
                             }
                             try {
-                              await updateDoc(doc('projects', p.id), {
+                              await updateDoc(fd('projects', p.id), {
                                 status: 'active',
                                 startedAt: Date.now(),
                                 notificationState: {
@@ -197,7 +206,7 @@ function ClientCustomProjectsPanel({
                               return;
                             }
                             try {
-                              await updateDoc(doc('projects', p.id), {
+                              await updateDoc(fd('projects', p.id), {
                                 status: 'closed',
                                 closedAt: Date.now(),
                               });
@@ -225,7 +234,7 @@ function ClientCustomProjectsPanel({
                               ? window.alert(
                                   'This billing cycle is locked. Unlock to mark invoiced.',
                                 )
-                              : updateDoc(doc('projects', p.id), {
+                              : updateDoc(fd('projects', p.id), {
                                   invoiced: true,
                                 }).then(() =>
                                   logAudit?.({
@@ -1708,7 +1717,16 @@ const AdminDashboard = ({
                         {row.item.text}
                       </div>
                       <div className={`text-[10px] font-bold uppercase tracking-widest ${styles.metaClass}`}>
-                        {row.clientName} • {row.categoryLabel}
+                        <button
+                          type="button"
+                          onClick={() => navigateToClient?.(row.clientId)}
+                          className="font-black text-[#fd7414] hover:underline mr-1"
+                          title="Open client page"
+                        >
+                          {row.clientName}
+                        </button>
+                        <span className="text-slate-400">•</span>{' '}
+                        {row.categoryLabel}
                         {row.item.dueDate
                           ? ` • Due ${new Date(row.item.dueDate).toLocaleDateString()}`
                           : ' • No due date'}
@@ -2098,7 +2116,7 @@ const AdminDashboard = ({
                   getTaskDuration,
                 },
               );
-              const clientProjects = projects.filter(
+              const clientProjects = (projects || []).filter(
                 (p) => p.clientId === c.id,
               );
 
@@ -2257,13 +2275,13 @@ const AdminDashboard = ({
 
                   {isClientPage && (
                     <div
-                      className="px-4 sm:px-6 pt-3 pb-0 bg-white border-b border-slate-100"
+                      className="px-4 sm:px-6 pt-3 pb-4 mb-1 bg-white border-b border-slate-100"
                       onClick={(e) => e.stopPropagation()}
                       onKeyDown={(e) => e.stopPropagation()}
                       role="presentation"
                     >
                       <nav
-                        className="flex flex-wrap gap-2"
+                        className="flex flex-wrap gap-2 pb-1"
                         aria-label="Client sections"
                       >
                         {[
@@ -2893,7 +2911,109 @@ const AdminDashboard = ({
                       </div>
                     )}
 
-                    {/* General / Unclassified to-do bucket */}
+                    {/* General / Unclassified — Summary tab: compact list */}
+                    {isClientPage &&
+                      showClientSummary &&
+                      !showClientTasks &&
+                      getTodoStateForCycle &&
+                      updateClientTodo &&
+                      (() => {
+                        const cycleStart = mStart;
+                        const generalLabel = 'General / Unclassified';
+                        const catKey = todoCategoryKey(generalLabel);
+                        const todoState = getTodoStateForCycle(c, cycleStart);
+                        const catTodo = todoState[catKey] || {
+                          closed: false,
+                          items: [],
+                        };
+                        const items = catTodo.items || [];
+                        if (!items.length && !catTodo.closed) return null;
+                        return (
+                          <div className="pt-2 border-t border-slate-100">
+                            <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                              To-do — {generalLabel}
+                            </h5>
+                            {catTodo.closed ? (
+                              <p className="text-xs text-slate-500 mb-2">
+                                Closed for this cycle. Use the{' '}
+                                <span className="font-black text-slate-700">
+                                  Tasks
+                                </span>{' '}
+                                tab to reopen or edit.
+                              </p>
+                            ) : (
+                              <ul className="space-y-2 mb-2">
+                                {items.map((item) => {
+                                  const urgency = getTodoUrgencyStyles(item);
+                                  return (
+                                    <li
+                                      key={item.id}
+                                      className={`flex items-center gap-2 rounded-lg p-2 ${urgency.rowClass}`}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={!!item.done}
+                                        onChange={async () => {
+                                          if (isCycleLocked(c, cycleStart))
+                                            return;
+                                          setTodoSaving(true);
+                                          try {
+                                            const next = items.map((i) =>
+                                              i.id === item.id
+                                                ? {
+                                                    ...i,
+                                                    done: !i.done,
+                                                    doneAt: !i.done
+                                                      ? Date.now()
+                                                      : null,
+                                                  }
+                                                : i,
+                                            );
+                                            await updateClientTodo(
+                                              c,
+                                              cycleStart,
+                                              catKey,
+                                              { ...catTodo, items: next },
+                                            );
+                                          } finally {
+                                            setTodoSaving(false);
+                                          }
+                                        }}
+                                        disabled={todoSaving}
+                                        className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
+                                      />
+                                      <span
+                                        className={`flex-1 text-sm ${urgency.textClass}`}
+                                      >
+                                        {item.text || '(no text)'}
+                                      </span>
+                                      {item.recurring && (
+                                        <span
+                                          className={`text-[9px] font-black uppercase tracking-widest ${urgency.metaClass}`}
+                                        >
+                                          Recurring
+                                        </span>
+                                      )}
+                                      {item.dueDate && (
+                                        <span
+                                          className={`text-[10px] font-black uppercase tracking-widest ${urgency.metaClass}`}
+                                        >
+                                          Due{' '}
+                                          {new Date(
+                                            item.dueDate,
+                                          ).toLocaleDateString()}
+                                        </span>
+                                      )}
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            )}
+                          </div>
+                        );
+                      })()}
+
+                    {/* General / Unclassified — Tasks tab: full controls + AI */}
                     {isClientPage && showClientTasks && getTodoStateForCycle && updateClientTodo && (
                       (() => {
                         const cycleStart = mStart;
@@ -2910,6 +3030,20 @@ const AdminDashboard = ({
 
                         return (
                           <div className="pt-2 border-t border-slate-100">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAiTodoTranscript('');
+                                setAiTodoCandidates([]);
+                                setAiTodoSelected({});
+                                setAiTodoModalOpen(true);
+                              }}
+                              className="w-full px-4 py-2 rounded-2xl bg-slate-900 text-white font-black text-[10px] uppercase tracking-widest hover:bg-black transition-colors mb-4"
+                              title="Extract action items from a meeting transcript and add them to this cycle"
+                            >
+                              AI Extract to-dos from transcript
+                            </button>
+
                             <div className="flex items-center justify-between gap-3 mb-3">
                               <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
                                 To-do — {generalLabel}
@@ -2920,20 +3054,6 @@ const AdminDashboard = ({
                                 </span>
                               )}
                             </div>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setAiTodoTranscript('');
-                                setAiTodoCandidates([]);
-                                setAiTodoSelected({});
-                                setAiTodoModalOpen(true);
-                              }}
-                              className="w-full px-4 py-2 rounded-2xl bg-slate-900 text-white font-black text-[10px] uppercase tracking-widest hover:bg-black transition-colors"
-                              title="Extract action items from a meeting transcript and add them to this cycle"
-                            >
-                              AI Extract to-dos from transcript
-                            </button>
 
                             {catTodo.closed ? (
                               <button
@@ -3741,6 +3861,125 @@ const AdminDashboard = ({
                                               )}
                                             </div>)}
                                             {isClientPage &&
+                                              showClientSummary &&
+                                              !showClientTasks &&
+                                              getTodoStateForCycle &&
+                                              updateClientTodo &&
+                                              (() => {
+                                                const todoState =
+                                                  getTodoStateForCycle(
+                                                    c,
+                                                    cycleStart,
+                                                  );
+                                                const catTodo = todoState[
+                                                  catKey
+                                                ] || { closed: false, items: [] };
+                                                const items = catTodo.items || [];
+                                                if (!items.length && !catTodo.closed)
+                                                  return null;
+                                                return (
+                                                  <div style={{ order: 8 }}>
+                                                    <h6 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                                                      To-dos
+                                                    </h6>
+                                                    {catTodo.closed ? (
+                                                      <p className="text-xs text-slate-500">
+                                                        Closed for this cycle — use{' '}
+                                                        <span className="font-black text-slate-700">
+                                                          Tasks
+                                                        </span>{' '}
+                                                        tab to manage.
+                                                      </p>
+                                                    ) : (
+                                                      <ul className="space-y-2 mb-1">
+                                                        {items.map((item) => {
+                                                          const urgency =
+                                                            getTodoUrgencyStyles(
+                                                              item,
+                                                            );
+                                                          return (
+                                                            <li
+                                                              key={item.id}
+                                                              className={`flex items-center gap-2 rounded-lg p-2 ${urgency.rowClass}`}
+                                                            >
+                                                              <input
+                                                                type="checkbox"
+                                                                checked={!!item.done}
+                                                                onChange={async () => {
+                                                                  if (
+                                                                    isCycleLocked(
+                                                                      c,
+                                                                      cycleStart,
+                                                                    )
+                                                                  )
+                                                                    return;
+                                                                  setTodoSaving(true);
+                                                                  try {
+                                                                    const next =
+                                                                      items.map(
+                                                                        (i) =>
+                                                                          i.id ===
+                                                                          item.id
+                                                                            ? {
+                                                                                ...i,
+                                                                                done: !i.done,
+                                                                                doneAt:
+                                                                                  !i.done
+                                                                                    ? Date.now()
+                                                                                    : null,
+                                                                              }
+                                                                            : i,
+                                                                      );
+                                                                    await updateClientTodo(
+                                                                      c,
+                                                                      cycleStart,
+                                                                      catKey,
+                                                                      {
+                                                                        ...catTodo,
+                                                                        items: next,
+                                                                      },
+                                                                    );
+                                                                  } finally {
+                                                                    setTodoSaving(
+                                                                      false,
+                                                                    );
+                                                                  }
+                                                                }}
+                                                                disabled={todoSaving}
+                                                                className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
+                                                              />
+                                                              <span
+                                                                className={`flex-1 text-sm ${urgency.textClass}`}
+                                                              >
+                                                                {item.text ||
+                                                                  '(no text)'}
+                                                              </span>
+                                                              {item.recurring && (
+                                                                <span
+                                                                  className={`text-[9px] font-black uppercase tracking-widest ${urgency.metaClass}`}
+                                                                >
+                                                                  Recurring
+                                                                </span>
+                                                              )}
+                                                              {item.dueDate && (
+                                                                <span
+                                                                  className={`text-[10px] font-black uppercase tracking-widest ${urgency.metaClass}`}
+                                                                >
+                                                                  Due{' '}
+                                                                  {new Date(
+                                                                    item.dueDate,
+                                                                  ).toLocaleDateString()}
+                                                                </span>
+                                                              )}
+                                                            </li>
+                                                          );
+                                                        })}
+                                                      </ul>
+                                                    )}
+                                                  </div>
+                                                );
+                                              })()}
+                                            {isClientPage &&
                                               showClientTasks &&
                                               getTodoStateForCycle &&
                                               updateClientTodo &&
@@ -4227,7 +4466,7 @@ const AdminDashboard = ({
                       setProjectEditValues={setProjectEditValues}
                       setDeleteConfirm={setDeleteConfirm}
                       updateDoc={updateDoc}
-                      doc={doc}
+                      firestoreDoc={doc}
                       logAudit={logAudit}
                     />
                   )}
@@ -4271,7 +4510,7 @@ const AdminDashboard = ({
                       setProjectEditValues={setProjectEditValues}
                       setDeleteConfirm={setDeleteConfirm}
                       updateDoc={updateDoc}
-                      doc={doc}
+                      firestoreDoc={doc}
                       logAudit={logAudit}
                     />
                     )}

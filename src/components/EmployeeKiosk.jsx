@@ -65,12 +65,6 @@ const EmployeeKiosk = ({
     return new Date(y, m - 1, d, 12, 0, 0, 0).getTime();
   };
 
-  const asDateInput = (ms) => {
-    if (!ms) return '';
-    const d = new Date(ms);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  };
-
   const normalizeAssignees = (item) => {
     const raw = Array.isArray(item?.assigneeEmails) ? item.assigneeEmails : [];
     const cleaned = raw.map((e) => String(e || '').trim().toLowerCase()).filter(Boolean);
@@ -506,72 +500,17 @@ const EmployeeKiosk = ({
                                           />
                                           <span className={`text-sm flex-1 ${item.done ? 'line-through opacity-70' : ''}`}>
                                             {item.text || '(no text)'}
+                                            {item.recurring && (
+                                              <span className="ml-2 text-[9px] font-black uppercase tracking-widest text-[#fd7414]">
+                                                Recurring
+                                              </span>
+                                            )}
                                             {item.dueDate && (
                                               <span className="ml-2 text-[10px] font-black uppercase tracking-widest">
                                                 Due {new Date(item.dueDate).toLocaleDateString()}
                                               </span>
                                             )}
                                           </span>
-                                          <input
-                                            type="date"
-                                            value={asDateInput(item.dueDate)}
-                                            onChange={async (e) => {
-                                              setTodoSaving(true);
-                                              try {
-                                                const dueDate = parseDateInputToMs(e.target.value);
-                                                const next = catTodo.items.map((i) =>
-                                                  i.id === item.id ? { ...i, dueDate } : i,
-                                                );
-                                                await updateClientTodo(selectedClientObj, cycleStart, catKey, {
-                                                  ...catTodo,
-                                                  items: next,
-                                                });
-                                              } finally {
-                                                setTodoSaving(false);
-                                              }
-                                            }}
-                                            disabled={todoSaving}
-                                            className="bg-white border border-slate-200 rounded px-1.5 py-1 text-[10px]"
-                                          />
-                                          <button
-                                            type="button"
-                                            disabled={todoSaving}
-                                            onClick={async () => {
-                                              setTodoSaving(true);
-                                              try {
-                                                const next = items.map((i) => {
-                                                  if (i.id !== item.id) return i;
-                                                  const nextRecurring = !i.recurring;
-                                                  return {
-                                                    ...i,
-                                                    recurring: nextRecurring,
-                                                    recurringId: nextRecurring
-                                                      ? (i.recurringId || i.id)
-                                                      : null,
-                                                    recurrence: nextRecurring
-                                                      ? {
-                                                          type: 'monthly_fixed_day',
-                                                          dayOfMonth: new Date(
-                                                            i.dueDate || Date.now(),
-                                                          ).getDate(),
-                                                        }
-                                                      : null,
-                                                  };
-                                                });
-                                                await updateClientTodo(selectedClientObj, cycleStart, catKey, { ...catTodo, items: next });
-                                              } finally {
-                                                setTodoSaving(false);
-                                              }
-                                            }}
-                                            className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${
-                                              item.recurring
-                                                ? 'bg-[#fd7414] text-white border-[#fd7414]'
-                                                : 'bg-white text-slate-500 border-slate-200'
-                                            }`}
-                                            title="Recurring each cycle"
-                                          >
-                                            Recurring
-                                          </button>
                                         </li>
                                       ))}
                                     </ul>
@@ -893,72 +832,17 @@ const EmployeeKiosk = ({
                                           />
                                           <span className={`text-sm flex-1 ${item.done ? 'line-through opacity-70' : ''}`}>
                                             {item.text || '(no text)'}
+                                            {item.recurring && (
+                                              <span className="ml-2 text-[9px] font-black uppercase tracking-widest text-[#fd7414]">
+                                                Recurring
+                                              </span>
+                                            )}
                                             {item.dueDate && (
                                               <span className="ml-2 text-[10px] font-black uppercase tracking-widest">
                                                 Due {new Date(item.dueDate).toLocaleDateString()}
                                               </span>
                                             )}
                                           </span>
-                                          <input
-                                            type="date"
-                                            value={asDateInput(item.dueDate)}
-                                            onChange={async (e) => {
-                                              setTodoSaving(true);
-                                              try {
-                                                const dueDate = parseDateInputToMs(e.target.value);
-                                                const next = catTodo.items.map((i) =>
-                                                  i.id === item.id ? { ...i, dueDate } : i,
-                                                );
-                                                await updateClientTodo(selectedClientObj, cycleStart, catKey, {
-                                                  ...catTodo,
-                                                  items: next,
-                                                });
-                                              } finally {
-                                                setTodoSaving(false);
-                                              }
-                                            }}
-                                            disabled={todoSaving}
-                                            className="bg-white border border-slate-200 rounded px-1.5 py-1 text-[10px]"
-                                          />
-                                          <button
-                                            type="button"
-                                            disabled={todoSaving}
-                                            onClick={async () => {
-                                              setTodoSaving(true);
-                                              try {
-                                                const next = items.map((i) => {
-                                                  if (i.id !== item.id) return i;
-                                                  const nextRecurring = !i.recurring;
-                                                  return {
-                                                    ...i,
-                                                    recurring: nextRecurring,
-                                                    recurringId: nextRecurring
-                                                      ? (i.recurringId || i.id)
-                                                      : null,
-                                                    recurrence: nextRecurring
-                                                      ? {
-                                                          type: 'monthly_fixed_day',
-                                                          dayOfMonth: new Date(
-                                                            i.dueDate || Date.now(),
-                                                          ).getDate(),
-                                                        }
-                                                      : null,
-                                                  };
-                                                });
-                                                await updateClientTodo(selectedClientObj, cycleStart, catKey, { ...catTodo, items: next });
-                                              } finally {
-                                                setTodoSaving(false);
-                                              }
-                                            }}
-                                            className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${
-                                              item.recurring
-                                                ? 'bg-[#fd7414] text-white border-[#fd7414]'
-                                                : 'bg-white text-slate-500 border-slate-200'
-                                            }`}
-                                            title="Recurring each cycle"
-                                          >
-                                            Recurring
-                                          </button>
                                         </li>
                                       ))}
                                     </ul>
