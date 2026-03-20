@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, Component } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import {
   Activity,
   ArrowRight,
@@ -25,6 +25,20 @@ import {
   Users,
   X,
 } from 'lucide-react';
+
+/** Normalize ?tab= for /admin/clients/:id (supports legacy `projects`). */
+function parseClientSubTabFromSearch(search) {
+  let t = '';
+  try {
+    t = new URLSearchParams(search || '').get('tab') || '';
+  } catch {
+    t = '';
+  }
+  if (t === 'projects' || t === 'custom_projects') return 'custom_projects';
+  if (t === 'tasks') return 'tasks';
+  if (t === 'timesheets') return 'timesheets';
+  return 'summary';
+}
 
 /** Avoid React child errors when Firestore stored a map/object in a text field. */
 function safeDisplayForReact(v) {
@@ -499,22 +513,24 @@ const AdminDashboard = ({
   const [aiTodoLoading, setAiTodoLoading] = useState(false);
   const [retainerCategoryOpen, setRetainerCategoryOpen] = useState({});
   const [expandedProjectsExpenses, setExpandedProjectsExpenses] = useState({});
-  const [searchParams] = useSearchParams();
+  const location = useLocation();
   /**
-   * Client sub-tab must come from the URL, not only from the parent prop. Otherwise a cached
-   * JS chunk can leave ?tab=custom_projects in the address bar while the dashboard still thinks
-   * the active tab is "summary" — every section (summary/tasks/timesheets/projects) stays hidden
-   * and the main area looks blank.
+   * Sub-tab uses local state updated immediately on click, then kept in sync with the URL.
+   * Relying only on `useSearchParams`/location after `setSearchParams` can lag one render in
+   * React Router 7 + React 19, leaving every `showClient*` flag false → blank content.
    */
-  const clientDetailSubTab = !clientId
-    ? 'summary'
-    : (() => {
-        const t = searchParams.get('tab');
-        if (t === 'projects' || t === 'custom_projects') return 'custom_projects';
-        if (t === 'tasks') return 'tasks';
-        if (t === 'timesheets') return 'timesheets';
-        return 'summary';
-      })();
+  const [clientDetailSubTab, setClientDetailSubTab] = useState(() =>
+    parseClientSubTabFromSearch(
+      typeof window !== 'undefined' ? window.location.search : '',
+    ),
+  );
+  useEffect(() => {
+    if (!clientId) {
+      setClientDetailSubTab('summary');
+      return;
+    }
+    setClientDetailSubTab(parseClientSubTabFromSearch(location.search));
+  }, [clientId, location.search]);
   const [todoEditId, setTodoEditId] = useState(null);
   const [todoEditText, setTodoEditText] = useState('');
   const [todoSaving, setTodoSaving] = useState(false);
@@ -2146,7 +2162,9 @@ const AdminDashboard = ({
 
           <div className="grid grid-cols-1 gap-6">
             {clients
-              .filter((c) => (!clientId ? true : c.id === clientId))
+              .filter(
+                (c) => !clientId || String(c.id) === String(clientId),
+              )
               .filter((c) => {
                 if (clientStatusFilter === 'active') return c.status !== 'paused';
                 if (clientStatusFilter === 'inactive') return c.status === 'paused';
@@ -2407,7 +2425,10 @@ const AdminDashboard = ({
                           <button
                             key={tab.id}
                             type="button"
-                            onClick={() => setClientPageTab(tab.id)}
+                            onClick={() => {
+                              setClientDetailSubTab(tab.id);
+                              setClientPageTab(tab.id);
+                            }}
                             className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
                               clientDetailSubTab === tab.id
                                 ? 'bg-[#fd7414] text-white shadow-sm'
