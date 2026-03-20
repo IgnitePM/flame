@@ -1407,7 +1407,7 @@ export default function App() {
   };
 
   // Render Checks
-  if (loading) return <div className="min-h-screen flex items-center justify-center bg-white"><RotateCw className="w-8 h-8 text-[#fd7414] animate-spin" /></div>;
+  if (loading) return <div className="min-h-screen flex items-center justify-center bg-[#0b1120]"><RotateCw className="w-8 h-8 text-[#fd7414] animate-spin" /></div>;
 
   // Global Auth Gate
   if (
@@ -1418,7 +1418,7 @@ export default function App() {
     !(ENABLE_DEMOS && (user.uid === 'demo-user-123' || user.uid === 'demo-client-123'))
   ) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#0b1120] p-6">
         <div className="bg-white p-12 rounded-[40px] shadow-2xl border border-slate-100 text-center max-w-sm w-full">
           <Shield className="w-16 h-16 text-red-500 mx-auto mb-6" />
           <h2 className="text-2xl font-black mb-2">Access Denied</h2>
@@ -1432,7 +1432,7 @@ export default function App() {
   // --- LOGIN SCREEN ---
   if (!user) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#0b1120] p-6">
         <div className="bg-white p-10 rounded-[40px] shadow-2xl border border-slate-100 flex flex-col items-center max-w-sm w-full text-center">
           <div className="w-28 h-28 mb-4 flex items-center justify-center"><IgniteLogo className="w-full h-full object-contain" /></div>
           <h1 className="text-3xl font-black text-slate-900 mb-1 tracking-tight">Ignite PM</h1>
@@ -1629,7 +1629,7 @@ export default function App() {
         auth={auth}
       />
     ) : (
-      <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+      <div className="min-h-screen bg-[#0b1120] text-slate-900 font-sans">
         <nav className="bg-white border-b border-slate-100 p-4 sticky top-0 z-40 shadow-sm">
           <div className="max-w-6xl mx-auto flex justify-between items-center">
             <div
