@@ -2528,7 +2528,7 @@ const AdminDashboard = ({
                         )}
                       </div>
                     )}
-                    {showClientSummary && (
+                    {(showClientSummary || showClientTimesheets) && (
                     <div>
                       <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center justify-between">
                         <span>Global Retainer Progress</span>
@@ -3930,13 +3930,26 @@ const AdminDashboard = ({
                                 categoryExps.length > 0;
 
                               return (
-                                <div key={cat}>
+                                <div
+                                  key={cat}
+                                  className={
+                                    isClientPage && showClientTasks
+                                      ? 'border-b border-slate-200 pb-5 mb-5 last:border-b-0 last:pb-0 last:mb-0'
+                                      : undefined
+                                  }
+                                >
                                   {(showClientSummary ||
                                     showClientTasks ||
                                     showClientTimesheets) && (
                                   <div className="flex items-start justify-between gap-3 mb-1">
                                     <div className="min-w-0">
-                                      <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest truncate">
+                                      <div
+                                        className={`truncate font-black ${
+                                          isClientPage && showClientTasks
+                                            ? 'text-sm sm:text-base text-slate-900 tracking-tight'
+                                            : 'text-[10px] text-slate-500 uppercase tracking-widest'
+                                        }`}
+                                      >
                                         {cat}
                                       </div>
                                       {(showClientSummary ||
