@@ -24,9 +24,25 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/clients/$(clientId));
     }
 
+    // Kiosk role: only clients explicitly shared via teamMemberAccessEmails (legacy clients
+    // without the field remain visible to all staff). Empty list = no kiosk/workspace access.
+    function kioskTeamClientReadOk(clientId) {
+      let c = clientDoc(clientId).data;
+      if (!c.keys().hasAll(['teamMemberAccessEmails'])) {
+        return true;
+      }
+      if (!(c.teamMemberAccessEmails is list)) {
+        return true;
+      }
+      if (c.teamMemberAccessEmails.size() == 0) {
+        return false;
+      }
+      return c.teamMemberAccessEmails.hasAny([emailLower()]);
+    }
+
     function clientAllowsEmail(clientId) {
       return isSignedIn() &&
-        (isAnyStaff() ||
+        ((isAnyStaff() && (!isKiosk() || kioskTeamClientReadOk(clientId))) ||
          (clientDoc(clientId).data.clientEmails is list &&
           clientDoc(clientId).data.clientEmails.hasAny([request.auth.token.email])));
     }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, Component } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, Component } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
   Activity,
@@ -32,6 +32,10 @@ import {
   reorderTodosDisplay,
   toggleTodoPinnedById,
 } from '../utils/todoListOrder.js';
+import {
+  teamMemberCanViewClient,
+  normalizeEmailList,
+} from '../utils/teamClientAccess.js';
 
 /** Normalize ?tab= for /admin/clients/:id (supports legacy `projects`). */
 function parseClientSubTabFromSearch(search) {
@@ -133,6 +137,7 @@ function ClientCustomProjectsPanelInner({
   /** Firestore doc ref helper — named to avoid shadowing the `doc` import */
   firestoreDoc,
   logAudit,
+  readOnly = false,
 }) {
   const c = client;
   const mStart = cycleStartMs;
@@ -158,22 +163,31 @@ function ClientCustomProjectsPanelInner({
           <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
             Custom Projects
           </h5>
-          <button
-            onClick={() => {
-              setProjectModal({ ...c, lockClient: true });
-              setProjectValues({
-                clientId: c.id,
-                clientName: c.name,
-                title: '',
-                description: '',
-                estimatedBudget: '',
-                estimatedHours: '',
-              });
-            }}
-            className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest"
-          >
-            + New Project
-          </button>
+          {readOnly ? (
+            <span
+              className="text-[10px] font-black uppercase tracking-widest text-slate-300 cursor-not-allowed"
+              title="Admin only"
+            >
+              + New Project
+            </span>
+          ) : (
+            <button
+              onClick={() => {
+                setProjectModal({ ...c, lockClient: true });
+                setProjectValues({
+                  clientId: c.id,
+                  clientName: c.name,
+                  title: '',
+                  description: '',
+                  estimatedBudget: '',
+                  estimatedHours: '',
+                });
+              }}
+              className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest"
+            >
+              + New Project
+            </button>
+          )}
         </div>
         {(clientProjects || []).length === 0 ? (
           <p className="text-xs italic text-slate-400">No custom projects yet.</p>
@@ -257,120 +271,124 @@ function ClientCustomProjectsPanelInner({
                       )}
                     </div>
                     <div className="flex flex-col gap-2 items-end">
-                      {(statusStr === 'requested' || statusStr === 'approved') && (
-                        <button
-                          onClick={async () => {
-                            if (isCycleLocked(c, mStart)) {
-                              window.alert(
-                                'This billing cycle is locked. Unlock to start projects.',
-                              );
-                              return;
-                            }
-                            try {
-                              await updateDoc(fd('projects', p.id), {
-                                status: 'active',
-                                startedAt: Date.now(),
-                                notificationState: {
-                                  ...(p.notificationState || {}),
-                                  adminApproved: false,
-                                },
-                              });
-                              await logAudit?.({
-                                type: 'project_started',
-                                entityType: 'project',
-                                entityId: p.id,
-                                clientId: c.id,
-                              });
-                            } catch (err) {
-                              window.alert(
-                                `Could not start project: ${err?.message || String(err)}`,
-                              );
-                            }
-                          }}
-                          className="px-3 py-1 rounded-xl bg-black text-white text-[10px] font-black uppercase tracking-widest hover:bg-slate-900"
-                        >
-                          Start Project
-                        </button>
-                      )}
-                      <button
-                        onClick={() => {
-                          setProjectEditError('');
-                          setProjectEditModal({ project: p, client: c });
-                          setProjectEditValues({
-                            estimatedBudget: String(p.estimatedBudget ?? ''),
-                            estimatedHours: String(p.estimatedHours ?? ''),
-                          });
-                        }}
-                        className="px-3 py-1 rounded-xl bg-white border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-600 hover:bg-slate-100"
-                      >
-                        Edit Estimates
-                      </button>
-                      {statusStr !== 'closed' && (
-                        <button
-                          onClick={async () => {
-                            if (isCycleLocked(c, mStart)) {
-                              window.alert(
-                                'This billing cycle is locked. Unlock to close projects.',
-                              );
-                              return;
-                            }
-                            try {
-                              await updateDoc(fd('projects', p.id), {
-                                status: 'closed',
-                                closedAt: Date.now(),
-                              });
-                              await logAudit?.({
-                                type: 'project_closed',
-                                entityType: 'project',
-                                entityId: p.id,
-                                clientId: c.id,
-                              });
-                            } catch (err) {
-                              window.alert(
-                                `Could not close project: ${err?.message || String(err)}`,
-                              );
-                            }
-                          }}
-                          className="px-3 py-1 rounded-xl bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest hover:bg-black"
-                        >
-                          Mark Complete
-                        </button>
-                      )}
-                      {statusStr === 'closed' && !p.invoiced && (
-                        <button
-                          onClick={() =>
-                            isCycleLocked(c, mStart)
-                              ? window.alert(
-                                  'This billing cycle is locked. Unlock to mark invoiced.',
-                                )
-                              : updateDoc(fd('projects', p.id), {
-                                  invoiced: true,
-                                }).then(() =>
-                                  logAudit?.({
-                                    type: 'project_marked_invoiced',
+                      {!readOnly && (
+                        <>
+                          {(statusStr === 'requested' || statusStr === 'approved') && (
+                            <button
+                              onClick={async () => {
+                                if (isCycleLocked(c, mStart)) {
+                                  window.alert(
+                                    'This billing cycle is locked. Unlock to start projects.',
+                                  );
+                                  return;
+                                }
+                                try {
+                                  await updateDoc(fd('projects', p.id), {
+                                    status: 'active',
+                                    startedAt: Date.now(),
+                                    notificationState: {
+                                      ...(p.notificationState || {}),
+                                      adminApproved: false,
+                                    },
+                                  });
+                                  await logAudit?.({
+                                    type: 'project_started',
                                     entityType: 'project',
                                     entityId: p.id,
                                     clientId: c.id,
-                                  }),
-                                )
-                          }
-                          className="px-3 py-1 rounded-xl bg-blue-500 text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-600"
-                        >
-                          Mark Invoiced
-                        </button>
+                                  });
+                                } catch (err) {
+                                  window.alert(
+                                    `Could not start project: ${err?.message || String(err)}`,
+                                  );
+                                }
+                              }}
+                              className="px-3 py-1 rounded-xl bg-black text-white text-[10px] font-black uppercase tracking-widest hover:bg-slate-900"
+                            >
+                              Start Project
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              setProjectEditError('');
+                              setProjectEditModal({ project: p, client: c });
+                              setProjectEditValues({
+                                estimatedBudget: String(p.estimatedBudget ?? ''),
+                                estimatedHours: String(p.estimatedHours ?? ''),
+                              });
+                            }}
+                            className="px-3 py-1 rounded-xl bg-white border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-600 hover:bg-slate-100"
+                          >
+                            Edit Estimates
+                          </button>
+                          {statusStr !== 'closed' && (
+                            <button
+                              onClick={async () => {
+                                if (isCycleLocked(c, mStart)) {
+                                  window.alert(
+                                    'This billing cycle is locked. Unlock to close projects.',
+                                  );
+                                  return;
+                                }
+                                try {
+                                  await updateDoc(fd('projects', p.id), {
+                                    status: 'closed',
+                                    closedAt: Date.now(),
+                                  });
+                                  await logAudit?.({
+                                    type: 'project_closed',
+                                    entityType: 'project',
+                                    entityId: p.id,
+                                    clientId: c.id,
+                                  });
+                                } catch (err) {
+                                  window.alert(
+                                    `Could not close project: ${err?.message || String(err)}`,
+                                  );
+                                }
+                              }}
+                              className="px-3 py-1 rounded-xl bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest hover:bg-black"
+                            >
+                              Mark Complete
+                            </button>
+                          )}
+                          {statusStr === 'closed' && !p.invoiced && (
+                            <button
+                              onClick={() =>
+                                isCycleLocked(c, mStart)
+                                  ? window.alert(
+                                      'This billing cycle is locked. Unlock to mark invoiced.',
+                                    )
+                                  : updateDoc(fd('projects', p.id), {
+                                      invoiced: true,
+                                    }).then(() =>
+                                      logAudit?.({
+                                        type: 'project_marked_invoiced',
+                                        entityType: 'project',
+                                        entityId: p.id,
+                                        clientId: c.id,
+                                      }),
+                                    )
+                              }
+                              className="px-3 py-1 rounded-xl bg-blue-500 text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-600"
+                            >
+                              Mark Invoiced
+                            </button>
+                          )}
+                          <button
+                            onClick={() =>
+                              setDeleteConfirm({
+                                collection: 'projects',
+                                id: p.id,
+                                title: `custom project "${titleStr}" for ${c.name}`,
+                              })
+                            }
+                            className="px-3 py-1 rounded-xl bg-white border border-red-100 text-[10px] font-black uppercase tracking-widest text-red-400 hover:bg-red-50"
+                          >
+                            Delete Project
+                          </button>
+                        </>
                       )}
-                      <button
-                        onClick={() =>
-                          setDeleteConfirm({
-                            collection: 'projects',
-                            id: p.id,
-                            title: `custom project "${titleStr}" for ${c.name}`,
-                          })
-                        }
-                        className="px-3 py-1 rounded-xl bg-white border border-red-100 text-[10px] font-black uppercase tracking-widest text-red-400 hover:bg-red-50"
-                      >
-                        Delete Project
-                      </button>
                     </div>
                   </div>
                 );
@@ -406,6 +424,8 @@ const AdminDashboard = ({
   mergeClientSearchParams = () => {},
   navigateToClient,
   navigateToClientsList,
+  adminBasePath = '/admin',
+  dashboardTitle = 'Admin',
   currentUserRole,
   user,
   clients,
@@ -467,6 +487,14 @@ const AdminDashboard = ({
 }) => {
   const canBilling = currentUserRole === 'admin' || currentUserRole === 'billing';
   const isAdmin = currentUserRole === 'admin';
+  const isRestrictedStaff = currentUserRole === 'kiosk';
+  const visibleClients = useMemo(
+    () =>
+      isRestrictedStaff
+        ? (clients || []).filter((c) => teamMemberCanViewClient(c, user?.email))
+        : clients || [],
+    [clients, isRestrictedStaff, user?.email],
+  );
 
   // Keep retainer categories stable in the UI even if Firestore map key ordering changes.
   const retainerCategoryOrder = Array.from(
@@ -555,6 +583,16 @@ const AdminDashboard = ({
   const [taskClientFilter, setTaskClientFilter] = useState('all');
   const [taskCategoryFilter, setTaskCategoryFilter] = useState('all');
   const [taskAssigneeFilter, setTaskAssigneeFilter] = useState('me');
+
+  useEffect(() => {
+    if (isRestrictedStaff) setTaskAssigneeFilter('all');
+  }, [isRestrictedStaff]);
+
+  useEffect(() => {
+    if (!isRestrictedStaff) return;
+    const ok = ['timesheets', 'tasks_global', 'clients'].includes(adminTab);
+    if (!ok) setAdminTab('timesheets');
+  }, [isRestrictedStaff, adminTab, setAdminTab]);
   const [estimateModal, setEstimateModal] = useState(null);
   const [estimateValues, setEstimateValues] = useState({
     hours: '',
@@ -1059,6 +1097,15 @@ const AdminDashboard = ({
     (p) => p.notificationState?.adminApproved && p.status === 'approved',
   ).length;
   const filteredTimesheets = timesheets.filter((shift) => {
+    if (isRestrictedStaff) {
+      const uidOk = shift.userId && shift.userId === user?.uid;
+      const nameOk =
+        !shift.userId &&
+        shift.employeeName &&
+        (shift.employeeName === user?.displayName ||
+          shift.employeeName === user?.email);
+      if (!uidOk && !nameOk) return false;
+    }
     const matchesSearch =
       searchQuery === '' ||
       shift.employeeName
@@ -1150,7 +1197,7 @@ const AdminDashboard = ({
     mergeClientSearchParams,
   ]);
 
-  const globalTodoRows = clients.flatMap((c) => {
+  const globalTodoRows = visibleClients.flatMap((c) => {
     const cycleStart = getBillingPeriod(c.billingDay || 1, 0).start;
     const todoState = getTodoStateForCycle ? getTodoStateForCycle(c, cycleStart) : {};
     const keyOf = (category) =>
@@ -1365,15 +1412,50 @@ const AdminDashboard = ({
     };
   };
 
+  const workspaceRouteClient = clientId
+    ? (clients || []).find((cl) => String(cl.id) === String(clientId))
+    : null;
+  if (
+    clientId &&
+    isRestrictedStaff &&
+    (!workspaceRouteClient ||
+      !teamMemberCanViewClient(workspaceRouteClient, user?.email))
+  ) {
+    return (
+      <div className="space-y-8 animate-in fade-in duration-500">
+        <div className="bg-white p-10 rounded-[32px] border border-slate-100 shadow-sm text-center">
+          <h2 className="font-black text-xl text-slate-800 mb-2">
+            No access to this client
+          </h2>
+          <p className="text-sm text-slate-500 font-medium mb-6">
+            Ask an admin to add you under Workspace access on the client page, or open a
+            client you&apos;re assigned to.
+          </p>
+          <button
+            type="button"
+            onClick={() => navigateToClientsList?.()}
+            className="px-6 py-3 rounded-2xl bg-[#fd7414] text-white font-black text-sm uppercase tracking-widest"
+          >
+            Back to {dashboardTitle}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 flex flex-col lg:flex-row justify-between items-center gap-6">
+        <div className="flex flex-col gap-2 w-full lg:w-auto">
+          <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">
+            {dashboardTitle}
+          </div>
         <div className="flex bg-slate-100 p-1 rounded-2xl w-full lg:w-auto overflow-x-auto no-scrollbar">
           {[
             { id: 'timesheets', label: 'Timesheets', icon: List },
             { id: 'tasks_global', label: 'Tasks', icon: CheckSquare },
             { id: 'clients', label: 'Clients', icon: History },
-            ...(canBilling
+            ...(canBilling && !isRestrictedStaff
               ? [
                   {
                     id: 'billing',
@@ -1382,7 +1464,7 @@ const AdminDashboard = ({
                   },
                 ]
               : []),
-            { id: 'tasks', label: 'Config', icon: Settings },
+            ...(!isRestrictedStaff ? [{ id: 'tasks', label: 'Config', icon: Settings }] : []),
             ...(isAdmin ? [{ id: 'users', label: 'Users', icon: Users }] : []),
           ].map((tab) => (
             <button
@@ -1397,6 +1479,7 @@ const AdminDashboard = ({
               <tab.icon className="w-4 h-4" /> {tab.label}
             </button>
           ))}
+        </div>
         </div>
 
         <div className="flex flex-wrap gap-2 w-full md:w-auto">
@@ -1415,7 +1498,13 @@ const AdminDashboard = ({
               });
               setManualTaskModal(true);
             }}
-            className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-slate-800 hover:bg-black text-white px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-lg active:scale-95"
+            disabled={isRestrictedStaff}
+            title={isRestrictedStaff ? 'Admin only' : undefined}
+            className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-lg active:scale-95 ${
+              isRestrictedStaff
+                ? 'bg-slate-200 text-slate-400 cursor-not-allowed opacity-60'
+                : 'bg-slate-800 hover:bg-black text-white'
+            }`}
           >
             <History className="w-4 h-4" /> Log Task
           </button>
@@ -1449,7 +1538,7 @@ const AdminDashboard = ({
                 className="w-full bg-slate-50 border border-slate-200 p-3.5 rounded-2xl outline-none focus:ring-2 focus:ring-[#fd7414]/50 transition-all font-bold text-sm"
               >
                 <option value="">All Clients</option>
-                {clients.map((c) => (
+                {visibleClients.map((c) => (
                   <option key={c.id} value={c.name}>
                     {c.name}
                   </option>
@@ -1600,6 +1689,8 @@ const AdminDashboard = ({
                           </>
                         )}
                       </button>
+                      {!isRestrictedStaff && (
+                        <>
                       <button
                         onClick={() => startEditing('shift', shift)}
                         className="p-3 bg-slate-50 text-slate-500 rounded-xl hover:text-[#fd7414] transition-colors"
@@ -1620,6 +1711,8 @@ const AdminDashboard = ({
                       >
                         <Trash2 className="w-5 h-5" />
                       </button>
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -1678,6 +1771,7 @@ const AdminDashboard = ({
                                 <div className="font-black text-lg text-[#fd7414] font-mono">
                                   {formatTime(getTaskDuration(task))}
                                 </div>
+                                {!isRestrictedStaff && (
                                 <div className="flex gap-2">
                                   <button
                                     onClick={() => startEditing('task', task)}
@@ -1699,6 +1793,7 @@ const AdminDashboard = ({
                                     <Trash2 className="w-4 h-4" />
                                   </button>
                                 </div>
+                                )}
                               </div>
                             </div>
                           ))}
@@ -1732,7 +1827,7 @@ const AdminDashboard = ({
                 className="w-full bg-slate-50 border border-slate-200 p-3.5 rounded-2xl outline-none focus:ring-2 focus:ring-[#fd7414]/50 transition-all font-bold text-sm"
               >
                 <option value="all">All Clients</option>
-                {clients.map((c) => (
+                {visibleClients.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
                   </option>
@@ -1797,6 +1892,12 @@ const AdminDashboard = ({
               });
 
               filtered.sort((a, b) => {
+                if (isRestrictedStaff) {
+                  const me = String(user?.email || '').trim().toLowerCase();
+                  const aMine = normalizeTodoAssignees(a.item).includes(me);
+                  const bMine = normalizeTodoAssignees(b.item).includes(me);
+                  if (aMine !== bMine) return aMine ? -1 : 1;
+                }
                 const ad = Number(a.item?.dueDate || 0);
                 const bd = Number(b.item?.dueDate || 0);
                 if (ad && bd) return ad - bd;
@@ -1900,7 +2001,7 @@ const AdminDashboard = ({
             </div>
           )}
 
-          {!clientId && (
+          {!clientId && !isRestrictedStaff && (
             <div className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-sm flex items-center justify-between gap-6">
               <div>
                 <h3 className="font-black text-xl mb-1">Add Client Account</h3>
@@ -2169,7 +2270,7 @@ const AdminDashboard = ({
           )}
 
           <div className="grid grid-cols-1 gap-6">
-            {clients
+            {visibleClients
               .filter(
                 (c) => !clientId || String(c.id) === String(clientId),
               )
@@ -2309,9 +2410,13 @@ const AdminDashboard = ({
                         )}
                       </div>
                       <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">
-                        Rate: ${c.hourlyRate || 0}/hr{' '}
-                        <span className="mx-1">•</span> Renews on the{' '}
-                        {getOrdinalSuffix(c.billingDay || 1)}
+                        {!isRestrictedStaff && (
+                          <>
+                            Rate: ${c.hourlyRate || 0}/hr{' '}
+                            <span className="mx-1">•</span>{' '}
+                          </>
+                        )}
+                        Renews on the {getOrdinalSuffix(c.billingDay || 1)}
                       </div>
                     </div>
                     <div
@@ -2319,6 +2424,8 @@ const AdminDashboard = ({
                       onClick={(e) => e.stopPropagation()}
                     >
                       <button
+                        type="button"
+                        disabled={isRestrictedStaff}
                         onClick={() => {
                           setManualTaskValues({
                             clientName: c.name,
@@ -2333,12 +2440,20 @@ const AdminDashboard = ({
                           });
                           setManualTaskModal(true);
                         }}
-                        className="p-2 text-white bg-slate-800 rounded-xl hover:bg-black transition-colors shadow-sm flex items-center justify-center"
-                        title="Log a task for this client"
+                        className={`p-2 text-white bg-slate-800 rounded-xl transition-colors shadow-sm flex items-center justify-center ${
+                          isRestrictedStaff
+                            ? 'opacity-40 cursor-not-allowed'
+                            : 'hover:bg-black'
+                        }`}
+                        title={
+                          isRestrictedStaff ? 'Admin only' : 'Log a task for this client'
+                        }
                       >
                         <History className="w-5 h-5" />
                       </button>
                       <button
+                        type="button"
+                        disabled={isRestrictedStaff || isCycleLocked(c, mStart)}
                         onClick={() => {
                           setProjectModal({ ...c, lockClient: true });
                           setProjectValues({
@@ -2350,13 +2465,18 @@ const AdminDashboard = ({
                             estimatedHours: '',
                           });
                         }}
-                        disabled={isCycleLocked(c, mStart)}
-                        className="p-2 text-slate-700 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors"
-                        title="Add Custom Project"
+                        className={`p-2 text-slate-700 bg-slate-100 rounded-xl transition-colors ${
+                          isRestrictedStaff
+                            ? 'opacity-40 cursor-not-allowed'
+                            : 'hover:bg-slate-200'
+                        }`}
+                        title={isRestrictedStaff ? 'Admin only' : 'Add Custom Project'}
                       >
                         <CheckSquare className="w-5 h-5" />
                       </button>
                       <button
+                        type="button"
+                        disabled={isRestrictedStaff}
                         onClick={() => {
                           if (isCycleLocked(c, mStart)) {
                             window.alert(
@@ -2366,12 +2486,18 @@ const AdminDashboard = ({
                           }
                           setExpenseModal(c);
                         }}
-                        className="p-2 text-blue-500 bg-blue-50 rounded-xl hover:bg-blue-100 transition-colors"
-                        title="Add Expense"
+                        className={`p-2 text-blue-500 bg-blue-50 rounded-xl transition-colors ${
+                          isRestrictedStaff
+                            ? 'opacity-40 cursor-not-allowed'
+                            : 'hover:bg-blue-100'
+                        }`}
+                        title={isRestrictedStaff ? 'Admin only' : 'Add Expense'}
                       >
                         <DollarSign className="w-5 h-5" />
                       </button>
                       <button
+                        type="button"
+                        disabled={isRestrictedStaff}
                         onClick={() =>
                           setEditingClient({
                             ...c,
@@ -2383,22 +2509,41 @@ const AdminDashboard = ({
                               c.carryoverResetByCategory || {},
                           })
                         }
-                        className="p-2 text-slate-400 bg-slate-100 rounded-xl hover:text-[#fd7414] transition-colors"
+                        className={`p-2 text-slate-400 bg-slate-100 rounded-xl transition-colors ${
+                          isRestrictedStaff
+                            ? 'opacity-40 cursor-not-allowed'
+                            : 'hover:text-[#fd7414]'
+                        }`}
+                        title={isRestrictedStaff ? 'Admin only' : 'Client settings'}
                       >
                         <Settings className="w-5 h-5" />
                       </button>
                       <button
+                        type="button"
+                        disabled={isRestrictedStaff}
                         onClick={() =>
                           updateDoc(doc('clients', c.id), {
                             archived: !c.archived,
                           })
                         }
-                        className="p-2 text-slate-400 bg-slate-100 rounded-xl hover:text-black transition-colors"
-                        title={c.archived ? 'Unarchive client' : 'Archive client'}
+                        className={`p-2 text-slate-400 bg-slate-100 rounded-xl transition-colors ${
+                          isRestrictedStaff
+                            ? 'opacity-40 cursor-not-allowed'
+                            : 'hover:text-black'
+                        }`}
+                        title={
+                          isRestrictedStaff
+                            ? 'Admin only'
+                            : c.archived
+                              ? 'Unarchive client'
+                              : 'Archive client'
+                        }
                       >
                         <FolderGit2 className="w-5 h-5" />
                       </button>
                       <button
+                        type="button"
+                        disabled={isRestrictedStaff}
                         onClick={() =>
                           setDeleteConfirm({
                             collection: 'clients',
@@ -2406,7 +2551,12 @@ const AdminDashboard = ({
                             title: `the client "${c.name}"`,
                           })
                         }
-                        className="p-2 text-slate-300 bg-slate-100 rounded-xl hover:text-red-500 hover:bg-red-50 transition-colors"
+                        className={`p-2 text-slate-300 bg-slate-100 rounded-xl transition-colors ${
+                          isRestrictedStaff
+                            ? 'opacity-40 cursor-not-allowed'
+                            : 'hover:text-red-500 hover:bg-red-50'
+                        }`}
+                        title={isRestrictedStaff ? 'Admin only' : 'Delete client'}
                       >
                         <Trash2 className="w-5 h-5" />
                       </button>
@@ -2450,6 +2600,107 @@ const AdminDashboard = ({
                     </div>
                   )}
 
+                  {isClientPage && !isRestrictedStaff && (
+                    <div
+                      className="px-4 sm:px-6 pb-4 bg-white border-b border-slate-100"
+                      onClick={(e) => e.stopPropagation()}
+                      role="presentation"
+                    >
+                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                        Workspace access (Kiosk)
+                      </h5>
+                      <p className="text-xs text-slate-500 mb-3">
+                        Control which team accounts can open this client in Workspace. Until
+                        you set a list, every kiosk user can see this client (legacy). An
+                        explicit empty list blocks all kiosk access.
+                      </p>
+                      {c.teamMemberAccessEmails == null ? (
+                        <button
+                          type="button"
+                          className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-black uppercase tracking-widest"
+                          onClick={async () => {
+                            const kioskEmails = dedupedAdminUsers
+                              .filter((u) => u.role === 'kiosk')
+                              .map((u) => String(u.email || '').trim().toLowerCase())
+                              .filter(Boolean);
+                            if (kioskEmails.length === 0) {
+                              window.alert(
+                                'No users with the Kiosk role found. Add a kiosk user under Users first.',
+                              );
+                              return;
+                            }
+                            try {
+                              await updateDoc(doc('clients', c.id), {
+                                teamMemberAccessEmails: [...new Set(kioskEmails)].sort(),
+                              });
+                              logAudit?.({
+                                type: 'client_workspace_access_initialized',
+                                entityType: 'client',
+                                entityId: c.id,
+                                clientId: c.id,
+                              });
+                            } catch (err) {
+                              window.alert(
+                                `Could not update access: ${err?.message || String(err)}`,
+                              );
+                            }
+                          }}
+                        >
+                          Set access list (start with all Kiosk users)
+                        </button>
+                      ) : (
+                      <div className="flex flex-wrap gap-x-4 gap-y-2">
+                        {dedupedAdminUsers.map(({ email }) => {
+                          const lower = String(email || '').trim().toLowerCase();
+                          if (!lower) return null;
+                          const selected = normalizeEmailList(
+                            c.teamMemberAccessEmails,
+                          ).includes(lower);
+                          return (
+                            <label
+                              key={lower}
+                              className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selected}
+                                onChange={async () => {
+                                  const cur = normalizeEmailList(
+                                    c.teamMemberAccessEmails,
+                                  );
+                                  const set = new Set(cur);
+                                  if (set.has(lower)) set.delete(lower);
+                                  else set.add(lower);
+                                  const next = [...set].sort();
+                                  try {
+                                    await updateDoc(doc('clients', c.id), {
+                                      teamMemberAccessEmails: next,
+                                    });
+                                    logAudit?.({
+                                      type: 'client_workspace_access_updated',
+                                      entityType: 'client',
+                                      entityId: c.id,
+                                      clientId: c.id,
+                                    });
+                                  } catch (err) {
+                                    window.alert(
+                                      `Could not update access: ${
+                                        err?.message || String(err)
+                                      }`,
+                                    );
+                                  }
+                                }}
+                                className="rounded border-slate-300"
+                              />
+                              <span>{email}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="p-6 flex-1 bg-white space-y-6">
                     {isClientPage && showClientSummary && (
                       <div>
@@ -2476,6 +2727,14 @@ const AdminDashboard = ({
 
                         {clientNotesOpen[c.id] && (
                           <div className="mt-3 bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
+                            {isRestrictedStaff ? (
+                              <div className="w-full bg-white border border-slate-200 p-4 rounded-2xl font-medium text-sm text-slate-600 min-h-[110px] whitespace-pre-wrap">
+                                {c.generalNotes?.trim()
+                                  ? c.generalNotes
+                                  : 'No client notes.'}
+                              </div>
+                            ) : (
+                              <>
                             <textarea
                               value={clientNotesDraft[c.id] ?? ''}
                               onChange={(e) =>
@@ -2524,6 +2783,8 @@ const AdminDashboard = ({
                                 Save Notes
                               </button>
                             </div>
+                              </>
+                            )}
                           </div>
                         )}
                       </div>
@@ -2597,6 +2858,8 @@ const AdminDashboard = ({
                           {isClientPage && (
                             <>
                               <button
+                                type="button"
+                                disabled={isRestrictedStaff}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   exportClientCyclePDF({
@@ -2613,13 +2876,23 @@ const AdminDashboard = ({
                                     expenses,
                                   });
                                 }}
-                                className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
-                                title="Export this billing cycle to PDF"
+                                className={`hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white border border-slate-200 text-slate-600 transition-colors ${
+                                  isRestrictedStaff
+                                    ? 'opacity-40 cursor-not-allowed'
+                                    : 'hover:bg-slate-50'
+                                }`}
+                                title={
+                                  isRestrictedStaff
+                                    ? 'Admin only'
+                                    : 'Export this billing cycle to PDF'
+                                }
                               >
                                 <FileText className="w-3 h-3" />
                                 Export PDF
                               </button>
                               <button
+                                type="button"
+                                disabled={isRestrictedStaff}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   exportClientCycleCSV({
@@ -2637,13 +2910,23 @@ const AdminDashboard = ({
                                     addons,
                                   });
                                 }}
-                                className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
-                                title="Export this billing cycle to CSV"
+                                className={`hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white border border-slate-200 text-slate-600 transition-colors ${
+                                  isRestrictedStaff
+                                    ? 'opacity-40 cursor-not-allowed'
+                                    : 'hover:bg-slate-50'
+                                }`}
+                                title={
+                                  isRestrictedStaff
+                                    ? 'Admin only'
+                                    : 'Export this billing cycle to CSV'
+                                }
                               >
                                 <FileDown className="w-3 h-3" />
                                 Export CSV
                               </button>
                               <button
+                                type="button"
+                                disabled={isRestrictedStaff}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   exportClientCyclePDF({
@@ -2674,17 +2957,27 @@ const AdminDashboard = ({
                                     addons,
                                   });
                                 }}
-                                className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-black text-white hover:bg-slate-800 transition-colors"
-                                title="Export PDF + CSV for this cycle"
+                                className={`hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-black text-white transition-colors ${
+                                  isRestrictedStaff
+                                    ? 'opacity-40 cursor-not-allowed'
+                                    : 'hover:bg-slate-800'
+                                }`}
+                                title={
+                                  isRestrictedStaff
+                                    ? 'Admin only'
+                                    : 'Export PDF + CSV for this cycle'
+                                }
                               >
                                 <FileText className="w-3 h-3" />
                                 Invoice Pack
                               </button>
                               <button
+                                type="button"
+                                disabled={isRestrictedStaff}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   const u = new URL(
-                                    `${window.location.origin}/admin/clients/${c.id}`,
+                                    `${window.location.origin}${adminBasePath}/clients/${c.id}`,
                                   );
                                   u.searchParams.set('tab', 'timesheets');
                                   u.searchParams.set('cycle', String(mStart));
@@ -2702,15 +2995,25 @@ const AdminDashboard = ({
                                     window.prompt('Copy this link:', text);
                                   }
                                 }}
-                                className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
-                                title="Copy shareable link (tab + billing cycle)"
+                                className={`hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white border border-slate-200 text-slate-600 transition-colors ${
+                                  isRestrictedStaff
+                                    ? 'opacity-40 cursor-not-allowed'
+                                    : 'hover:bg-slate-50'
+                                }`}
+                                title={
+                                  isRestrictedStaff
+                                    ? 'Admin only'
+                                    : 'Copy shareable link (tab + billing cycle)'
+                                }
                               >
                                 <Copy className="w-3 h-3" />
                                 Copy cycle link
                               </button>
                               <button
+                                type="button"
                                 onClick={async (e) => {
                                   e.stopPropagation();
+                                  if (isRestrictedStaff) return;
                                   const locked = isCycleLocked(c, mStart);
                                   if (locked && !isAdmin) return;
                                   await updateDoc(doc('clients', c.id), {
@@ -2731,27 +3034,37 @@ const AdminDashboard = ({
                                   });
                                 }}
                                 className={`hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest transition-colors border ${
-                                  isCycleLocked(c, mStart)
-                                    ? isAdmin
-                                      ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100'
-                                      : 'bg-red-50 text-red-300 border-red-100 opacity-60 cursor-not-allowed'
-                                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                                  isRestrictedStaff
+                                    ? 'opacity-40 cursor-not-allowed border-slate-100 text-slate-300 bg-slate-50'
+                                    : isCycleLocked(c, mStart)
+                                      ? isAdmin
+                                        ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100'
+                                        : 'bg-red-50 text-red-300 border-red-100 opacity-60 cursor-not-allowed'
+                                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                                 }`}
                                 title={
-                                  isCycleLocked(c, mStart)
-                                    ? isAdmin
-                                      ? 'Unlock this billing cycle'
-                                      : 'Only Admin can unlock'
-                                    : 'Lock this billing cycle'
+                                  isRestrictedStaff
+                                    ? 'Admin only'
+                                    : isCycleLocked(c, mStart)
+                                      ? isAdmin
+                                        ? 'Unlock this billing cycle'
+                                        : 'Only Admin can unlock'
+                                      : 'Lock this billing cycle'
                                 }
-                                disabled={isCycleLocked(c, mStart) && !isAdmin}
+                                disabled={
+                                  isRestrictedStaff ||
+                                  (isCycleLocked(c, mStart) && !isAdmin)
+                                }
                               >
                                 <Lock className="w-3 h-3" />
                                 {isCycleLocked(c, mStart) ? 'Unlock' : 'Lock'}
                               </button>
                               <button
+                                type="button"
+                                disabled={isRestrictedStaff}
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  if (isRestrictedStaff) return;
                                   if (isCycleLocked(c, mStart)) {
                                     window.alert(
                                       'This billing cycle is locked. Unlock to add hours.',
@@ -2760,7 +3073,12 @@ const AdminDashboard = ({
                                   }
                                   setAddonModal(c);
                                 }}
-                                className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors"
+                                className={`hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-600 transition-colors ${
+                                  isRestrictedStaff
+                                    ? 'opacity-40 cursor-not-allowed'
+                                    : 'hover:bg-emerald-100'
+                                }`}
+                                title={isRestrictedStaff ? 'Admin only' : undefined}
                               >
                                 <CheckSquare className="w-3 h-3" />
                                 Add Hours
@@ -2875,6 +3193,7 @@ const AdminDashboard = ({
                                           <span className="font-black text-sm text-[#fd7414] font-mono">
                                             {formatTime(getTaskDuration(task))}
                                           </span>
+                                          {!isRestrictedStaff && (
                                           <button
                                             onClick={() =>
                                               setDeleteConfirm({
@@ -2888,6 +3207,7 @@ const AdminDashboard = ({
                                           >
                                             <Trash2 className="w-4 h-4" />
                                           </button>
+                                          )}
                                         </div>
                                       </div>
                                     ))}
@@ -2922,6 +3242,7 @@ const AdminDashboard = ({
                                           <span className="font-black text-sm text-blue-500">
                                             ${exp.finalCost.toFixed(2)}
                                           </span>
+                                          {!isRestrictedStaff && (
                                           <button
                                             onClick={() =>
                                               setDeleteConfirm({
@@ -2935,6 +3256,7 @@ const AdminDashboard = ({
                                           >
                                             <Trash2 className="w-4 h-4" />
                                           </button>
+                                          )}
                                         </div>
                                       </div>
                                     ))}
@@ -2976,6 +3298,7 @@ const AdminDashboard = ({
                                             <span className="font-black text-sm text-[#fd7414] font-mono">
                                               {formatTime(getTaskDuration(task))}
                                             </span>
+                                            {!isRestrictedStaff && (
                                             <button
                                               onClick={() =>
                                                 setDeleteConfirm({
@@ -2989,6 +3312,7 @@ const AdminDashboard = ({
                                             >
                                               <Trash2 className="w-4 h-4" />
                                             </button>
+                                            )}
                                           </div>
                                         </div>
                                       );
@@ -3029,6 +3353,7 @@ const AdminDashboard = ({
                                             <span className="font-black text-sm text-blue-500">
                                               ${exp.finalCost.toFixed(2)}
                                             </span>
+                                            {!isRestrictedStaff && (
                                             <button
                                               onClick={() =>
                                                 setDeleteConfirm({
@@ -3042,6 +3367,7 @@ const AdminDashboard = ({
                                             >
                                               <Trash2 className="w-4 h-4" />
                                             </button>
+                                            )}
                                           </div>
                                         </div>
                                       );
@@ -4793,6 +5119,7 @@ const AdminDashboard = ({
                       updateDoc={updateDoc}
                       firestoreDoc={doc}
                       logAudit={logAudit}
+                      readOnly={isRestrictedStaff}
                     />
                   )}
                   </div>
@@ -4837,6 +5164,7 @@ const AdminDashboard = ({
                       updateDoc={updateDoc}
                       firestoreDoc={doc}
                       logAudit={logAudit}
+                      readOnly={isRestrictedStaff}
                     />
                     )}
                   </>

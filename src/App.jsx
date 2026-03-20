@@ -62,6 +62,7 @@ import {
 import ClientPortal from './components/ClientPortal.jsx';
 import EmployeeKiosk from './components/EmployeeKiosk.jsx';
 import AdminDashboard from './components/AdminDashboard.jsx';
+import { teamMemberCanViewClient } from './utils/teamClientAccess.js';
 import {
   Routes,
   Route,
@@ -100,10 +101,22 @@ const IgniteLogo = ({ className }) => (
 
 const KioskRouteView = (props) => <EmployeeKiosk {...props} />;
 
+/** Kiosk users must use /workspace URLs; preserve client deep-link. */
+function RedirectKioskAdminClientToWorkspace() {
+  const { clientId } = useParams();
+  return <Navigate to={`/workspace/clients/${clientId}`} replace />;
+}
+
+function RedirectStaffWorkspaceClientToAdmin() {
+  const { clientId } = useParams();
+  return <Navigate to={`/admin/clients/${clientId}`} replace />;
+}
+
 // Use `custom_projects` (not `projects`) for ?tab= to avoid clashes with routers/proxies treating "projects" specially.
 const CLIENT_PAGE_TABS = ['summary', 'tasks', 'custom_projects', 'timesheets'];
 
 const AdminDashboardRouteView = ({ adminDashboardProps, navigate }) => {
+  const adminBasePath = adminDashboardProps?.adminBasePath || '/admin';
   const params = useParams();
   const clientId = params?.clientId || null;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -148,8 +161,8 @@ const AdminDashboardRouteView = ({ adminDashboardProps, navigate }) => {
       setClientPageTab={setClientPageTab}
       clientUrlCycle={clientUrlCycle}
       mergeClientSearchParams={mergeClientSearchParams}
-      navigateToClient={(id) => navigate(`/admin/clients/${id}`)}
-      navigateToClientsList={() => navigate('/admin')}
+      navigateToClient={(id) => navigate(`${adminBasePath}/clients/${id}`)}
+      navigateToClientsList={() => navigate(adminBasePath)}
     />
   );
 };
@@ -192,9 +205,12 @@ export default function App() {
     // Don't fight client portal, which is role-driven and not yet routed.
     if (view === 'client_portal') return;
     const path = location.pathname || '/';
-    if (path.startsWith('/admin')) {
+    if (path.startsWith('/admin') || path.startsWith('/workspace')) {
       if (view !== 'admin') setView('admin');
-      if (adminTab !== 'clients' && path.startsWith('/admin/clients')) {
+      if (
+        adminTab !== 'clients' &&
+        (path.startsWith('/admin/clients') || path.startsWith('/workspace/clients'))
+      ) {
         setAdminTab('clients');
       }
       return;
@@ -1438,7 +1454,12 @@ export default function App() {
     activeTask,
     liveDuration,
     liveTaskDuration,
-    clients: clients.filter((c) => !c.archived && c.status !== 'paused'),
+    clients: clients.filter(
+      (c) =>
+        !c.archived &&
+        c.status !== 'paused' &&
+        (currentUserRole !== 'kiosk' || teamMemberCanViewClient(c, user?.email)),
+    ),
     selectableRetainers,
     GENERAL_LABEL,
     clientActiveProjects,
@@ -1468,7 +1489,7 @@ export default function App() {
     todoCategoryKey,
   };
 
-  const adminDashboardRouteProps = {
+  const adminDashboardBaseProps = {
     adminTab,
     setAdminTab,
     currentUserRole,
@@ -1532,6 +1553,18 @@ export default function App() {
     updatePolicy,
   };
 
+  const adminDashboardRouteProps = {
+    ...adminDashboardBaseProps,
+    adminBasePath: '/admin',
+    dashboardTitle: 'Admin',
+  };
+
+  const workspaceDashboardRouteProps = {
+    ...adminDashboardBaseProps,
+    adminBasePath: '/workspace',
+    dashboardTitle: 'Workspace',
+  };
+
   const content =
     view === 'client_portal' && clientProfile ? (
       <ClientPortal
@@ -1587,7 +1620,18 @@ export default function App() {
               >
                 Kiosk
               </button>
-            {currentUserRole !== 'kiosk' && (
+            {currentUserRole === 'kiosk' ? (
+              <button
+                onClick={() => navigate('/workspace')}
+                className={`px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+                  view === 'admin'
+                    ? 'bg-white shadow-md text-[#fd7414]'
+                    : 'text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                Workspace
+              </button>
+            ) : (
               <button
                 onClick={() => navigate('/admin')}
                 className={`px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
@@ -1619,19 +1663,53 @@ export default function App() {
             <Route
               path="/admin"
               element={
-                <AdminDashboardRouteView
-                  adminDashboardProps={adminDashboardRouteProps}
-                  navigate={navigate}
-                />
+                currentUserRole === 'kiosk' ? (
+                  <Navigate to="/workspace" replace />
+                ) : (
+                  <AdminDashboardRouteView
+                    adminDashboardProps={adminDashboardRouteProps}
+                    navigate={navigate}
+                  />
+                )
               }
             />
             <Route
               path="/admin/clients/:clientId"
               element={
-                <AdminDashboardRouteView
-                  adminDashboardProps={adminDashboardRouteProps}
-                  navigate={navigate}
-                />
+                currentUserRole === 'kiosk' ? (
+                  <RedirectKioskAdminClientToWorkspace />
+                ) : (
+                  <AdminDashboardRouteView
+                    adminDashboardProps={adminDashboardRouteProps}
+                    navigate={navigate}
+                  />
+                )
+              }
+            />
+            <Route
+              path="/workspace"
+              element={
+                currentUserRole === 'kiosk' ? (
+                  <AdminDashboardRouteView
+                    adminDashboardProps={workspaceDashboardRouteProps}
+                    navigate={navigate}
+                  />
+                ) : (
+                  <Navigate to="/admin" replace />
+                )
+              }
+            />
+            <Route
+              path="/workspace/clients/:clientId"
+              element={
+                currentUserRole === 'kiosk' ? (
+                  <AdminDashboardRouteView
+                    adminDashboardProps={workspaceDashboardRouteProps}
+                    navigate={navigate}
+                  />
+                ) : (
+                  <RedirectStaffWorkspaceClientToAdmin />
+                )
               }
             />
             <Route path="*" element={<Navigate to="/kiosk" replace />} />
