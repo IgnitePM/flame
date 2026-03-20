@@ -435,6 +435,7 @@ const AdminDashboard = ({
   setExpenseModal,
   setAddonModal,
   setProjectModal,
+  setProjectValues,
   setEditingClient,
   setDeleteConfirm,
   startEditing,

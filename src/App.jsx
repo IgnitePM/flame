@@ -1501,6 +1501,7 @@ export default function App() {
     setExpenseModal,
     setAddonModal,
     setProjectModal,
+    setProjectValues,
     setEditingClient,
     setDeleteConfirm,
     startEditing,
