@@ -893,7 +893,9 @@ export default function App() {
       const prevCat = prevData[ck];
       const prevItems = prevCat?.items || [];
       const carried = prevItems
-        .filter((i) => !i.done && !i.recurring)
+        // Carry forward all unfinished items, including unfinished recurring
+        // iterations, so overdue recurring instances remain visible.
+        .filter((i) => !i.done)
         .map((i) => ({
           ...i,
           done: false,
@@ -902,9 +904,21 @@ export default function App() {
             ? i.assigneeEmails.filter(Boolean)
             : [],
         }));
-      const recurring = prevItems
-        .filter((i) => !!i.recurring)
-        .map((i) => {
+      // Create exactly one new iteration per recurring series (recurringId).
+      // If multiple old unfinished recurring items exist, we still add only one
+      // new item for the next cycle while preserving all unfinished carryovers.
+      const recurringSeeds = Array.from(
+        prevItems
+          .filter((i) => !!i.recurring)
+          .reduce((acc, i) => {
+            const rid = String(i.recurringId || i.id || '');
+            if (!rid) return acc;
+            if (!acc.has(rid)) acc.set(rid, i);
+            return acc;
+          }, new Map())
+          .values(),
+      );
+      const recurring = recurringSeeds.map((i) => {
           const effectiveRecurrence =
             i.recurrence ||
             (i.dueDate
@@ -952,7 +966,9 @@ export default function App() {
       const prevCat = prevData[ck];
       const prevItems = prevCat?.items || [];
       const carried = prevItems
-        .filter((i) => !i.done && !i.recurring)
+        // Carry forward all unfinished items, including unfinished recurring
+        // iterations, so overdue recurring instances remain visible.
+        .filter((i) => !i.done)
         .map((i) => ({
           ...i,
           done: false,
@@ -961,9 +977,19 @@ export default function App() {
             ? i.assigneeEmails.filter(Boolean)
             : [],
         }));
-      const recurring = prevItems
-        .filter((i) => !!i.recurring)
-        .map((i) => {
+      // Create exactly one new iteration per recurring series (recurringId).
+      const recurringSeeds = Array.from(
+        prevItems
+          .filter((i) => !!i.recurring)
+          .reduce((acc, i) => {
+            const rid = String(i.recurringId || i.id || '');
+            if (!rid) return acc;
+            if (!acc.has(rid)) acc.set(rid, i);
+            return acc;
+          }, new Map())
+          .values(),
+      );
+      const recurring = recurringSeeds.map((i) => {
           const effectiveRecurrence =
             i.recurrence ||
             (i.dueDate
