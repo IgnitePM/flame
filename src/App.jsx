@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Clock,
   User,
@@ -62,7 +62,10 @@ import {
 import ClientPortal from './components/ClientPortal.jsx';
 import EmployeeKiosk from './components/EmployeeKiosk.jsx';
 import AdminDashboard from './components/AdminDashboard.jsx';
-import { teamMemberCanViewClient } from './utils/teamClientAccess.js';
+import {
+  teamMemberCanViewClient,
+  buildTeamAccessMergeForTodoAssignees,
+} from './utils/teamClientAccess.js';
 import {
   Routes,
   Route,
@@ -382,6 +385,34 @@ export default function App() {
     else if (isUserAdmin && view === 'client_portal')
       setView(currentUserRole === 'kiosk' ? 'employee' : 'admin');
   }, [isClientUser, isUserAdmin, currentUserRole, view]);
+
+  // One-time per session (admin/billing): backfill assignees → teamMemberAccessEmails for
+  // data created before deploy. Ongoing: every updateClientTodo / updateClientTodosBatch
+  // already merges assignees — no admin login required for new assignments.
+  const teamAccessAssigneeBackfillDoneRef = useRef(false);
+  useEffect(() => {
+    if (teamAccessAssigneeBackfillDoneRef.current) return;
+    if (!user?.email || !isUserAdmin || currentUserRole === 'kiosk') return;
+    if (!clients?.length) return;
+
+    let cancelled = false;
+    (async () => {
+      for (const c of clients) {
+        if (cancelled) return;
+        const patch = buildTeamAccessMergeForTodoAssignees(c, c.todoCycles || {});
+        if (!patch.teamMemberAccessEmails) continue;
+        try {
+          await updateDoc(doc(db, 'clients', c.id), patch);
+        } catch {
+          // ignore offline / permission edge cases
+        }
+      }
+      if (!cancelled) teamAccessAssigneeBackfillDoneRef.current = true;
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clients, isUserAdmin, currentUserRole, user?.email]);
 
   const activeTaskTypes = taskTypes.length > 0 ? taskTypes.map(t => t.name) : DEFAULT_PROJECT_CATEGORIES;
   // For the client settings Retainers UI, always ensure Social Ad Budget is present
@@ -1022,7 +1053,8 @@ export default function App() {
     const cycles = ensureCurrentCycleTodoData(client, cycleStart);
     const cycleData = cycles[String(cycleStart)] || {};
     cycles[String(cycleStart)] = { ...cycleData, [categoryKey]: nextCategoryData };
-    await updateDoc(doc(db, 'clients', client.id), { todoCycles: cycles });
+    const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(client, cycles);
+    await updateDoc(doc(db, 'clients', client.id), { todoCycles: cycles, ...teamAccessPatch });
   };
 
   // Batch update multiple to-do categories in a single Firestore write.
@@ -1035,7 +1067,8 @@ export default function App() {
       ...cycleData,
       ...categoryKeyToData,
     };
-    await updateDoc(doc(db, 'clients', client.id), { todoCycles: cycles });
+    const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(client, cycles);
+    await updateDoc(doc(db, 'clients', client.id), { todoCycles: cycles, ...teamAccessPatch });
   };
 
   // Dynamic Billing Period & Global Carryover Logic
