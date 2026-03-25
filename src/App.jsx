@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Clock,
   User,
@@ -189,7 +189,10 @@ export default function App() {
   const [clients, setClients] = useState([]);
   const [taskLogs, setTaskLogs] = useState([]);
   const [taskTypes, setTaskTypes] = useState([]);
-  const [adminUsers, setAdminUsers] = useState([]); 
+  /** Own admins/{emailLower} doc — collection queries fail for kiosk/billing (Firestore rules). */
+  const [myAdminDoc, setMyAdminDoc] = useState(null);
+  const [adminDocReady, setAdminDocReady] = useState(false);
+  const [adminUsersFromCollection, setAdminUsersFromCollection] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [projects, setProjects] = useState([]);
   const [addons, setAddons] = useState([]);
@@ -306,7 +309,6 @@ export default function App() {
     const unsubClients = onSnapshot(collection(db, 'clients'), (snapshot) => setClients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
     const unsubTasks = onSnapshot(collection(db, 'taskLogs'), (snapshot) => setTaskLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.clockInTime - a.clockInTime)));
     const unsubTaskTypes = onSnapshot(collection(db, 'taskTypes'), (snapshot) => setTaskTypes(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
-    const unsubAdmins = onSnapshot(collection(db, 'admins'), (snapshot) => setAdminUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
     const unsubExpenses = onSnapshot(collection(db, 'expenses'), (snapshot) => setExpenses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a,b) => b.date - a.date)));
     const unsubProjects = onSnapshot(collection(db, 'projects'), (snapshot) => setProjects(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a,b) => b.createdAt - a.createdAt)));
     const unsubAddons = onSnapshot(collection(db, 'addons'), (snapshot) => setAddons(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a,b) => b.date - a.date)));
@@ -325,13 +327,56 @@ export default function App() {
       unsubClients();
       unsubTasks();
       unsubTaskTypes();
-      unsubAdmins();
       unsubExpenses();
       unsubProjects();
       unsubAddons();
       unsubUserTodos();
     };
   }, [user]);
+
+  // Firestore: only role === 'admin' may read all admins/*; kiosk/billing must read doc(admins, ownEmail).
+  useEffect(() => {
+    if (!user?.email) {
+      setMyAdminDoc(null);
+      setAdminDocReady(true);
+      return;
+    }
+    setAdminDocReady(false);
+    const emailKey = user.email.toLowerCase();
+    const unsub = onSnapshot(
+      doc(db, 'admins', emailKey),
+      (snap) => {
+        setMyAdminDoc(snap.exists() ? { id: snap.id, ...snap.data() } : null);
+        setAdminDocReady(true);
+      },
+      () => {
+        setMyAdminDoc(null);
+        setAdminDocReady(true);
+      },
+    );
+    return () => unsub();
+  }, [user?.email]);
+
+  const canListAllAdmins =
+    user?.email === 'chris@ignitepm.com' || myAdminDoc?.role === 'admin';
+
+  useEffect(() => {
+    if (!user?.email || !canListAllAdmins) {
+      setAdminUsersFromCollection([]);
+      return;
+    }
+    const unsub = onSnapshot(collection(db, 'admins'), (snapshot) => {
+      setAdminUsersFromCollection(
+        snapshot.docs.map((d) => ({ id: d.id, ...d.data() })),
+      );
+    });
+    return () => unsub();
+  }, [user?.email, canListAllAdmins]);
+
+  const adminUsers = useMemo(() => {
+    if (canListAllAdmins) return adminUsersFromCollection;
+    return myAdminDoc ? [myAdminDoc] : [];
+  }, [canListAllAdmins, adminUsersFromCollection, myAdminDoc]);
 
   const updateUserTodos = async (nextItems) => {
     if (!user?.uid) return;
@@ -352,18 +397,17 @@ export default function App() {
       { merge: true },
     ).catch(() => {});
 
-    adminUsers.forEach((a) => {
+    adminUsersFromCollection.forEach((a) => {
       if (!a.email) return;
       const id = a.email.toLowerCase();
       if (a.id === id) return;
       // Mirror record to email-keyed doc id for security rules
       setDoc(doc(db, 'admins', id), { email: a.email, role: a.role || 'billing' }, { merge: true }).catch(() => {});
     });
-  }, [user?.email, adminUsers]);
+  }, [user?.email, adminUsersFromCollection]);
 
-  // Roles & Access Logic
-  const adminRecord =
-    user && adminUsers.find((a) => a.email?.toLowerCase() === user.email?.toLowerCase());
+  // Roles & Access Logic (own admins/{email} doc is authoritative for role)
+  const adminRecord = user && myAdminDoc ? myAdminDoc : null;
   const isUserAdmin =
     !!user &&
     (user.email === 'chris@ignitepm.com' || !!adminRecord);
@@ -1466,7 +1510,13 @@ export default function App() {
   };
 
   // Render Checks
-  if (loading) return <div className="min-h-screen flex items-center justify-center bg-[#0b1120]"><RotateCw className="w-8 h-8 text-[#fd7414] animate-spin" /></div>;
+  if (loading || (user && !adminDocReady)) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#0b1120]">
+        <RotateCw className="w-8 h-8 text-[#fd7414] animate-spin" />
+      </div>
+    );
+  }
 
   // Global Auth Gate
   if (
