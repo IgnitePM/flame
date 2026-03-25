@@ -32,10 +32,7 @@ import {
   reorderTodosDisplay,
   toggleTodoPinnedById,
 } from '../utils/todoListOrder.js';
-import {
-  teamMemberCanViewClient,
-  normalizeEmailList,
-} from '../utils/teamClientAccess.js';
+import { normalizeEmailList } from '../utils/teamClientAccess.js';
 
 /** Normalize ?tab= for /admin/clients/:id (supports legacy `projects`). */
 function parseClientSubTabFromSearch(search) {
@@ -801,13 +798,7 @@ const AdminDashboard = ({
   const canBilling = currentUserRole === 'admin' || currentUserRole === 'billing';
   const isAdmin = currentUserRole === 'admin';
   const isRestrictedStaff = currentUserRole === 'kiosk';
-  const visibleClients = useMemo(
-    () =>
-      isRestrictedStaff
-        ? (clients || []).filter((c) => teamMemberCanViewClient(c, user?.email))
-        : clients || [],
-    [clients, isRestrictedStaff, user?.email],
-  );
+  const visibleClients = useMemo(() => clients || [], [clients]);
 
   // Keep retainer categories stable in the UI even if Firestore map key ordering changes.
   const retainerCategoryOrder = Array.from(
@@ -1739,12 +1730,7 @@ const AdminDashboard = ({
   const workspaceRouteClient = clientId
     ? (clients || []).find((cl) => String(cl.id) === String(clientId))
     : null;
-  if (
-    clientId &&
-    isRestrictedStaff &&
-    (!workspaceRouteClient ||
-      !teamMemberCanViewClient(workspaceRouteClient, user?.email))
-  ) {
+  if (clientId && isRestrictedStaff && !workspaceRouteClient) {
     return (
       <div className="space-y-8 animate-in fade-in duration-500">
         <div className="bg-white p-10 rounded-[32px] border border-slate-100 shadow-sm text-center">

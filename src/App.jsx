@@ -62,10 +62,7 @@ import {
 import ClientPortal from './components/ClientPortal.jsx';
 import EmployeeKiosk from './components/EmployeeKiosk.jsx';
 import AdminDashboard from './components/AdminDashboard.jsx';
-import {
-  teamMemberCanViewClient,
-  buildTeamAccessMergeForTodoAssignees,
-} from './utils/teamClientAccess.js';
+import { buildTeamAccessMergeForTodoAssignees } from './utils/teamClientAccess.js';
 import {
   Routes,
   Route,
@@ -1597,10 +1594,7 @@ export default function App() {
     liveDuration,
     liveTaskDuration,
     clients: clients.filter(
-      (c) =>
-        !c.archived &&
-        c.status !== 'paused' &&
-        (currentUserRole !== 'kiosk' || teamMemberCanViewClient(c, user?.email)),
+      (c) => !c.archived && c.status !== 'paused',
     ),
     selectableRetainers,
     GENERAL_LABEL,
