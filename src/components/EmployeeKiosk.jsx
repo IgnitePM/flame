@@ -14,6 +14,12 @@ import {
   reorderTodosDisplay,
   toggleTodoPinnedById,
 } from '../utils/todoListOrder.js';
+import { buildGlobalTodoRows } from '../utils/todoGlobalRows.js';
+import {
+  buildKioskBillingTargetFromTodoRow,
+  todoRowMatchesFilters,
+  sortTodoRowsByDueThenClient,
+} from '../utils/todoFilters.js';
 
 const EmployeeKiosk = ({
   user,
@@ -48,6 +54,8 @@ const EmployeeKiosk = ({
   getTodoStateForCycle,
   updateClientTodo,
   todoCategoryKey,
+  projects = [],
+  queueKioskTaskStart = () => {},
 }) => {
   const [clientSearch, setClientSearch] = React.useState('');
   const [socialAdAmount, setSocialAdAmount] = React.useState('');
@@ -57,6 +65,9 @@ const EmployeeKiosk = ({
   const [todoSaving, setTodoSaving] = React.useState(false);
   const [todoDueDate, setTodoDueDate] = React.useState('');
   const [todoMineOnly, setTodoMineOnly] = React.useState(true);
+  const [categoryTodoMineOnly, setCategoryTodoMineOnly] = React.useState(true);
+  const [kioskTaskStatusFilter, setKioskTaskStatusFilter] = React.useState('open');
+  const [kioskTaskDueFilter, setKioskTaskDueFilter] = React.useState('next7');
   const [todoRecurrenceMode, setTodoRecurrenceMode] = React.useState('none');
   const [todoOptionsOpen, setTodoOptionsOpen] = React.useState(false);
 
@@ -200,10 +211,6 @@ const EmployeeKiosk = ({
     (selectedClientObj?.retainers &&
       selectedClientObj.retainers[selectedRetainerCategory]) || 0;
 
-  // Used/Allotted units: hours or dollars per client retainerUnits
-  const categoryUnitLabel = isDollarCategory ? '$' : '';
-
-
   React.useEffect(() => {
     if (!policy?.idleReminderMinutes || !activeTask) return;
     const minutes = Number(policy.idleReminderMinutes) || 0;
@@ -217,8 +224,51 @@ const EmployeeKiosk = ({
     return () => clearInterval(timer);
   }, [policy?.idleReminderMinutes, activeTask, activeTaskNotes]);
 
+  const meLower = String(user?.email || '').trim().toLowerCase();
+
+  const globalTodoRows = React.useMemo(
+    () =>
+      buildGlobalTodoRows(
+        clientsFull || [],
+        projects,
+        getBillingPeriod,
+        getTodoStateForCycle,
+        todoCategoryKey,
+      ),
+    [clientsFull, projects, getBillingPeriod, getTodoStateForCycle, todoCategoryKey],
+  );
+
+  const kioskFilteredRows = React.useMemo(() => {
+    let rows = globalTodoRows.filter((row) =>
+      todoRowMatchesFilters(row, kioskTaskStatusFilter, kioskTaskDueFilter),
+    );
+    if (todoMineOnly) {
+      rows = rows.filter((row) => {
+        const raw = Array.isArray(row.item?.assigneeEmails) ? row.item.assigneeEmails : [];
+        const cleaned = raw.map((e) => String(e || '').trim().toLowerCase()).filter(Boolean);
+        const assignees =
+          cleaned.length > 0
+            ? cleaned
+            : user?.email
+              ? [String(user.email).trim().toLowerCase()]
+              : [];
+        return assignees.includes(meLower);
+      });
+    }
+    return sortTodoRowsByDueThenClient(rows);
+  }, [
+    globalTodoRows,
+    kioskTaskStatusFilter,
+    kioskTaskDueFilter,
+    todoMineOnly,
+    meLower,
+    user,
+  ]);
+
   return (
-    <div className="space-y-6 max-w-xl mx-auto">
+    <div className="max-w-6xl mx-auto px-3">
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_300px] gap-6 items-start">
+        <div className="space-y-6 min-w-0">
       <div className="bg-white rounded-[32px] shadow-xl border border-slate-100 overflow-hidden">
         <div className="p-8 text-center border-b border-slate-50 bg-slate-50/30">
           <div className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mb-3">
@@ -456,10 +506,10 @@ const EmployeeKiosk = ({
                           const allItems = catTodo.items || [];
                           const meLower = String(user?.email || '').trim().toLowerCase();
                           const displayItems = orderTodosForDisplay(allItems).filter((item) => {
-                            if (!todoMineOnly) return true;
+                            if (!categoryTodoMineOnly) return true;
                             return normalizeAssignees(item).includes(meLower);
                           });
-                          const canDragReorder = !todoMineOnly;
+                          const canDragReorder = !categoryTodoMineOnly;
                           return (
                             <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
                               <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
@@ -473,8 +523,8 @@ const EmployeeKiosk = ({
                               <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600 mb-2">
                                 <input
                                   type="checkbox"
-                                  checked={todoMineOnly}
-                                  onChange={(e) => setTodoMineOnly(e.target.checked)}
+                                  checked={categoryTodoMineOnly}
+                                  onChange={(e) => setCategoryTodoMineOnly(e.target.checked)}
                                 />
                                 Show only tasks assigned to me
                               </label>
@@ -483,7 +533,7 @@ const EmployeeKiosk = ({
                                   Drag the grip to reorder. Pin keeps tasks at the top of the list.
                                 </p>
                               )}
-                              {!catTodo.closed && todoMineOnly && allItems.length > 0 && (
+                              {!catTodo.closed && categoryTodoMineOnly && allItems.length > 0 && (
                                 <p className="text-[10px] text-amber-800/90 mb-2">
                                   Uncheck &quot;only my tasks&quot; to drag-reorder the full list.
                                 </p>
@@ -863,10 +913,10 @@ const EmployeeKiosk = ({
                           const allItems = catTodo.items || [];
                           const meLower = String(user?.email || '').trim().toLowerCase();
                           const displayItems = orderTodosForDisplay(allItems).filter((item) => {
-                            if (!todoMineOnly) return true;
+                            if (!categoryTodoMineOnly) return true;
                             return normalizeAssignees(item).includes(meLower);
                           });
-                          const canDragReorder = !todoMineOnly;
+                          const canDragReorder = !categoryTodoMineOnly;
                           return (
                             <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
                               <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
@@ -880,8 +930,8 @@ const EmployeeKiosk = ({
                               <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600 mb-2">
                                 <input
                                   type="checkbox"
-                                  checked={todoMineOnly}
-                                  onChange={(e) => setTodoMineOnly(e.target.checked)}
+                                  checked={categoryTodoMineOnly}
+                                  onChange={(e) => setCategoryTodoMineOnly(e.target.checked)}
                                 />
                                 Show only tasks assigned to me
                               </label>
@@ -890,7 +940,7 @@ const EmployeeKiosk = ({
                                   Drag the grip to reorder. Pin keeps tasks at the top of the list.
                                 </p>
                               )}
-                              {!catTodo.closed && todoMineOnly && allItems.length > 0 && (
+                              {!catTodo.closed && categoryTodoMineOnly && allItems.length > 0 && (
                                 <p className="text-[10px] text-amber-800/90 mb-2">
                                   Uncheck &quot;only my tasks&quot; to drag-reorder the full list.
                                 </p>
@@ -1275,6 +1325,86 @@ const EmployeeKiosk = ({
             </div>
           </div>
         )}
+      </div>
+        </div>
+        <aside className="rounded-[24px] border border-slate-100 bg-white p-4 shadow-sm xl:sticky xl:top-4 xl:self-start space-y-3">
+          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+            Your tasks
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <select
+              value={kioskTaskStatusFilter}
+              onChange={(e) => setKioskTaskStatusFilter(e.target.value)}
+              className="bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-[#fd7414]/40"
+            >
+              <option value="open">Open</option>
+              <option value="completed">Completed</option>
+            </select>
+            <select
+              value={kioskTaskDueFilter}
+              onChange={(e) => setKioskTaskDueFilter(e.target.value)}
+              className="bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-[#fd7414]/40"
+            >
+              <option value="next7">Next 7d</option>
+              <option value="next14">Next 14d</option>
+              <option value="next30">Next 30d</option>
+              <option value="all_future">All future</option>
+            </select>
+          </div>
+          <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600">
+            <input
+              type="checkbox"
+              checked={todoMineOnly}
+              onChange={(e) => setTodoMineOnly(e.target.checked)}
+            />
+            Only my tasks
+          </label>
+          <div className="max-h-[min(420px,55vh)] overflow-y-auto space-y-2 pr-1">
+            {kioskFilteredRows.length === 0 ? (
+              <p className="text-xs text-slate-400">No tasks match these filters.</p>
+            ) : (
+              kioskFilteredRows.map((row) => {
+                const client = (clientsFull || []).find((cl) => cl.id === row.clientId);
+                return (
+                  <div
+                    key={`${row.clientId}__${row.categoryKey}__${row.item.id}`}
+                    className={`rounded-xl p-2 border border-slate-100 ${getUrgencyClass(row.item)}`}
+                  >
+                    <div className="text-[10px] font-black text-slate-600 truncate">{row.clientName}</div>
+                    <div className="text-[9px] text-slate-500 truncate">{row.categoryLabel}</div>
+                    <div className="text-xs font-bold leading-snug line-clamp-2">{row.item.text || '(no text)'}</div>
+                    {row.item.dueDate ? (
+                      <div className="text-[9px] font-bold text-slate-500 mt-0.5">
+                        Due {new Date(row.item.dueDate).toLocaleDateString()}
+                      </div>
+                    ) : (
+                      <div className="text-[9px] font-bold text-slate-400 mt-0.5">No due date</div>
+                    )}
+                    {!row.item.done && client && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const target = buildKioskBillingTargetFromTodoRow(
+                            row,
+                            client,
+                            projects,
+                            todoCategoryKey,
+                            GENERAL_LABEL,
+                          );
+                          queueKioskTaskStart(row.clientName, target);
+                        }}
+                        className="mt-2 w-full inline-flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl bg-black text-white text-[10px] font-black uppercase tracking-widest hover:bg-slate-800"
+                      >
+                        <Play className="w-3.5 h-3.5" aria-hidden />
+                        Start task
+                      </button>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </aside>
       </div>
     </div>
   );

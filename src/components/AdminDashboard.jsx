@@ -20,6 +20,7 @@ import {
   Lock,
   Pencil,
   Pin,
+  Play,
   Search,
   Settings,
   ShoppingCart,
@@ -33,6 +34,13 @@ import {
   toggleTodoPinnedById,
 } from '../utils/todoListOrder.js';
 import { normalizeEmailList } from '../utils/teamClientAccess.js';
+import { buildGlobalTodoRows } from '../utils/todoGlobalRows.js';
+import {
+  buildKioskBillingTargetFromTodoRow,
+  taskMatchesDueWindow,
+  taskMatchesStatus,
+  todoRowMatchesFilters,
+} from '../utils/todoFilters.js';
 
 /** Normalize ?tab= for /admin/clients/:id (supports legacy `projects`). */
 function parseClientSubTabFromSearch(search) {
@@ -794,6 +802,7 @@ const AdminDashboard = ({
   todoCategoryKey,
   userTodos = [],
   updateUserTodos,
+  navigateToKioskWithTask = () => {},
 }) => {
   const canBilling = currentUserRole === 'admin' || currentUserRole === 'billing';
   const isAdmin = currentUserRole === 'admin';
@@ -887,6 +896,10 @@ const AdminDashboard = ({
   const [taskClientFilter, setTaskClientFilter] = useState('all');
   const [taskCategoryFilter, setTaskCategoryFilter] = useState('all');
   const [taskAssigneeFilter, setTaskAssigneeFilter] = useState('me');
+  const [taskStatusFilter, setTaskStatusFilter] = useState('open');
+  const [taskDueFilter, setTaskDueFilter] = useState('next7');
+  const [clientTaskStatusFilter, setClientTaskStatusFilter] = useState('open');
+  const [clientTaskDueFilter, setClientTaskDueFilter] = useState('next7');
   const [userTodoDraft, setUserTodoDraft] = useState('');
   const [userTodoSaving, setUserTodoSaving] = useState(false);
 
@@ -1503,41 +1516,20 @@ const AdminDashboard = ({
     mergeClientSearchParams,
   ]);
 
-  const globalTodoRows = visibleClients.flatMap((c) => {
-    const cycleStart = getBillingPeriod(c.billingDay || 1, 0).start;
-    const todoState = getTodoStateForCycle ? getTodoStateForCycle(c, cycleStart) : {};
-    const keyOf = (category) =>
-      String(category)
-        .replace(/[~*[\]/]/g, '_')
-        .replace(/\./g, '_');
-    const labelMap = {};
-    Object.keys(c.retainers || {}).forEach((cat) => {
-      labelMap[keyOf(cat)] = cat;
-    });
-    labelMap[keyOf('General / Unclassified')] = 'General / Unclassified';
-    // Custom project to-do categories are stored under `project_<id>` keys.
-    (projects || [])
-      .filter((p) => p && p.clientId === c.id && !p.archived)
-      .forEach((p) => {
-        const catKey = todoCategoryKey
-          ? todoCategoryKey(`project_${p.id}`)
-          : `project_${p.id}`;
-        labelMap[keyOf(catKey)] = p.title || 'Custom Project';
-      });
+  const globalTodoRows = useMemo(
+    () =>
+      buildGlobalTodoRows(
+        visibleClients,
+        projects,
+        getBillingPeriod,
+        getTodoStateForCycle,
+        todoCategoryKey,
+      ),
+    [visibleClients, projects, getBillingPeriod, getTodoStateForCycle, todoCategoryKey],
+  );
 
-    return Object.entries(todoState || {}).flatMap(([catKey, catTodo]) => {
-      const items = catTodo?.items || [];
-      return orderTodosForDisplay(items).map((item) => ({
-        clientId: c.id,
-        clientName: c.name,
-        cycleStart,
-        categoryKey: catKey,
-        categoryLabel: labelMap[catKey] || catKey,
-        catTodo,
-        item,
-      }));
-    });
-  });
+  const clientTodoFiltersAllowReorder =
+    clientTaskStatusFilter === 'open' && clientTaskDueFilter === 'next7';
 
   const assignableEmails = Array.from(
     new Set([
@@ -2271,7 +2263,8 @@ const AdminDashboard = ({
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-sm grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2 mb-2 block">
                 Client
@@ -2324,6 +2317,37 @@ const AdminDashboard = ({
                 ))}
               </select>
             </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2 mb-2 block">
+                Status
+              </label>
+              <select
+                value={taskStatusFilter}
+                onChange={(e) => setTaskStatusFilter(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 p-3.5 rounded-2xl outline-none focus:ring-2 focus:ring-[#fd7414]/50 transition-all font-bold text-sm"
+              >
+                <option value="open">Open</option>
+                <option value="completed">Completed</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2 mb-2 block">
+                Due
+              </label>
+              <select
+                value={taskDueFilter}
+                onChange={(e) => setTaskDueFilter(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 p-3.5 rounded-2xl outline-none focus:ring-2 focus:ring-[#fd7414]/50 transition-all font-bold text-sm"
+              >
+                <option value="next7">Next 7 days</option>
+                <option value="next14">Next 14 days</option>
+                <option value="next30">Next 30 days</option>
+                <option value="all_future">All future</option>
+              </select>
+            </div>
+            </div>
           </div>
 
           <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm p-6 space-y-3">
@@ -2333,6 +2357,9 @@ const AdminDashboard = ({
                   return false;
                 }
                 if (taskCategoryFilter !== 'all' && row.categoryLabel !== taskCategoryFilter) {
+                  return false;
+                }
+                if (!todoRowMatchesFilters(row, taskStatusFilter, taskDueFilter)) {
                   return false;
                 }
                 const assignees = normalizeTodoAssignees(row.item);
@@ -2429,6 +2456,28 @@ const AdminDashboard = ({
                         Assigned: {assignees.join(', ') || 'Unassigned'}
                       </div>
                     </div>
+                    {!row.item.done && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const client = clients.find((cl) => cl.id === row.clientId);
+                          if (!client) return;
+                          const target = buildKioskBillingTargetFromTodoRow(
+                            row,
+                            client,
+                            projects,
+                            todoCategoryKey,
+                            'General / Unclassified',
+                          );
+                          navigateToKioskWithTask(row.clientName, target);
+                        }}
+                        className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#fd7414] text-white text-xs font-black uppercase tracking-widest hover:bg-[#e66a12] transition-colors"
+                        title="Start timer on kiosk with this client and billing target"
+                      >
+                        <Play className="w-4 h-4" aria-hidden />
+                        Start
+                      </button>
+                    )}
                   </div>
                 );
               });
@@ -3056,6 +3105,38 @@ const AdminDashboard = ({
                   )}
 
                   <div className="p-6 flex-1 bg-white space-y-6">
+                    {isClientPage && showClientTasks && (
+                      <div className="flex flex-wrap gap-3 items-end rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                        <div className="min-w-[140px]">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-1 block">
+                            Status
+                          </label>
+                          <select
+                            value={clientTaskStatusFilter}
+                            onChange={(e) => setClientTaskStatusFilter(e.target.value)}
+                            className="w-full bg-white border border-slate-200 p-2.5 rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-[#fd7414]/40"
+                          >
+                            <option value="open">Open</option>
+                            <option value="completed">Completed</option>
+                          </select>
+                        </div>
+                        <div className="min-w-[160px]">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-1 block">
+                            Due
+                          </label>
+                          <select
+                            value={clientTaskDueFilter}
+                            onChange={(e) => setClientTaskDueFilter(e.target.value)}
+                            className="w-full bg-white border border-slate-200 p-2.5 rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-[#fd7414]/40"
+                          >
+                            <option value="next7">Next 7 days</option>
+                            <option value="next14">Next 14 days</option>
+                            <option value="next30">Next 30 days</option>
+                            <option value="all_future">All future</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
                     {isClientPage && showClientSummary && (
                       <div>
                         <button
@@ -3818,7 +3899,11 @@ const AdminDashboard = ({
                           items: [],
                         };
                         const items = catTodo.items || [];
-                        const displayItems = orderTodosForDisplay(items);
+                        const displayItems = orderTodosForDisplay(items).filter(
+                          (item) =>
+                            taskMatchesStatus(item, 'open') &&
+                            taskMatchesDueWindow(item, 'next7'),
+                        );
                         if (!items.length && !catTodo.closed) return null;
                         return (
                           <div className="pt-2 border-t border-slate-100">
@@ -3922,7 +4007,11 @@ const AdminDashboard = ({
                           items: [],
                         };
                         const items = catTodo.items || [];
-                        const displayItems = orderTodosForDisplay(items);
+                        const displayItems = orderTodosForDisplay(items).filter(
+                          (item) =>
+                            taskMatchesStatus(item, clientTaskStatusFilter) &&
+                            taskMatchesDueWindow(item, clientTaskDueFilter),
+                        );
                         const allDone =
                           items.length > 0 && items.every((i) => i.done);
 
@@ -3952,10 +4041,15 @@ const AdminDashboard = ({
                                 </span>
                               )}
                             </div>
-                            {!catTodo.closed && items.length > 0 && (
+                            {!catTodo.closed && items.length > 0 && clientTodoFiltersAllowReorder && (
                               <p className="text-[10px] text-slate-400 mb-2">
                                 Drag the grip to reorder. Pin keeps tasks at the top of the
                                 list.
+                              </p>
+                            )}
+                            {!catTodo.closed && items.length > 0 && !clientTodoFiltersAllowReorder && (
+                              <p className="text-[10px] text-amber-800/90 mb-2">
+                                Switch filters to Open + Next 7 days to drag-reorder.
                               </p>
                             )}
 
@@ -3996,14 +4090,14 @@ const AdminDashboard = ({
                                         key={item.id}
                                         className={`flex items-center gap-2 rounded-lg p-2 ${urgency.rowClass}`}
                                         onDragOver={(e) => {
-                                          if (todoSaving || isCycleLocked(c, cycleStart))
+                                          if (todoSaving || isCycleLocked(c, cycleStart) || !clientTodoFiltersAllowReorder)
                                             return;
                                           e.preventDefault();
                                           e.dataTransfer.dropEffect = 'move';
                                         }}
                                         onDrop={(e) => {
                                           e.preventDefault();
-                                          if (todoSaving || isCycleLocked(c, cycleStart))
+                                          if (todoSaving || isCycleLocked(c, cycleStart) || !clientTodoFiltersAllowReorder)
                                             return;
                                           const draggedId =
                                             e.dataTransfer.getData('text/plain');
@@ -4032,7 +4126,8 @@ const AdminDashboard = ({
                                       >
                                         <span
                                           draggable={
-                                            !(todoSaving || isCycleLocked(c, cycleStart))
+                                            !(todoSaving || isCycleLocked(c, cycleStart)) &&
+                                            clientTodoFiltersAllowReorder
                                           }
                                           onDragStart={(e) => {
                                             e.dataTransfer.setData('text/plain', item.id);
@@ -4169,6 +4264,31 @@ const AdminDashboard = ({
                                         >
                                           Options
                                         </button>
+                                        {!item.done && (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const row = {
+                                                categoryKey: catKey,
+                                                categoryLabel: generalLabel,
+                                                item,
+                                              };
+                                              const target = buildKioskBillingTargetFromTodoRow(
+                                                row,
+                                                c,
+                                                projects,
+                                                todoCategoryKey,
+                                                generalLabel,
+                                              );
+                                              navigateToKioskWithTask(c.name, target);
+                                            }}
+                                            className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl bg-[#fd7414] text-white text-[10px] font-black uppercase tracking-widest hover:bg-[#e66a12] shrink-0"
+                                            title="Start timer on kiosk"
+                                          >
+                                            <Play className="w-3.5 h-3.5" aria-hidden />
+                                            Start
+                                          </button>
+                                        )}
                                       </li>
                                     )})}
                                   </ul>
@@ -4877,7 +4997,11 @@ const AdminDashboard = ({
                                                 ] || { closed: false, items: [] };
                                                 const items = catTodo.items || [];
                                                 const displayItems =
-                                                  orderTodosForDisplay(items);
+                                                  orderTodosForDisplay(items).filter(
+                                                    (item) =>
+                                                      taskMatchesStatus(item, 'open') &&
+                                                      taskMatchesDueWindow(item, 'next7'),
+                                                  );
                                                 if (!items.length && !catTodo.closed)
                                                   return null;
                                                 return (
@@ -4995,7 +5119,11 @@ const AdminDashboard = ({
                                               const todoState = getTodoStateForCycle(c, cycleStart);
                                               const catTodo = todoState[catKey] || { closed: false, items: [] };
                                               const items = catTodo.items || [];
-                                              const displayItems = orderTodosForDisplay(items);
+                                              const displayItems = orderTodosForDisplay(items).filter(
+                                                (item) =>
+                                                  taskMatchesStatus(item, clientTaskStatusFilter) &&
+                                                  taskMatchesDueWindow(item, clientTaskDueFilter),
+                                              );
                                               const allDone = items.length > 0 && items.every((i) => i.done);
                                               return (
                                                 <div style={{ order: 10 }}>
@@ -5007,9 +5135,14 @@ const AdminDashboard = ({
                                                       </span>
                                                     )}
                                                   </h6>
-                                                  {!catTodo.closed && items.length > 0 && (
+                                                  {!catTodo.closed && items.length > 0 && clientTodoFiltersAllowReorder && (
                                                     <p className="text-[10px] text-slate-400 mb-2">
                                                       Drag the grip to reorder. Pin keeps tasks at the top.
+                                                    </p>
+                                                  )}
+                                                  {!catTodo.closed && items.length > 0 && !clientTodoFiltersAllowReorder && (
+                                                    <p className="text-[10px] text-amber-800/90 mb-2">
+                                                      Switch filters to Open + Next 7 days to drag-reorder.
                                                     </p>
                                                   )}
                                                   {catTodo.closed ? (
@@ -5043,13 +5176,13 @@ const AdminDashboard = ({
                                                               key={item.id}
                                                               className={`flex items-center gap-2 rounded-lg p-2 ${urgency.rowClass}`}
                                                               onDragOver={(e) => {
-                                                                if (todoSaving || isCycleLocked(c, cycleStart)) return;
+                                                                if (todoSaving || isCycleLocked(c, cycleStart) || !clientTodoFiltersAllowReorder) return;
                                                                 e.preventDefault();
                                                                 e.dataTransfer.dropEffect = 'move';
                                                               }}
                                                               onDrop={(e) => {
                                                                 e.preventDefault();
-                                                                if (todoSaving || isCycleLocked(c, cycleStart)) return;
+                                                                if (todoSaving || isCycleLocked(c, cycleStart) || !clientTodoFiltersAllowReorder) return;
                                                                 const draggedId = e.dataTransfer.getData('text/plain');
                                                                 if (!draggedId || draggedId === item.id) return;
                                                                 const disp = orderTodosForDisplay(items);
@@ -5065,7 +5198,7 @@ const AdminDashboard = ({
                                                               }}
                                                             >
                                                               <span
-                                                                draggable={!(todoSaving || isCycleLocked(c, cycleStart))}
+                                                                draggable={!(todoSaving || isCycleLocked(c, cycleStart)) && clientTodoFiltersAllowReorder}
                                                                 onDragStart={(e) => {
                                                                   e.dataTransfer.setData('text/plain', item.id);
                                                                   e.dataTransfer.effectAllowed = 'move';
@@ -5218,6 +5351,31 @@ const AdminDashboard = ({
                                                               >
                                                                 Options
                                                               </button>
+                                                              {!item.done && (
+                                                                <button
+                                                                  type="button"
+                                                                  onClick={() => {
+                                                                    const row = {
+                                                                      categoryKey: catKey,
+                                                                      categoryLabel: cat,
+                                                                      item,
+                                                                    };
+                                                                    const target = buildKioskBillingTargetFromTodoRow(
+                                                                      row,
+                                                                      c,
+                                                                      projects,
+                                                                      todoCategoryKey,
+                                                                      'General / Unclassified',
+                                                                    );
+                                                                    navigateToKioskWithTask(c.name, target);
+                                                                  }}
+                                                                  className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl bg-[#fd7414] text-white text-[10px] font-black uppercase tracking-widest hover:bg-[#e66a12] shrink-0"
+                                                                  title="Start timer on kiosk"
+                                                                >
+                                                                  <Play className="w-3.5 h-3.5" aria-hidden />
+                                                                  Start
+                                                                </button>
+                                                              )}
                                                               <button
                                                                 type="button"
                                                                 onClick={async () => {

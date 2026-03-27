@@ -267,6 +267,9 @@ export default function App() {
   // Employee Form states
   const [selectedClient, setSelectedClient] = useState('');
   const [selectedBillingTarget, setSelectedBillingTarget] = useState('');
+  const [kioskAutostartPending, setKioskAutostartPending] = useState(false);
+  const kioskAutostartSearchProcessedRef = useRef('');
+  const kioskAutostartClockInAttemptedRef = useRef(false);
   const [activeTaskNotes, setActiveTaskNotes] = useState('');
 
   // Client Portal State
@@ -538,8 +541,41 @@ export default function App() {
 
   // Tracking Logic
   const handleClockIn = async () => {
-    await addDoc(collection(db, 'timesheets'), { employeeName: user.displayName || user.email, clockInTime: Date.now(), lastResumeTime: Date.now(), totalSavedDuration: 0, status: 'active', userId: user.uid });
+    await addDoc(collection(db, 'timesheets'), {
+      employeeName: user.displayName || user.email,
+      clockInTime: Date.now(),
+      lastResumeTime: Date.now(),
+      totalSavedDuration: 0,
+      status: 'active',
+      userId: user.uid,
+    });
   };
+
+  const queueKioskTaskStart = useCallback((clientName, billingTarget) => {
+    setSelectedClient(clientName);
+    setSelectedBillingTarget(billingTarget);
+    kioskAutostartClockInAttemptedRef.current = false;
+    setKioskAutostartPending(true);
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    if (!location.pathname.startsWith('/kiosk')) return;
+    const qs = location.search || '';
+    if (!qs.includes('autostart=1')) return;
+    if (qs === kioskAutostartSearchProcessedRef.current) return;
+    const params = new URLSearchParams(qs);
+    if (params.get('autostart') !== '1') return;
+    const c = params.get('client');
+    const t = params.get('target');
+    if (!c || !t) return;
+    kioskAutostartSearchProcessedRef.current = qs;
+    setSelectedClient(decodeURIComponent(c));
+    setSelectedBillingTarget(decodeURIComponent(t));
+    kioskAutostartClockInAttemptedRef.current = false;
+    setKioskAutostartPending(true);
+    navigate('/kiosk', { replace: true });
+  }, [user, location.pathname, location.search, navigate]);
 
   const handleStartTask = async () => {
     if (!selectedClient || !selectedBillingTarget) return;
@@ -561,6 +597,32 @@ export default function App() {
     // Keep selected client/target so kiosk notes (client + selected retainer category) remain visible
     setActiveTaskNotes('');
   };
+
+  useEffect(() => {
+    if (!user || !kioskAutostartPending) return;
+    if (!selectedClient || !selectedBillingTarget) return;
+    if (!activeShift) {
+      if (!kioskAutostartClockInAttemptedRef.current) {
+        kioskAutostartClockInAttemptedRef.current = true;
+        handleClockIn();
+      }
+      return;
+    }
+    kioskAutostartClockInAttemptedRef.current = false;
+    if (activeTask) {
+      setKioskAutostartPending(false);
+      return;
+    }
+    setKioskAutostartPending(false);
+    handleStartTask();
+  }, [
+    user,
+    kioskAutostartPending,
+    selectedClient,
+    selectedBillingTarget,
+    activeShift,
+    activeTask,
+  ]);
 
   const handleStopTask = async () => {
     if (!activeTask) return;
@@ -1623,6 +1685,8 @@ export default function App() {
     getTodoStateForCycle,
     updateClientTodo,
     todoCategoryKey,
+    projects,
+    queueKioskTaskStart,
   };
 
   const adminDashboardBaseProps = {
@@ -1689,6 +1753,10 @@ export default function App() {
     userTodos,
     updateUserTodos,
     updatePolicy,
+    navigateToKioskWithTask: (clientName, billingTarget) =>
+      navigate(
+        `/kiosk?autostart=1&client=${encodeURIComponent(clientName)}&target=${encodeURIComponent(billingTarget)}`,
+      ),
   };
 
   const adminDashboardRouteProps = {
