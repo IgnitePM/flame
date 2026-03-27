@@ -190,7 +190,11 @@ const EmployeeKiosk = ({
   const selectedClientGeneralNote = selectedClientObj?.generalNotes || '';
 
   const SOCIAL_AD_CATEGORY = 'Social Ad Budget';
-  const isDollarCategory = selectedRetainerCategory === SOCIAL_AD_CATEGORY || selectedClientObj?.retainerUnits?.[selectedRetainerCategory] === 'dollar';
+  const categoryIsDollar = (client, categoryName) =>
+    !categoryName
+      ? false
+      : categoryName === SOCIAL_AD_CATEGORY || client?.retainerUnits?.[categoryName] === 'dollar';
+  const isDollarCategory = categoryIsDollar(selectedClientObj, selectedRetainerCategory);
   const isSocialAdCategory = selectedRetainerCategory === SOCIAL_AD_CATEGORY;
 
   const cycleStartMs = cycleStart;
@@ -230,7 +234,7 @@ const EmployeeKiosk = ({
     ? 'Custom Project'
     : activeTask?.projectName || selectedRetainerCategory || GENERAL_LABEL;
   const activeExpenseProjectId = activeTask?.projectId || null;
-  const activeExpenseIsDollarCategory = isDollarCategory(
+  const activeExpenseIsDollarCategory = categoryIsDollar(
     selectedClientObj,
     activeExpenseCategory,
   );
