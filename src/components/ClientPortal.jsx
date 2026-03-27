@@ -22,6 +22,8 @@ const ClientPortal = ({
   getGlobalRetainerStats,
   formatTime,
   getTaskDuration,
+  getTodoStateForCycle,
+  todoCategoryKey,
   setAddonModal,
   setProjectModal,
   updateProject,

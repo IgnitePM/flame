@@ -1,3 +1,5 @@
+/* global process, exports */
+
 const extractFirstJsonObject = (text) => {
   if (typeof text !== 'string') return null;
   const start = text.indexOf('{');

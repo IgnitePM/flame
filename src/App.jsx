@@ -244,6 +244,7 @@ export default function App() {
     date: '',
     currency: 'CAD',
     applyMarkup: true,
+    recurrenceMode: 'none',
   });
   const [manualTaskModal, setManualTaskModal] = useState(false);
   const [manualTaskValues, setManualTaskValues] = useState({ clientName: '', billingTarget: '', date: '', hours: '', minutes: '', notes: '', employeeName: '', parsedExpense: 0 });
@@ -270,6 +271,7 @@ export default function App() {
   const [kioskAutostartPending, setKioskAutostartPending] = useState(false);
   const kioskAutostartSearchProcessedRef = useRef('');
   const kioskAutostartClockInAttemptedRef = useRef(false);
+  const recurringExpenseSyncInProgressRef = useRef(false);
   const [activeTaskNotes, setActiveTaskNotes] = useState('');
 
   // Client Portal State
@@ -290,9 +292,36 @@ export default function App() {
       const next = { ...prev, ...updates };
       try {
         localStorage.setItem('ignite_policy', JSON.stringify(next));
-      } catch {}
+      } catch {
+        // Ignore localStorage failures in restricted environments.
+      }
       return next;
     });
+  };
+
+  const computeNextRecurringExpenseDate = (currentDateMs, recurrence) => {
+    const base = new Date(Number(currentDateMs || 0));
+    if (Number.isNaN(base.getTime()) || !recurrence?.type) return null;
+    const type = String(recurrence.type);
+    if (type === 'monthly_fixed_day') {
+      const day = Number(recurrence.dayOfMonth || 0);
+      if (!day) return null;
+      const y = base.getFullYear();
+      const m = base.getMonth() + 1;
+      const lastDay = new Date(y, m + 1, 0).getDate();
+      const clamped = Math.min(Math.max(day, 1), lastDay);
+      return new Date(y, m, clamped, 12, 0, 0, 0).getTime();
+    }
+    if (type === 'annual_fixed') {
+      const month = Number(recurrence.month);
+      const day = Number(recurrence.day);
+      if (!Number.isFinite(month) || month < 0 || month > 11 || !day) return null;
+      const y = base.getFullYear() + 1;
+      const lastDay = new Date(y, month + 1, 0).getDate();
+      const clamped = Math.min(Math.max(day, 1), lastDay);
+      return new Date(y, month, clamped, 12, 0, 0, 0).getTime();
+    }
+    return null;
   };
 
   useEffect(() => {
@@ -333,6 +362,88 @@ export default function App() {
       unsubUserTodos();
     };
   }, [user]);
+
+  useEffect(() => {
+    if (!user || !Array.isArray(expenses) || expenses.length === 0) return;
+    if (recurringExpenseSyncInProgressRef.current) return;
+    const recurringItems = expenses.filter(
+      (e) => !!e?.recurring && !!e?.recurrence && Number(e?.date || 0) > 0,
+    );
+    if (recurringItems.length === 0) return;
+
+    const run = async () => {
+      recurringExpenseSyncInProgressRef.current = true;
+      try {
+        const now = Date.now();
+        const bySeries = recurringItems.reduce((acc, exp) => {
+          const seriesId = String(exp.recurringId || exp.id || '');
+          if (!seriesId) return acc;
+          if (!acc[seriesId]) acc[seriesId] = [];
+          acc[seriesId].push(exp);
+          return acc;
+        }, {});
+
+        const toCreate = [];
+        Object.values(bySeries).forEach((series) => {
+          const sorted = [...series].sort(
+            (a, b) => Number(a.date || 0) - Number(b.date || 0),
+          );
+          if (sorted.length === 0) return;
+          const latest = sorted[sorted.length - 1];
+          const recurrence = latest.recurrence;
+          const seriesId = String(latest.recurringId || latest.id || '');
+          if (!seriesId || !recurrence) return;
+          const seenDates = new Set(
+            sorted.map((e) => Number(e.date || 0)).filter((n) => Number.isFinite(n)),
+          );
+          let cursor = Number(latest.date || 0);
+          for (let i = 0; i < 24; i++) {
+            const nextDate = computeNextRecurringExpenseDate(cursor, recurrence);
+            if (!nextDate || nextDate > now) break;
+            if (!seenDates.has(nextDate)) {
+              toCreate.push({
+                ...latest,
+                id: undefined,
+                date: nextDate,
+                recurring: true,
+                recurringId: seriesId,
+                recurrence,
+              });
+              seenDates.add(nextDate);
+            }
+            cursor = nextDate;
+          }
+        });
+
+        if (toCreate.length > 0) {
+          await Promise.all(
+            toCreate.map((e) =>
+              addDoc(collection(db, 'expenses'), {
+                clientId: e.clientId || '',
+                clientName: e.clientName || '',
+                category: e.category || '',
+                projectId: e.projectId || null,
+                description: e.description || '',
+                rawAmount: Number(e.rawAmount || 0),
+                finalCost: Number(e.finalCost || 0),
+                equivalentHours: Number(e.equivalentHours || 0),
+                date: Number(e.date || Date.now()),
+                originalCurrency: e.originalCurrency || 'CAD',
+                originalAmount: Number(e.originalAmount || e.rawAmount || 0),
+                recurring: true,
+                recurringId: e.recurringId,
+                recurrence: e.recurrence,
+              }),
+            ),
+          );
+        }
+      } finally {
+        recurringExpenseSyncInProgressRef.current = false;
+      }
+    };
+
+    run();
+  }, [user, expenses]);
 
   // Firestore: only role === 'admin' may read all admins/*; kiosk/billing must read doc(admins, ownEmail).
   useEffect(() => {
@@ -499,7 +610,7 @@ export default function App() {
   // Auth Methods
   const loginWithGoogle = async () => {
     const provider = new GoogleAuthProvider();
-    try { await signInWithPopup(auth, provider); setError(''); } catch (err) { setError("Sign in failed."); }
+    try { await signInWithPopup(auth, provider); setError(''); } catch { setError("Sign in failed."); }
   };
 
   const handleEmailAuth = async (e) => {
@@ -766,6 +877,22 @@ export default function App() {
           return new Date(y, m - 1, d, 12, 0, 0, 0).getTime();
         })()
       : Date.now();
+    const expenseDateObj = new Date(expenseDate);
+    const recurrenceMode = String(expenseValues.recurrenceMode || 'none');
+    const recurrence =
+      recurrenceMode === 'monthly'
+        ? { type: 'monthly_fixed_day', dayOfMonth: expenseDateObj.getDate() }
+        : recurrenceMode === 'annual'
+          ? {
+              type: 'annual_fixed',
+              month: expenseDateObj.getMonth(),
+              day: expenseDateObj.getDate(),
+            }
+          : null;
+    const recurring = !!recurrence;
+    const recurringId = recurring
+      ? `expense_recurring_${Date.now()}_${Math.random().toString(36).slice(2)}`
+      : null;
 
     await addDoc(collection(db, 'expenses'), {
       clientId: expenseModal.id,
@@ -779,6 +906,9 @@ export default function App() {
       date: expenseDate,
       originalCurrency: currency,
       originalAmount: amountInOriginalCurrency,
+      recurring,
+      recurringId,
+      recurrence,
     });
     setExpenseModal(null);
     setExpenseValues({
@@ -788,6 +918,7 @@ export default function App() {
       date: '',
       currency: 'CAD',
       applyMarkup: true,
+      recurrenceMode: 'none',
     });
   };
 
@@ -939,14 +1070,6 @@ export default function App() {
     if (!ms || ms < 0) return "0h 0m";
     const totalMins = Math.floor(ms / 60000);
     return `${Math.floor(totalMins / 60)}h ${totalMins % 60}m`;
-  };
-
-  const getOrdinalSuffix = (i) => {
-    let j = i % 10, k = i % 100;
-    if (j == 1 && k != 11) return i + "st";
-    if (j == 2 && k != 12) return i + "nd";
-    if (j == 3 && k != 13) return i + "rd";
-    return i + "th";
   };
 
   const todoCategoryKey = (cat) =>
@@ -1678,7 +1801,7 @@ export default function App() {
     handleResumeTask,
     handleTakeBreak,
     handleClockOut,
-    getGlobalRetainerStats: (client, start, end, ctx) =>
+    getGlobalRetainerStats: (client, start, end) =>
       getGlobalRetainerStats(client, start, end),
     formatTime,
     onLogSocialAdSpend: logSocialAdSpend,
@@ -1735,7 +1858,7 @@ export default function App() {
     getShiftDuration,
     getTaskDuration,
     formatTime,
-    getGlobalRetainerStats: (client, start, end, ctx) =>
+    getGlobalRetainerStats: (client, start, end) =>
       getGlobalRetainerStats(client, start, end),
     exportCSV,
     exportPDF,
@@ -1782,7 +1905,7 @@ export default function App() {
         projects={projects}
         addons={addons}
         getBillingPeriod={getBillingPeriod}
-        getGlobalRetainerStats={(client, start, end, ctx) =>
+        getGlobalRetainerStats={(client, start, end) =>
           getGlobalRetainerStats(client, start, end)
         }
         formatTime={formatTime}
@@ -2086,6 +2209,23 @@ export default function App() {
                     />
                     <span className="text-sm font-bold text-slate-700">Add 30% markup (HST)</span>
                   </label>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Recurrence</label>
+                    <select
+                      value={expenseValues.recurrenceMode || 'none'}
+                      onChange={e => setExpenseValues({ ...expenseValues, recurrenceMode: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="none">One-time</option>
+                      <option value="monthly">Monthly</option>
+                      <option value="annual">Annually</option>
+                    </select>
+                    {(expenseValues.recurrenceMode || 'none') !== 'none' && (
+                      <p className="text-[10px] font-bold text-slate-500">
+                        Recurring expenses auto-create each period when the app loads.
+                      </p>
+                    )}
+                  </div>
                   {expenseValues.amount && (
                     (() => {
                       const currency = expenseValues.currency || 'CAD';

@@ -33,7 +33,6 @@ import {
   reorderTodosDisplay,
   toggleTodoPinnedById,
 } from '../utils/todoListOrder.js';
-import { normalizeEmailList } from '../utils/teamClientAccess.js';
 import { buildGlobalTodoRows } from '../utils/todoGlobalRows.js';
 import {
   buildKioskBillingTargetFromTodoRow,
@@ -733,7 +732,6 @@ const AdminDashboard = ({
   setAdminTab,
   clientId,
   /** @deprecated Sub-tab is read from ?tab= via useSearchParams when clientId is set (avoids blank UI if prop/URL drift). */
-  clientPageTab = null,
   setClientPageTab = () => {},
   /** Billing cycle start (ms) from ?cycle= on client detail URL */
   clientUrlCycle = null,
@@ -754,8 +752,6 @@ const AdminDashboard = ({
   adminUsers,
   policy,
   updatePolicy,
-  newClientName,
-  setNewClientName,
   newTaskType,
   setNewTaskType,
   newAdminEmail,
@@ -771,8 +767,6 @@ const AdminDashboard = ({
   expandedShifts,
   toggleShiftAccordion,
   expandedClients,
-  toggleClientAccordion,
-  manualTaskValues,
   setManualTaskValues,
   setManualTaskModal,
   setExpenseModal,
@@ -925,6 +919,7 @@ const AdminDashboard = ({
     estimatedHours: '',
   });
   const [projectEditError, setProjectEditError] = useState('');
+  const [legacyProjectsEnabled] = useState(false);
 
   const exportClientCyclePDF = ({
     client,
@@ -1335,7 +1330,7 @@ const AdminDashboard = ({
           r
             .map((cell) =>
               `"${String(cell ?? '')
-                .replace(/\"/g, '\"\"')
+                .replace(/"/g, '""')
                 .trim()}"`,
             )
             .join(','),
@@ -2820,7 +2815,7 @@ const AdminDashboard = ({
               const period = getBillingPeriod(c.billingDay || 1, effectiveOffset);
               const mStart = period.start;
               const mEnd = period.end;
-              const isExpanded = isClientPage ? true : expandedClients[c.id];
+              const _isExpanded = isClientPage ? true : expandedClients[c.id];
 
               const periodTasks = taskLogs.filter(
                 (t) =>
@@ -5711,7 +5706,7 @@ const AdminDashboard = ({
                   )}
                   </div>
 
-                  {false && (
+                  {legacyProjectsEnabled && (
                   <>
                     <button
                       type="button"
