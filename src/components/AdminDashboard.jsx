@@ -156,6 +156,92 @@ function ClientCustomProjectsPanelInner({
   const [projectTodoDraft, setProjectTodoDraft] = useState({});
   const [projectTodoAssigneeDraft, setProjectTodoAssigneeDraft] = useState({});
   const [projectTodoSaving, setProjectTodoSaving] = useState(false);
+  const [projectAssigneePickerOpenKey, setProjectAssigneePickerOpenKey] =
+    useState(null);
+
+  const renderAssigneeMultiSelect = ({ openKey, value, onChange, disabled }) => {
+    const cleaned = Array.isArray(value)
+      ? value
+          .map((e) => String(e || '').trim().toLowerCase())
+          .filter(Boolean)
+      : [];
+    const summary =
+      cleaned.length === 0
+        ? 'Unassigned'
+        : cleaned.length === 1
+          ? cleaned[0]
+          : `${cleaned.length} assignees`;
+    const isOpen = projectAssigneePickerOpenKey === openKey;
+    return (
+      <div className="relative">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() =>
+            setProjectAssigneePickerOpenKey((prev) =>
+              prev === openKey ? null : openKey,
+            )
+          }
+          className="min-w-[160px] max-w-[240px] bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-black text-slate-700 outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px] flex items-center justify-between gap-2 disabled:opacity-40"
+          title="Assign to users"
+        >
+          <span className="truncate">{summary}</span>
+          <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+        </button>
+        {isOpen && (
+          <div className="absolute right-0 mt-2 w-[320px] max-w-[min(92vw,320px)] bg-white border border-slate-200 rounded-2xl shadow-xl p-3 z-[120]">
+            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+              Assign to
+            </div>
+            <div className="max-h-[240px] overflow-y-auto space-y-1 pr-1">
+              {(assignableEmails || []).map((email) => {
+                const checked = cleaned.includes(email);
+                return (
+                  <label
+                    key={email}
+                    className="flex items-center gap-2 px-2 py-2 rounded-xl hover:bg-slate-50 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => {
+                        const next = checked
+                          ? cleaned.filter((e) => e !== email)
+                          : Array.from(new Set([...cleaned, email]));
+                        const sorted = [...next].sort((a, b) =>
+                          String(a).localeCompare(String(b)),
+                        );
+                        onChange(sorted);
+                      }}
+                    />
+                    <span className="text-xs font-bold text-slate-700 truncate">
+                      {email}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="px-3 py-2 rounded-xl text-xs font-black text-slate-600 bg-slate-100 hover:bg-slate-200 uppercase tracking-widest"
+                onClick={() => onChange([])}
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                className="px-3 py-2 rounded-xl text-xs font-black text-white bg-[#fd7414] hover:brightness-95 uppercase tracking-widest"
+                onClick={() => setProjectAssigneePickerOpenKey(null)}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
   const todoStateForCycle =
     getTodoStateForCycle && c && mStart ? getTodoStateForCycle(c, mStart) : {};
   if (!c?.id) {
@@ -426,8 +512,23 @@ function ClientCustomProjectsPanelInner({
                                           )
                                             .trim()
                                             .toLowerCase();
-                                          const chosenAssignee =
-                                            projectTodoAssigneeDraft?.[p.id] || me;
+                                          const chosenAssigneesRaw =
+                                            projectTodoAssigneeDraft?.[p.id];
+                                          const chosenAssignees = Array.isArray(
+                                            chosenAssigneesRaw,
+                                          )
+                                            ? chosenAssigneesRaw
+                                            : String(chosenAssigneesRaw || '')
+                                                .trim()
+                                                .toLowerCase()
+                                              ? [
+                                                  String(chosenAssigneesRaw || '')
+                                                    .trim()
+                                                    .toLowerCase(),
+                                                ]
+                                              : me
+                                                ? [me]
+                                                : [];
                                           const nid = `todo_${Date.now()}_${Math.random()
                                             .toString(36)
                                             .slice(2)}`;
@@ -440,9 +541,7 @@ function ClientCustomProjectsPanelInner({
                                             recurring: false,
                                             recurringId: null,
                                             dueDate: null,
-                                            assigneeEmails: chosenAssignee
-                                              ? [chosenAssignee]
-                                              : [],
+                                          assigneeEmails: chosenAssignees,
                                           };
                                           await updateClientTodo(c, mStart, catKey, {
                                             ...prev,
@@ -455,7 +554,7 @@ function ClientCustomProjectsPanelInner({
                                           }));
                                           setProjectTodoAssigneeDraft((prevAss) => ({
                                             ...prevAss,
-                                            [p.id]: me,
+                                            [p.id]: me ? [me] : [],
                                           }));
                                         } finally {
                                           setProjectTodoSaving(false);
@@ -464,28 +563,24 @@ function ClientCustomProjectsPanelInner({
                                     }}
                                   />
                                   <div className="flex flex-wrap items-center gap-2">
-                                    <select
-                                      value={
-                                        projectTodoAssigneeDraft?.[p.id] ||
-                                        (user?.email
+                                    {renderAssigneeMultiSelect({
+                                      openKey: `proj_todo_add__${c.id}__${mStart}__${p.id}`,
+                                      value: (() => {
+                                        const raw = projectTodoAssigneeDraft?.[p.id];
+                                        if (Array.isArray(raw)) return raw;
+                                        const one = String(raw || '').trim().toLowerCase();
+                                        const me = user?.email
                                           ? String(user.email).trim().toLowerCase()
-                                          : '')
-                                      }
-                                      onChange={(e) =>
+                                          : '';
+                                        return one ? [one] : me ? [me] : [];
+                                      })(),
+                                      disabled: projectTodoSaving,
+                                      onChange: (nextAssignees) =>
                                         setProjectTodoAssigneeDraft((prev) => ({
                                           ...prev,
-                                          [p.id]: e.target.value,
-                                        }))
-                                      }
-                                      className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px]"
-                                      title="Assign to user"
-                                    >
-                                      {(assignableEmails || []).map((email) => (
-                                        <option key={email} value={email}>
-                                          {email}
-                                        </option>
-                                      ))}
-                                    </select>
+                                          [p.id]: nextAssignees,
+                                        })),
+                                    })}
                                     <button
                                       type="button"
                                       disabled={projectTodoSaving || !String(projectTodoDraft?.[p.id] || '').trim()}
@@ -506,8 +601,23 @@ function ClientCustomProjectsPanelInner({
                                             const me = String(user?.email || '')
                                               .trim()
                                               .toLowerCase();
-                                            const chosenAssignee =
-                                              projectTodoAssigneeDraft?.[p.id] || me;
+                                            const chosenAssigneesRaw =
+                                              projectTodoAssigneeDraft?.[p.id];
+                                            const chosenAssignees = Array.isArray(
+                                              chosenAssigneesRaw,
+                                            )
+                                              ? chosenAssigneesRaw
+                                              : String(chosenAssigneesRaw || '')
+                                                  .trim()
+                                                  .toLowerCase()
+                                                ? [
+                                                    String(chosenAssigneesRaw || '')
+                                                      .trim()
+                                                      .toLowerCase(),
+                                                  ]
+                                                : me
+                                                  ? [me]
+                                                  : [];
                                             const nid = `todo_${Date.now()}_${Math.random()
                                               .toString(36)
                                               .slice(2)}`;
@@ -520,9 +630,7 @@ function ClientCustomProjectsPanelInner({
                                               recurring: false,
                                               recurringId: null,
                                               dueDate: null,
-                                              assigneeEmails: chosenAssignee
-                                                ? [chosenAssignee]
-                                                : [],
+                                            assigneeEmails: chosenAssignees,
                                             };
                                             await updateClientTodo(c, mStart, catKey, {
                                               ...prev,
@@ -533,10 +641,10 @@ function ClientCustomProjectsPanelInner({
                                               ...prevDraft,
                                               [p.id]: '',
                                             }));
-                                            setProjectTodoAssigneeDraft((prevAss) => ({
-                                              ...prevAss,
-                                              [p.id]: me,
-                                            }));
+                                          setProjectTodoAssigneeDraft((prevAss) => ({
+                                            ...prevAss,
+                                            [p.id]: me ? [me] : [],
+                                          }));
                                           } finally {
                                             setProjectTodoSaving(false);
                                           }
@@ -887,6 +995,7 @@ const AdminDashboard = ({
   const [todoEditOptionsTarget, setTodoEditOptionsTarget] = useState(null);
   const [todoEditOptionsDue, setTodoEditOptionsDue] = useState('');
   const [todoEditOptionsRecurrence, setTodoEditOptionsRecurrence] = useState('none');
+  const [assigneePickerOpenKey, setAssigneePickerOpenKey] = useState(null);
   const [taskClientFilter, setTaskClientFilter] = useState('all');
   const [taskCategoryFilter, setTaskCategoryFilter] = useState('all');
   const [taskAssigneeFilter, setTaskAssigneeFilter] = useState('me');
@@ -1672,6 +1781,94 @@ const AdminDashboard = ({
     if (one) return [one];
     const me = String(user?.email || '').trim().toLowerCase();
     return me ? [me] : [];
+  };
+
+  const renderAssigneeMultiSelect = ({
+    openKey,
+    value,
+    onChange,
+    disabled,
+    className = '',
+  }) => {
+    const cleaned = Array.isArray(value)
+      ? value
+          .map((e) => String(e || '').trim().toLowerCase())
+          .filter(Boolean)
+      : [];
+    const summary =
+      cleaned.length === 0
+        ? 'Unassigned'
+        : cleaned.length === 1
+          ? cleaned[0]
+          : `${cleaned.length} assignees`;
+    const isOpen = assigneePickerOpenKey === openKey;
+    return (
+      <div className={`relative ${className}`}>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() =>
+            setAssigneePickerOpenKey((prev) => (prev === openKey ? null : openKey))
+          }
+          className="min-w-[160px] max-w-[240px] bg-white/90 border border-slate-200 rounded-xl px-3 py-2 text-xs font-black text-slate-700 outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px] flex items-center justify-between gap-2 disabled:opacity-40"
+          title="Assign to users"
+        >
+          <span className="truncate">{summary}</span>
+          <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+        </button>
+        {isOpen && (
+          <div className="absolute right-0 mt-2 w-[320px] max-w-[min(92vw,320px)] bg-white border border-slate-200 rounded-2xl shadow-xl p-3 z-[120]">
+            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+              Assign to
+            </div>
+            <div className="max-h-[240px] overflow-y-auto space-y-1 pr-1">
+              {assignableEmails.map((email) => {
+                const checked = cleaned.includes(email);
+                return (
+                  <label
+                    key={email}
+                    className="flex items-center gap-2 px-2 py-2 rounded-xl hover:bg-slate-50 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => {
+                        const next = checked
+                          ? cleaned.filter((e) => e !== email)
+                          : Array.from(new Set([...cleaned, email]));
+                        const sorted = [...next].sort((a, b) =>
+                          String(a).localeCompare(String(b)),
+                        );
+                        onChange(sorted);
+                      }}
+                    />
+                    <span className="text-xs font-bold text-slate-700 truncate">
+                      {email}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="px-3 py-2 rounded-xl text-xs font-black text-slate-600 bg-slate-100 hover:bg-slate-200 uppercase tracking-widest"
+                onClick={() => onChange([])}
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                className="px-3 py-2 rounded-xl text-xs font-black text-white bg-[#fd7414] hover:brightness-95 uppercase tracking-widest"
+                onClick={() => setAssigneePickerOpenKey(null)}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
   };
 
   const getTodoUrgencyStyles = (item) => {
@@ -4214,19 +4411,17 @@ const AdminDashboard = ({
                                             </span>
                                           )}
                                         </span>
-                                        <select
-                                          value={
-                                            assignees[0] ||
-                                            String(user?.email || '').toLowerCase()
-                                          }
-                                          onChange={async (e) => {
+                                        {renderAssigneeMultiSelect({
+                                          openKey: `todo_item__${c.id}__${cycleStart}__${catKey}__${item.id}`,
+                                          value: assignees,
+                                          disabled: todoSaving || isCycleLocked(c, cycleStart),
+                                          onChange: async (nextAssignees) => {
                                             if (isCycleLocked(c, cycleStart)) return;
-                                            const v = e.target.value;
                                             setTodoSaving(true);
                                             try {
                                               const next = items.map((i) =>
                                                 i.id === item.id
-                                                  ? { ...i, assigneeEmails: v ? [v] : [] }
+                                                  ? { ...i, assigneeEmails: nextAssignees }
                                                   : i,
                                               );
                                               await updateClientTodo(c, cycleStart, catKey, {
@@ -4236,17 +4431,8 @@ const AdminDashboard = ({
                                             } finally {
                                               setTodoSaving(false);
                                             }
-                                          }}
-                                          disabled={todoSaving}
-                                          className="min-w-[140px] max-w-[220px] bg-white/90 border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px]"
-                                          title="Assign to user"
-                                        >
-                                          {assignableEmails.map((email) => (
-                                            <option key={email} value={email}>
-                                              {email}
-                                            </option>
-                                          ))}
-                                        </select>
+                                          },
+                                        })}
                                         <button
                                           type="button"
                                           disabled={todoSaving}
@@ -4344,28 +4530,16 @@ const AdminDashboard = ({
                                       })();
                                     }}
                                   />
-                                  <select
-                                    value={
-                                      (Array.isArray(todoAddAssigneesDraft[catKey])
-                                        ? todoAddAssigneesDraft[catKey][0]
-                                        : todoAddAssigneesDraft[catKey]) ||
-                                      String(user?.email || '').toLowerCase()
-                                    }
-                                    onChange={(e) =>
+                                  {renderAssigneeMultiSelect({
+                                    openKey: `todo_add__${c.id}__${cycleStart}__${catKey}`,
+                                    value: getDraftAssigneeEmails(catKey),
+                                    disabled: todoSaving || isCycleLocked(c, cycleStart),
+                                    onChange: (nextAssignees) =>
                                       setTodoAddAssigneesDraft((prev) => ({
                                         ...prev,
-                                        [catKey]: e.target.value,
-                                      }))
-                                    }
-                                    className="min-w-[140px] max-w-[220px] bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px]"
-                                    title="Assign to user"
-                                  >
-                                    {assignableEmails.map((email) => (
-                                      <option key={email} value={email}>
-                                        {email}
-                                      </option>
-                                    ))}
-                                  </select>
+                                        [catKey]: nextAssignees,
+                                      })),
+                                  })}
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -5301,19 +5475,17 @@ const AdminDashboard = ({
                                                                   </span>
                                                                 </span>
                                                               )}
-                                                              <select
-                                                                value={
-                                                                  assignees[0] ||
-                                                                  String(user?.email || '').toLowerCase()
-                                                                }
-                                                                onChange={async (e) => {
+                                                              {renderAssigneeMultiSelect({
+                                                                openKey: `todo_item__${c.id}__${cycleStart}__${catKey}__${item.id}`,
+                                                                value: assignees,
+                                                                disabled: todoSaving || isCycleLocked(c, cycleStart),
+                                                                onChange: async (nextAssignees) => {
                                                                   if (isCycleLocked(c, cycleStart)) return;
-                                                                  const v = e.target.value;
                                                                   setTodoSaving(true);
                                                                   try {
                                                                     const next = items.map((i) =>
                                                                       i.id === item.id
-                                                                        ? { ...i, assigneeEmails: v ? [v] : [] }
+                                                                        ? { ...i, assigneeEmails: nextAssignees }
                                                                         : i
                                                                     );
                                                                     await updateClientTodo(c, cycleStart, catKey, {
@@ -5323,17 +5495,8 @@ const AdminDashboard = ({
                                                                   } finally {
                                                                     setTodoSaving(false);
                                                                   }
-                                                                }}
-                                                                disabled={todoSaving}
-                                                                className="min-w-[140px] max-w-[220px] bg-white/90 border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px]"
-                                                                title="Assign to user"
-                                                              >
-                                                                {assignableEmails.map((email) => (
-                                                                  <option key={email} value={email}>
-                                                                    {email}
-                                                                  </option>
-                                                                ))}
-                                                              </select>
+                                                                },
+                                                              })}
                                                               <button
                                                                 type="button"
                                                                 disabled={todoSaving}
@@ -5445,27 +5608,16 @@ const AdminDashboard = ({
                                                               })();
                                                             }}
                                                           />
-                                                          <select
-                                                            value={
-                                                              (Array.isArray(todoAddAssigneesDraft[catKey])
-                                                                ? todoAddAssigneesDraft[catKey][0]
-                                                                : todoAddAssigneesDraft[catKey]) ||
-                                                              String(user?.email || '').toLowerCase()
-                                                            }
-                                                            onChange={(e) =>
+                                                          {renderAssigneeMultiSelect({
+                                                            openKey: `todo_add__${c.id}__${cycleStart}__${catKey}`,
+                                                            value: getDraftAssigneeEmails(catKey),
+                                                            disabled: todoSaving || isCycleLocked(c, cycleStart),
+                                                            onChange: (nextAssignees) =>
                                                               setTodoAddAssigneesDraft((prev) => ({
                                                                 ...prev,
-                                                                [catKey]: e.target.value,
-                                                              }))
-                                                            }
-                                                            className="min-w-[140px] max-w-[220px] bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px]"
-                                                          >
-                                                            {assignableEmails.map((email) => (
-                                                              <option key={email} value={email}>
-                                                                {email}
-                                                              </option>
-                                                            ))}
-                                                          </select>
+                                                                [catKey]: nextAssignees,
+                                                              })),
+                                                          })}
                                                           <button
                                                             type="button"
                                                             onClick={() => {
