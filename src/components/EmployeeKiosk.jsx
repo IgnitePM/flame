@@ -51,6 +51,7 @@ const EmployeeKiosk = ({
   getGlobalRetainerStats,
   formatTime,
   onLogSocialAdSpend,
+  onLogClientExpense,
   getTodoStateForCycle,
   updateClientTodo,
   todoCategoryKey,
@@ -70,6 +71,11 @@ const EmployeeKiosk = ({
   const [kioskTaskDueFilter, setKioskTaskDueFilter] = React.useState('next7');
   const [todoRecurrenceMode, setTodoRecurrenceMode] = React.useState('none');
   const [todoOptionsOpen, setTodoOptionsOpen] = React.useState(false);
+  const [kioskExpenseAmount, setKioskExpenseAmount] = React.useState('');
+  const [kioskExpenseDescription, setKioskExpenseDescription] = React.useState('');
+  const [kioskExpenseCurrency, setKioskExpenseCurrency] = React.useState('CAD');
+  const [kioskExpenseApplyMarkup, setKioskExpenseApplyMarkup] = React.useState(true);
+  const [kioskExpenseSubmitting, setKioskExpenseSubmitting] = React.useState(false);
 
   const safeCategoryKey = (category) =>
     String(category)
@@ -95,10 +101,20 @@ const EmployeeKiosk = ({
     if (!due) return 'bg-white border border-slate-100 text-slate-800';
     const now = Date.now();
     const fiveDays = 5 * 24 * 60 * 60 * 1000;
-    if (due < now) return 'bg-red-600 border border-red-700 text-white';
+    if (due < now) return 'bg-red-700 border border-red-900 text-white';
     if (due - now <= fiveDays)
-      return 'bg-emerald-600 border border-emerald-700 text-white';
+      return 'bg-emerald-700 border border-emerald-900 text-white';
     return 'bg-white border border-slate-100 text-slate-800';
+  };
+
+  const getUrgencyTone = (item) => {
+    const due = Number(item?.dueDate || 0);
+    if (!due) return 'normal';
+    const now = Date.now();
+    const fiveDays = 5 * 24 * 60 * 60 * 1000;
+    if (due < now) return 'overdue';
+    if (due - now <= fiveDays) return 'soon';
+    return 'normal';
   };
 
   const getDraftRecurrence = (dueDateMs) => {
@@ -210,6 +226,14 @@ const EmployeeKiosk = ({
   const categoryAllotted =
     (selectedClientObj?.retainers &&
       selectedClientObj.retainers[selectedRetainerCategory]) || 0;
+  const activeExpenseCategory = activeTask?.projectId
+    ? 'Custom Project'
+    : activeTask?.projectName || selectedRetainerCategory || GENERAL_LABEL;
+  const activeExpenseProjectId = activeTask?.projectId || null;
+  const activeExpenseIsDollarCategory = isDollarCategory(
+    selectedClientObj,
+    activeExpenseCategory,
+  );
 
   React.useEffect(() => {
     if (!policy?.idleReminderMinutes || !activeTask) return;
@@ -866,41 +890,76 @@ const EmployeeKiosk = ({
                       <div className="text-6xl font-black text-slate-900 text-center mb-8 font-mono tracking-tighter">
                         {formatTime(liveTaskDuration)}
                       </div>
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
-                          Progress Notes
-                        </label>
-                        <textarea
-                          value={activeTaskNotes}
-                          onChange={(e) => setActiveTaskNotes(e.target.value)}
-                          placeholder="Briefly describe what you've accomplished..."
-                          className="w-full p-5 border-orange-200 border rounded-2xl bg-white/70 focus:ring-2 focus:ring-[#fd7414] outline-none text-sm min-h-[120px] font-medium"
-                        />
-                      </div>
-
-                      {selectedClientObj && selectedRetainerCategory && (
+                      {/* Retainer progress (show first while actively working) */}
+                      {retainerStats && selectedRetainerCategory && (
                         <div className="mt-5 bg-white border border-slate-200 rounded-[24px] p-4">
-                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
-                            Notes for {selectedClientObj.name} • {selectedRetainerCategory}
+                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
+                            Retainer Progress
                           </div>
-                          <div className="space-y-3">
-                            <div>
-                              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
-                                Client Notes
-                              </div>
-                              <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
-                                {selectedClientGeneralNote || 'No client notes yet.'}
-                              </div>
-                            </div>
-                            <div>
-                              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
-                                {selectedRetainerCategory} Note
-                              </div>
-                              <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
-                                {selectedRetainerNote || 'No category note yet.'}
-                              </div>
-                            </div>
+
+                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                            Category: {selectedRetainerCategory}
                           </div>
+                          <div className="text-xs font-black text-slate-700 mb-2">
+                            {isDollarCategory
+                              ? `$${Number(categoryUsedWithActiveNormalized || 0).toFixed(2)} used / $${Number(categoryAllotted || 0).toFixed(2)} available`
+                              : `${Number(categoryUsedWithActiveNormalized || 0).toFixed(2)}h used / ${Number(categoryAllotted || 0).toFixed(2)}h available`}
+                          </div>
+                          <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-3">
+                            <div
+                              className={`h-3 rounded-full transition-all duration-500 ${
+                                categoryUsedWithActive > Number(categoryAllotted || 0)
+                                  ? 'bg-red-500'
+                                  : 'bg-emerald-500'
+                              }`}
+                              style={{
+                                width: `${Math.min(
+                                  100,
+                                  ((categoryUsedWithActive || 0) /
+                                    ((Number(categoryAllotted || 0) || 1))) *
+                                    100,
+                                )}%`,
+                              }}
+                            />
+                          </div>
+
+                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                            Combined Pool
+                          </div>
+                          <div className="text-xs font-black text-slate-700 mb-2">
+                            {combinedUsedWithActive.toFixed(2)}h used /{' '}
+                            {retainerStats.adjustedAllotted.toFixed(2)}h available
+                          </div>
+                          <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-2">
+                            <div
+                              className={`h-3 rounded-full transition-all duration-500 ${
+                                combinedUsedWithActive > retainerStats.adjustedAllotted
+                                  ? 'bg-red-500'
+                                  : 'bg-emerald-500'
+                              }`}
+                              style={{
+                                width: `${Math.min(
+                                  100,
+                                  retainerStats.adjustedAllotted > 0
+                                    ? (combinedUsedWithActive / retainerStats.adjustedAllotted) * 100
+                                    : 0,
+                                )}%`,
+                              }}
+                            />
+                          </div>
+
+                          {cycleEndMs && (
+                            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-3">
+                              Days left:{' '}
+                              {Math.max(
+                                0,
+                                Math.ceil(
+                                  (cycleEndMs - Date.now()) / 86400000,
+                                ),
+                              )}{' '}
+                              days
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -1119,79 +1178,129 @@ const EmployeeKiosk = ({
                         })()
                       )}
 
-                      {/* Retainer progress (category + combined) for current cycle (show while actively working) */}
-                      {retainerStats && selectedRetainerCategory && (
+                      {selectedClientObj && selectedRetainerCategory && (
                         <div className="mt-5 bg-white border border-slate-200 rounded-[24px] p-4">
-                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
-                            Retainer Progress
+                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                            Notes for {selectedClientObj.name} • {selectedRetainerCategory}
                           </div>
-
-                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
-                            Category: {selectedRetainerCategory}
-                          </div>
-                          <div className="text-xs font-black text-slate-700 mb-2">
-                            {isDollarCategory
-                              ? `$${Number(categoryUsedWithActiveNormalized || 0).toFixed(2)} used / $${Number(categoryAllotted || 0).toFixed(2)} available`
-                              : `${Number(categoryUsedWithActiveNormalized || 0).toFixed(2)}h used / ${Number(categoryAllotted || 0).toFixed(2)}h available`}
-                          </div>
-                          <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-3">
-                            <div
-                              className={`h-3 rounded-full transition-all duration-500 ${
-                                categoryUsedWithActive > Number(categoryAllotted || 0)
-                                  ? 'bg-red-500'
-                                  : 'bg-emerald-500'
-                              }`}
-                              style={{
-                                width: `${Math.min(
-                                  100,
-                                  ((categoryUsedWithActive || 0) /
-                                    ((Number(categoryAllotted || 0) || 1))) *
-                                    100,
-                                )}%`,
-                              }}
-                            />
-                          </div>
-
-                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
-                            Combined Pool
-                          </div>
-                          <div className="text-xs font-black text-slate-700 mb-2">
-                            {combinedUsedWithActive.toFixed(2)}h used /{' '}
-                            {retainerStats.adjustedAllotted.toFixed(2)}h available
-                          </div>
-                          <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-2">
-                            <div
-                              className={`h-3 rounded-full transition-all duration-500 ${
-                                combinedUsedWithActive > retainerStats.adjustedAllotted
-                                  ? 'bg-red-500'
-                                  : 'bg-emerald-500'
-                              }`}
-                              style={{
-                                width: `${Math.min(
-                                  100,
-                                  retainerStats.adjustedAllotted > 0
-                                    ? (combinedUsedWithActive / retainerStats.adjustedAllotted) * 100
-                                    : 0,
-                                )}%`,
-                              }}
-                            />
-                          </div>
-
-                          {/* Days left */}
-                          {cycleEndMs && (
-                            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-3">
-                              Days left:{' '}
-                              {Math.max(
-                                0,
-                                Math.ceil(
-                                  (cycleEndMs - Date.now()) / 86400000,
-                                ),
-                              )}{' '}
-                              days
+                          <div className="space-y-3">
+                            <div>
+                              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                                Client Notes
+                              </div>
+                              <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                                {selectedClientGeneralNote || 'No client notes yet.'}
+                              </div>
                             </div>
-                          )}
+                            <div>
+                              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                                {selectedRetainerCategory} Note
+                              </div>
+                              <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                                {selectedRetainerNote || 'No category note yet.'}
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       )}
+
+                      {selectedClientObj && onLogClientExpense && (
+                        <div className="mt-5 bg-white border border-slate-200 rounded-[24px] p-4">
+                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                            Log Client Expense
+                          </div>
+                          <div className="space-y-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px] gap-2">
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={kioskExpenseAmount}
+                                onChange={(e) => setKioskExpenseAmount(e.target.value)}
+                                placeholder="Amount"
+                                className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                              />
+                              <select
+                                value={kioskExpenseCurrency}
+                                onChange={(e) => setKioskExpenseCurrency(e.target.value)}
+                                className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                              >
+                                <option value="CAD">CAD</option>
+                                <option value="USD">USD</option>
+                                <option value="EUR">EUR</option>
+                                <option value="GBP">GBP</option>
+                              </select>
+                            </div>
+                            <textarea
+                              value={kioskExpenseDescription}
+                              onChange={(e) => setKioskExpenseDescription(e.target.value)}
+                              placeholder="Expense description"
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[72px]"
+                            />
+                            <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600">
+                              <input
+                                type="checkbox"
+                                checked={kioskExpenseApplyMarkup}
+                                onChange={(e) => setKioskExpenseApplyMarkup(e.target.checked)}
+                                disabled={activeExpenseIsDollarCategory}
+                              />
+                              Add 30% markup (HST)
+                              {activeExpenseIsDollarCategory && (
+                                <span className="text-slate-400">(disabled for dollar category)</span>
+                              )}
+                            </label>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const amt = Number(kioskExpenseAmount);
+                                if (!Number.isFinite(amt) || amt <= 0) {
+                                  window.alert('Enter a valid expense amount.');
+                                  return;
+                                }
+                                setKioskExpenseSubmitting(true);
+                                try {
+                                  await onLogClientExpense({
+                                    clientId: selectedClientObj.id,
+                                    clientName: selectedClientObj.name,
+                                    category: activeExpenseCategory,
+                                    projectId: activeExpenseProjectId,
+                                    amount: amt,
+                                    description: kioskExpenseDescription.trim(),
+                                    currency: kioskExpenseCurrency,
+                                    applyMarkup: kioskExpenseApplyMarkup,
+                                  });
+                                  setKioskExpenseAmount('');
+                                  setKioskExpenseDescription('');
+                                } catch (err) {
+                                  window.alert(err?.message || 'Failed to log expense.');
+                                } finally {
+                                  setKioskExpenseSubmitting(false);
+                                }
+                              }}
+                              disabled={
+                                kioskExpenseSubmitting ||
+                                !kioskExpenseAmount ||
+                                Number(kioskExpenseAmount) <= 0
+                              }
+                              className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white p-3 rounded-xl font-black text-sm uppercase tracking-widest transition-all"
+                            >
+                              {kioskExpenseSubmitting ? 'Saving…' : 'Save Expense'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="mt-5 space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
+                          Progress Notes
+                        </label>
+                        <textarea
+                          value={activeTaskNotes}
+                          onChange={(e) => setActiveTaskNotes(e.target.value)}
+                          placeholder="Briefly describe what you've accomplished..."
+                          className="w-full p-5 border-orange-200 border rounded-2xl bg-white/70 focus:ring-2 focus:ring-[#fd7414] outline-none text-sm min-h-[120px] font-medium"
+                        />
+                      </div>
 
                       <button
                         onClick={handleStopTask}
@@ -1359,26 +1468,33 @@ const EmployeeKiosk = ({
             />
             Only my tasks
           </label>
-          <div className="max-h-[min(420px,55vh)] overflow-y-auto space-y-2 pr-1">
+          <div className="max-h-[min(900px,85vh)] overflow-y-auto space-y-2 pr-1">
             {kioskFilteredRows.length === 0 ? (
               <p className="text-xs text-slate-400">No tasks match these filters.</p>
             ) : (
               kioskFilteredRows.map((row) => {
                 const client = (clientsFull || []).find((cl) => cl.id === row.clientId);
+                const tone = getUrgencyTone(row.item);
+                const titleClass =
+                  tone === 'normal' ? 'text-slate-700' : 'text-white';
+                const metaClass =
+                  tone === 'normal' ? 'text-slate-500' : 'text-white/90';
+                const dueClass =
+                  tone === 'normal' ? 'text-slate-500' : 'text-white';
                 return (
                   <div
                     key={`${row.clientId}__${row.categoryKey}__${row.item.id}`}
                     className={`rounded-xl p-2 border border-slate-100 ${getUrgencyClass(row.item)}`}
                   >
-                    <div className="text-[10px] font-black text-slate-600 truncate">{row.clientName}</div>
-                    <div className="text-[9px] text-slate-500 truncate">{row.categoryLabel}</div>
-                    <div className="text-xs font-bold leading-snug line-clamp-2">{row.item.text || '(no text)'}</div>
+                    <div className={`text-[10px] font-black truncate ${titleClass}`}>{row.clientName}</div>
+                    <div className={`text-[9px] truncate ${metaClass}`}>{row.categoryLabel}</div>
+                    <div className={`text-xs font-bold leading-snug line-clamp-2 ${titleClass}`}>{row.item.text || '(no text)'}</div>
                     {row.item.dueDate ? (
-                      <div className="text-[9px] font-bold text-slate-500 mt-0.5">
+                      <div className={`text-[9px] font-bold mt-0.5 ${dueClass}`}>
                         Due {new Date(row.item.dueDate).toLocaleDateString()}
                       </div>
                     ) : (
-                      <div className="text-[9px] font-bold text-slate-400 mt-0.5">No due date</div>
+                      <div className={`text-[9px] font-bold mt-0.5 ${metaClass}`}>No due date</div>
                     )}
                     {!row.item.done && client && (
                       <button

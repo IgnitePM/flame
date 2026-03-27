@@ -940,6 +940,42 @@ export default function App() {
     });
   };
 
+  const logKioskClientExpense = async ({
+    clientId,
+    clientName,
+    category,
+    projectId = null,
+    amount,
+    description,
+    currency = 'CAD',
+    applyMarkup = true,
+  }) => {
+    const amt = Number(amount);
+    if (!clientId || !clientName || !category || !Number.isFinite(amt) || amt <= 0) return;
+    const fx = FX_TO_CAD[currency] ?? 1;
+    const rawAmount = amt * fx;
+    const clientObj = clients.find((c) => String(c.id) === String(clientId));
+    const isDollar = isDollarCategory(clientObj, category);
+    const shouldMarkup = applyMarkup && !isDollar;
+    const finalCost = shouldMarkup ? rawAmount * 1.3 : rawAmount;
+    const hourlyRate = Number(clientObj?.hourlyRate || 0);
+    const equivalentHours = isDollar ? 0 : hourlyRate > 0 ? finalCost / hourlyRate : 0;
+
+    await addDoc(collection(db, 'expenses'), {
+      clientId,
+      clientName,
+      category,
+      projectId: projectId || null,
+      description: description || 'Logged from kiosk',
+      rawAmount,
+      finalCost,
+      equivalentHours,
+      date: Date.now(),
+      originalCurrency: currency,
+      originalAmount: amt,
+    });
+  };
+
   const submitAddonRequest = async () => {
     const hoursNum = Math.max(0, Number(addonValues.hours) || 0);
     if (!hoursNum || !addonModal) return;
@@ -1805,6 +1841,7 @@ export default function App() {
       getGlobalRetainerStats(client, start, end),
     formatTime,
     onLogSocialAdSpend: logSocialAdSpend,
+    onLogClientExpense: logKioskClientExpense,
     getTodoStateForCycle,
     updateClientTodo,
     todoCategoryKey,
