@@ -2986,7 +2986,11 @@ const AdminDashboard = ({
                 );
                 return name.includes(q) || emailMatch;
               })
-              .filter((c) => !c.archived)
+              .filter(
+                (c) =>
+                  !c.archived ||
+                  (clientId && String(c.id) === String(clientId)),
+              )
               .map((c) => {
               const isClientPage = !!clientId;
               const showClientSummary =
@@ -3213,48 +3217,6 @@ const AdminDashboard = ({
                         title={isRestrictedStaff ? 'Admin only' : 'Client settings'}
                       >
                         <Settings className="w-5 h-5" />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isRestrictedStaff}
-                        onClick={() =>
-                          updateDoc(doc('clients', c.id), {
-                            archived: !c.archived,
-                          })
-                        }
-                        className={`p-2 text-slate-400 bg-slate-100 rounded-xl transition-colors ${
-                          isRestrictedStaff
-                            ? 'opacity-40 cursor-not-allowed'
-                            : 'hover:text-black'
-                        }`}
-                        title={
-                          isRestrictedStaff
-                            ? 'Admin only'
-                            : c.archived
-                              ? 'Unarchive client'
-                              : 'Archive client'
-                        }
-                      >
-                        <FolderGit2 className="w-5 h-5" />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isRestrictedStaff}
-                        onClick={() =>
-                          setDeleteConfirm({
-                            collection: 'clients',
-                            id: c.id,
-                            title: `the client "${c.name}"`,
-                          })
-                        }
-                        className={`p-2 text-slate-300 bg-slate-100 rounded-xl transition-colors ${
-                          isRestrictedStaff
-                            ? 'opacity-40 cursor-not-allowed'
-                            : 'hover:text-red-500 hover:bg-red-50'
-                        }`}
-                        title={isRestrictedStaff ? 'Admin only' : 'Delete client'}
-                      >
-                        <Trash2 className="w-5 h-5" />
                       </button>
                     </div>
                   </div>
@@ -4945,17 +4907,21 @@ const AdminDashboard = ({
                               const baseNum = Number(base) || 0;
                               const isDollarCategory =
                                 cat === 'Social Ad Budget' || c?.retainerUnits?.[cat] === 'dollar';
+                              const catStats = stats?.perCategory?.[cat] || null;
+                              const carryoverForCat = Number(catStats?.carryover || 0);
+                              const allottedForCat = Number(catStats?.adjustedAllotted ?? baseNum);
                               const usedDisplay = Number(used || 0).toFixed(2);
                               const baseDisplay = Number(baseNum || 0).toFixed(2);
+                              const allottedDisplay = Number(allottedForCat || 0).toFixed(2);
                               const pct =
-                                baseNum > 0
+                                allottedForCat > 0
                                   ? Math.min(
                                       100,
-                                      (Number(used || 0) / baseNum) * 100,
+                                      (Number(used || 0) / allottedForCat) * 100,
                                     )
                                   : 0;
                               const over =
-                                baseNum > 0 && used > baseNum;
+                                allottedForCat > 0 && used > allottedForCat;
                               const categoryTasks = periodTasks.filter(
                                 (t) => t.projectName === cat,
                               );
@@ -4993,8 +4959,16 @@ const AdminDashboard = ({
                                         showClientTimesheets) && (
                                       <div className="text-[10px] font-bold text-slate-400">
                                         {isDollarCategory
-                                          ? `$${usedDisplay} / $${baseDisplay}`
-                                          : `${usedDisplay}h / ${baseDisplay}h`}
+                                          ? `$${usedDisplay} / $${allottedDisplay}`
+                                          : `${usedDisplay}h / ${allottedDisplay}h`}
+                                        {carryoverForCat !== 0 && (
+                                          <span className="ml-2">
+                                            (carryover:{' '}
+                                            {carryoverForCat > 0 ? '+' : ''}
+                                            {Number(carryoverForCat || 0).toFixed(2)}
+                                            {isDollarCategory ? '' : 'h'})
+                                          </span>
+                                        )}
                                       </div>
                                       )}
                                     </div>

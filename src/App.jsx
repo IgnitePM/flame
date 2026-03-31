@@ -235,6 +235,7 @@ export default function App() {
   const [editingItem, setEditingItem] = useState(null); 
   const [editValues, setEditValues] = useState({});
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [archiveConfirm, setArchiveConfirm] = useState(null);
   const [editingClient, setEditingClient] = useState(null); 
   const [expenseModal, setExpenseModal] = useState(null);
   const [expenseValues, setExpenseValues] = useState({
@@ -1398,24 +1399,38 @@ export default function App() {
       0,
     );
 
-    const hourCategories = Object.keys(client.retainers || {}).filter(
-      (cat) => !isDollarCategory(client, cat),
-    );
+    const retainerCategories = Object.keys(client.retainers || {});
+    const perCategory = {};
 
-    let carryover = 0;
-    hourCategories.forEach((cat) => {
-      const catResetMs = Number(
-        perCategoryReset[carryoverCategoryKey(cat)] || 0,
-      );
+    const getEffectiveStartMs = (effectiveResetMs, firstActivityMs) => {
+      // Prefer clientStartDate so allocations accrue even if nothing was logged yet.
+      // Fall back to first activity date for legacy clients with no start date.
+      const base = clientStartMs || firstActivityMs || 0;
+      return Math.max(Number(effectiveResetMs || 0), Number(base || 0)) || 0;
+    };
+
+    const isPaused = client.status === 'paused';
+
+    // Compute carryover per category (hours and dollars) so each category can show
+    // base + carryover like the combined pool.
+    retainerCategories.forEach((cat) => {
+      const base = Number(client.retainers?.[cat] || 0);
+      const catResetMs = Number(perCategoryReset[carryoverCategoryKey(cat)] || 0);
       const effectiveResetMs = Math.max(globalResetMs, catResetMs);
 
-      let pastTasksCat = taskLogs.filter(
-        (t) =>
-          t.clientName === client.name &&
-          t.clockInTime < mStart &&
-          !t.projectId &&
-          t.projectName === cat,
-      );
+      const catIsDollar = isDollarCategory(client, cat);
+
+      let pastTasksCat = [];
+      if (!catIsDollar) {
+        pastTasksCat = taskLogs.filter(
+          (t) =>
+            t.clientName === client.name &&
+            t.clockInTime < mStart &&
+            !t.projectId &&
+            t.projectName === cat,
+        );
+      }
+
       let pastExpsCat = expenses.filter(
         (e) =>
           e.clientName === client.name &&
@@ -1425,59 +1440,69 @@ export default function App() {
       );
 
       if (clientStartMs) {
-        pastTasksCat = pastTasksCat.filter((t) => t.clockInTime >= clientStartMs);
+        if (!catIsDollar) {
+          pastTasksCat = pastTasksCat.filter((t) => t.clockInTime >= clientStartMs);
+        }
         pastExpsCat = pastExpsCat.filter((e) => e.date >= clientStartMs);
       }
       if (effectiveResetMs) {
-        pastTasksCat = pastTasksCat.filter(
-          (t) => t.clockInTime >= effectiveResetMs,
-        );
+        if (!catIsDollar) {
+          pastTasksCat = pastTasksCat.filter((t) => t.clockInTime >= effectiveResetMs);
+        }
         pastExpsCat = pastExpsCat.filter((e) => e.date >= effectiveResetMs);
       }
 
       const firstTaskTime =
-        pastTasksCat.length > 0
+        !catIsDollar && pastTasksCat.length > 0
           ? Math.min(...pastTasksCat.map((t) => t.clockInTime))
           : null;
       const firstExpTime =
-        pastExpsCat.length > 0
-          ? Math.min(...pastExpsCat.map((e) => e.date))
-          : null;
+        pastExpsCat.length > 0 ? Math.min(...pastExpsCat.map((e) => e.date)) : null;
 
-      let firstDateMs = null;
-      if (firstTaskTime && firstExpTime) firstDateMs = Math.min(firstTaskTime, firstExpTime);
-      else if (firstTaskTime) firstDateMs = firstTaskTime;
-      else if (firstExpTime) firstDateMs = firstExpTime;
+      let firstActivityMs = null;
+      if (firstTaskTime && firstExpTime) firstActivityMs = Math.min(firstTaskTime, firstExpTime);
+      else if (firstTaskTime) firstActivityMs = firstTaskTime;
+      else if (firstExpTime) firstActivityMs = firstExpTime;
 
-      if (effectiveResetMs) {
-        firstDateMs = firstDateMs
-          ? Math.max(firstDateMs, effectiveResetMs)
-          : effectiveResetMs;
+      const effectiveStartMs = getEffectiveStartMs(effectiveResetMs, firstActivityMs);
+      if (!effectiveStartMs) {
+        perCategory[cat] = {
+          isDollar: catIsDollar,
+          baseActive: isPaused ? 0 : base,
+          carryover: 0,
+        };
+        return;
       }
-      if (clientStartMs && firstDateMs !== null) {
-        firstDateMs = Math.max(firstDateMs, clientStartMs);
-      } else if (clientStartMs) {
-        firstDateMs = clientStartMs;
-      }
-
-      if (!firstDateMs) return;
 
       const periodsPassed = getPeriodsPassed(
-        firstDateMs,
+        effectiveStartMs,
         mStart,
         client.billingDay || 1,
       );
-      const base = Number(client.retainers?.[cat] || 0);
       const totalAllottedPast = periodsPassed * base;
-      const pastTaskHours =
-        pastTasksCat.reduce((acc, t) => acc + getTaskDuration(t), 0) / 3600000;
-      const pastExpHours = pastExpsCat.reduce(
-        (acc, e) => acc + Number(e.equivalentHours || 0),
-        0,
-      );
 
-      carryover += totalAllottedPast - (pastTaskHours + pastExpHours);
+      const pastTaskHours =
+        !catIsDollar
+          ? pastTasksCat.reduce((acc, t) => acc + getTaskDuration(t), 0) / 3600000
+          : 0;
+      const pastExpUsed = catIsDollar
+        ? pastExpsCat.reduce((acc, e) => acc + Number(e.finalCost || 0), 0)
+        : pastExpsCat.reduce((acc, e) => acc + Number(e.equivalentHours || 0), 0);
+
+      const carryover = totalAllottedPast - (pastTaskHours + pastExpUsed);
+
+      perCategory[cat] = {
+        isDollar: catIsDollar,
+        baseActive: isPaused ? 0 : base,
+        carryover,
+      };
     });
+
+    const hourCategories = retainerCategories.filter((cat) => !isDollarCategory(client, cat));
+    let carryover = hourCategories.reduce(
+      (acc, cat) => acc + Number(perCategory?.[cat]?.carryover || 0),
+      0,
+    );
 
     // Keep historical Add Hours behavior as a global carryover contributor.
     carryover += pastAddonHours;
@@ -1515,15 +1540,41 @@ export default function App() {
       }
     });
 
+    // Finalize per-category totals for current cycle (base + carryover, excluding addons which are global).
+    Object.keys(perCategory).forEach((cat) => {
+      const used = Number(categoryBreakdown?.[cat] || 0);
+      const baseActive = Number(perCategory[cat]?.baseActive || 0);
+      const catCarry = Number(perCategory[cat]?.carryover || 0);
+      const adjustedAllottedCat = baseActive + catCarry;
+      perCategory[cat] = {
+        ...perCategory[cat],
+        used,
+        adjustedAllotted: adjustedAllottedCat,
+        isOver: adjustedAllottedCat > 0 ? used > adjustedAllottedCat : used > 0,
+        percent:
+          adjustedAllottedCat > 0
+            ? Math.min(Math.max((used / adjustedAllottedCat) * 100, 0), 100)
+            : used > 0
+              ? 100
+              : 0,
+      };
+    });
+
     return {
-        base: activeBase,
-        carryover,
-        currentAddons: currentAddonHours,
-        adjustedAllotted,
-        currentUsed,
-        isOver: currentUsed > adjustedAllotted,
-        percent: adjustedAllotted > 0 ? Math.min(Math.max((currentUsed / adjustedAllotted) * 100, 0), 100) : (currentUsed > 0 ? 100 : 0),
-        categoryBreakdown,
+      base: activeBase,
+      carryover,
+      currentAddons: currentAddonHours,
+      adjustedAllotted,
+      currentUsed,
+      isOver: currentUsed > adjustedAllotted,
+      percent:
+        adjustedAllotted > 0
+          ? Math.min(Math.max((currentUsed / adjustedAllotted) * 100, 0), 100)
+          : currentUsed > 0
+            ? 100
+            : 0,
+      categoryBreakdown,
+      perCategory,
     };
   };
 
@@ -2679,6 +2730,50 @@ export default function App() {
                   })}
                 </div>
               </div>
+
+              {currentUserRole !== 'kiosk' && (
+                <div className="space-y-3 pt-2 border-t border-slate-200">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    Archive &amp; delete
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Archiving hides the client from the main list. Deleting removes
+                    the client record from the database permanently.
+                  </p>
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setArchiveConfirm({
+                          id: editingClient.id,
+                          name: editingClient.name,
+                          unarchive: !!editingClient.archived,
+                        })
+                      }
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-2xl border border-slate-200 bg-slate-50 text-slate-800 font-bold text-sm hover:bg-slate-100 transition-colors"
+                    >
+                      <FolderGit2 className="w-4 h-4" />
+                      {editingClient.archived
+                        ? 'Unarchive client'
+                        : 'Archive client'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDeleteConfirm({
+                          collection: 'clients',
+                          id: editingClient.id,
+                          title: `the client "${editingClient.name}"`,
+                        })
+                      }
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-2xl border border-red-200 bg-red-50 text-red-600 font-bold text-sm hover:bg-red-100 transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Delete client permanently
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="p-8 border-t border-slate-100 bg-white shrink-0">
@@ -2997,6 +3092,51 @@ export default function App() {
         </div>
       )}
 
+      {/* Archive / unarchive confirmation */}
+      {archiveConfirm && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[110] animate-in fade-in duration-200">
+          <div className="bg-white rounded-[32px] w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 p-8 text-center space-y-6">
+            <div className="w-16 h-16 bg-slate-100 text-slate-600 rounded-full flex items-center justify-center mx-auto border border-slate-200">
+              <FolderGit2 className="w-8 h-8" />
+            </div>
+            <div>
+              <h3 className="font-black text-xl mb-2">
+                {archiveConfirm.unarchive
+                  ? 'Restore this client?'
+                  : 'Archive this client?'}
+              </h3>
+              <p className="text-sm text-slate-500 font-medium">
+                {archiveConfirm.unarchive
+                  ? `Are you sure you want to restore "${archiveConfirm.name}" to the client list?`
+                  : `Are you sure you want to archive "${archiveConfirm.name}"? They will be hidden from the main list until you unarchive them from Client settings or Firestore.`}
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setArchiveConfirm(null)}
+                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-4 rounded-2xl transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await updateDoc(doc(db, 'clients', archiveConfirm.id), {
+                    archived: !archiveConfirm.unarchive,
+                  }).catch(() => {});
+                  setArchiveConfirm(null);
+                  setEditingClient(null);
+                }}
+                className="flex-1 bg-slate-900 hover:bg-slate-800 text-white font-bold py-4 rounded-2xl transition-all"
+              >
+                {archiveConfirm.unarchive ? 'Restore' : 'Archive'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Delete Confirmation Custom Modal */}
       {deleteConfirm && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[110] animate-in fade-in duration-200">
@@ -3005,12 +3145,26 @@ export default function App() {
               <Trash2 className="w-8 h-8" />
             </div>
             <div>
-              <h3 className="font-black text-xl mb-2">Confirm Deletion</h3>
-              <p className="text-sm text-slate-500 font-medium">Are you sure you want to delete {deleteConfirm.title}? This action cannot be undone.</p>
+              <h3 className="font-black text-xl mb-2">Confirm permanent deletion</h3>
+              <p className="text-sm text-slate-500 font-medium">
+                Are you sure you want to delete {deleteConfirm.title}?
+              </p>
+              {deleteConfirm.collection === 'clients' && (
+                <p className="text-sm text-red-600 font-bold mt-3 leading-snug">
+                  This permanently removes the client and all references in this app.
+                  Only proceed if you are absolutely sure.
+                </p>
+              )}
+              {deleteConfirm.collection !== 'clients' && (
+                <p className="text-xs text-slate-400 font-medium mt-2">
+                  This action cannot be undone.
+                </p>
+              )}
             </div>
             <div className="flex gap-3">
-              <button onClick={() => setDeleteConfirm(null)} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-4 rounded-2xl transition-all">Cancel</button>
+              <button type="button" onClick={() => setDeleteConfirm(null)} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-4 rounded-2xl transition-all">Cancel</button>
               <button
+                type="button"
                 onClick={async () => {
                   const ids = Array.isArray(deleteConfirm.ids)
                     ? deleteConfirm.ids
@@ -3020,11 +3174,14 @@ export default function App() {
                       deleteDoc(doc(db, deleteConfirm.collection, id)).catch(() => {})
                     )
                   );
+                  if (deleteConfirm.collection === 'clients') {
+                    setEditingClient(null);
+                  }
                   setDeleteConfirm(null);
                 }}
                 className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-red-500/30 transition-all"
               >
-                Delete
+                Delete permanently
               </button>
             </div>
           </div>

@@ -228,8 +228,10 @@ const EmployeeKiosk = ({
   const combinedUsedWithActive = (retainerStats?.currentUsed || 0) + activeDeltaHours;
 
   const categoryAllotted =
-    (selectedClientObj?.retainers &&
-      selectedClientObj.retainers[selectedRetainerCategory]) || 0;
+    retainerStats?.perCategory?.[selectedRetainerCategory]?.adjustedAllotted ??
+    ((selectedClientObj?.retainers &&
+      selectedClientObj.retainers[selectedRetainerCategory]) ||
+      0);
   const activeExpenseCategory = activeTask?.projectId
     ? 'Custom Project'
     : activeTask?.projectName || selectedRetainerCategory || GENERAL_LABEL;
