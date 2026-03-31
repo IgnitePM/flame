@@ -2925,6 +2925,7 @@ const AdminDashboard = ({
                   { id: 'all', label: 'All' },
                   { id: 'active', label: 'Active' },
                   { id: 'inactive', label: 'Inactive' },
+                  { id: 'archived', label: 'Archived' },
                 ].map((opt) => (
                   <button
                     key={opt.id}
@@ -2973,6 +2974,7 @@ const AdminDashboard = ({
               .filter((c) => {
                 if (clientStatusFilter === 'active') return c.status !== 'paused';
                 if (clientStatusFilter === 'inactive') return c.status === 'paused';
+                if (clientStatusFilter === 'archived') return !!c.archived;
                 return true;
               })
               .filter((c) => {
@@ -2986,11 +2988,13 @@ const AdminDashboard = ({
                 );
                 return name.includes(q) || emailMatch;
               })
-              .filter(
-                (c) =>
-                  !c.archived ||
-                  (clientId && String(c.id) === String(clientId)),
-              )
+              .filter((c) => {
+                // Always allow opening a deep-linked archived client page.
+                if (clientId && String(c.id) === String(clientId)) return true;
+                // Archived tab shows only archived; other tabs hide archived.
+                if (clientStatusFilter === 'archived') return !!c.archived;
+                return !c.archived;
+              })
               .map((c) => {
               const isClientPage = !!clientId;
               const showClientSummary =
