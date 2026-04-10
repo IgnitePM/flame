@@ -22,6 +22,7 @@ import {
   sortTodoRowsByDueThenClient,
   sortTodoRowsByClientThenDue,
 } from '../utils/todoFilters.js';
+import { safeDisplayForReact } from '../utils/safeReactText.js';
 
 const EmployeeKiosk = ({
   user,
@@ -810,7 +811,7 @@ const EmployeeKiosk = ({
                                             className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
                                           />
                                           <span className={`text-sm flex-1 ${item.done ? 'line-through opacity-70' : ''}`}>
-                                            {item.text || '(no text)'}
+                                            {safeDisplayForReact(item.text) || '(no text)'}
                                             {item.recurring && (
                                               <span className="ml-2 text-[9px] font-black uppercase tracking-widest text-[#fd7414]">
                                                 Recurring
@@ -1252,7 +1253,7 @@ const EmployeeKiosk = ({
                                             className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
                                           />
                                           <span className={`text-sm flex-1 ${item.done ? 'line-through opacity-70' : ''}`}>
-                                            {item.text || '(no text)'}
+                                            {safeDisplayForReact(item.text) || '(no text)'}
                                             {item.recurring && (
                                               <span className="ml-2 text-[9px] font-black uppercase tracking-widest text-[#fd7414]">
                                                 Recurring
@@ -1634,7 +1635,9 @@ const EmployeeKiosk = ({
             {kioskFilteredRows.length === 0 ? (
               <p className="text-xs text-slate-400">No tasks match these filters.</p>
             ) : (
-              kioskFilteredRows.map((row) => {
+              kioskFilteredRows
+                .filter((row) => row?.item?.id != null && row.item.id !== '')
+                .map((row) => {
                 const client = (clientsFull || []).find((cl) => cl.id === row.clientId);
                 const tone = getUrgencyTone(row.item);
                 const titleClass =
@@ -1650,7 +1653,7 @@ const EmployeeKiosk = ({
                   >
                     <div className={`text-[10px] font-black truncate ${titleClass}`}>{row.clientName}</div>
                     <div className={`text-[9px] truncate ${metaClass}`}>{row.categoryLabel}</div>
-                    <div className={`text-xs font-bold leading-snug line-clamp-2 ${titleClass}`}>{row.item.text || '(no text)'}</div>
+                    <div className={`text-xs font-bold leading-snug line-clamp-2 ${titleClass}`}>{safeDisplayForReact(row.item.text) || '(no text)'}</div>
                     {row.item.dueDate ? (
                       <div className={`text-[9px] font-bold mt-0.5 ${dueClass}`}>
                         Due {new Date(row.item.dueDate).toLocaleDateString()}
@@ -1814,7 +1817,7 @@ const EmployeeKiosk = ({
                               t.done ? 'line-through text-slate-400' : 'text-slate-800'
                             }`}
                           >
-                            {t.text || '(no text)'}
+                            {safeDisplayForReact(t.text) || '(no text)'}
                           </span>
                         </label>
                         <div className="text-[9px] font-bold text-slate-400 pl-6">
@@ -2073,7 +2076,7 @@ const EmployeeKiosk = ({
                   const newId = `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`;
                   const newItem = {
                     id: newId,
-                    text: personalLinkItem.text,
+                    text: safeDisplayForReact(personalLinkItem.text) || '(no text)',
                     done: !!personalLinkItem.done,
                     doneAt: personalLinkItem.doneAt || null,
                     assigneeEmails: Array.isArray(personalLinkItem.assigneeEmails)

@@ -547,7 +547,14 @@ export default function App() {
       : adminRecord?.role || (isUserAdmin ? 'admin' : null);
   
   // Inject Mock Client Profile for Demo Mode so you don't get Access Denied
-  let clientProfile = user ? clients.find(c => c.clientEmails && c.clientEmails.map(e=>e.toLowerCase().trim()).includes(user.email.toLowerCase())) : null;
+  const userEmailLower = String(user?.email || '').trim().toLowerCase();
+  let clientProfile = user && userEmailLower
+    ? clients.find(
+        (c) =>
+          c.clientEmails &&
+          c.clientEmails.map((e) => e.toLowerCase().trim()).includes(userEmailLower),
+      )
+    : null;
   if (ENABLE_DEMOS && user && user.uid === 'demo-client-123' && !clientProfile) {
     clientProfile = { id: 'demo', name: "Demo Client", status: 'active', hourlyRate: 100, billingDay: 1, clientEmails: ["client@demo.com"], retainers: { "SEO": 10 } };
   }
@@ -1864,7 +1871,7 @@ export default function App() {
     user &&
     !isUserAdmin &&
     !isClientUser &&
-    !user.email.endsWith('@ignitepm.com') &&
+    !userEmailLower.endsWith('@ignitepm.com') &&
     !(ENABLE_DEMOS && (user.uid === 'demo-user-123' || user.uid === 'demo-client-123'))
   ) {
     return (
@@ -1872,7 +1879,7 @@ export default function App() {
         <div className="bg-white p-12 rounded-[40px] shadow-2xl border border-slate-100 text-center max-w-sm w-full">
           <Shield className="w-16 h-16 text-red-500 mx-auto mb-6" />
           <h2 className="text-2xl font-black mb-2">Access Denied</h2>
-          <p className="text-slate-500 text-sm mb-6 font-medium">Your account ({user.email}) is not authorized. Please contact an administrator.</p>
+          <p className="text-slate-500 text-sm mb-6 font-medium">Your account ({String(user?.email || '').trim() || user?.uid || 'unknown'}) is not authorized. Please contact an administrator.</p>
           <button onClick={() => { setUser(null); signOut(auth); }} className="w-full bg-slate-100 text-slate-600 p-4 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-slate-200 transition-all">Sign Out</button>
         </div>
       </div>

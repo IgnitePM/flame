@@ -40,6 +40,7 @@ import {
   taskMatchesStatus,
   todoRowMatchesFilters,
 } from '../utils/todoFilters.js';
+import { safeDisplayForReact } from '../utils/safeReactText.js';
 
 /** Normalize ?tab= for /admin/clients/:id (supports legacy `projects`). */
 function parseClientSubTabFromSearch(search) {
@@ -53,21 +54,6 @@ function parseClientSubTabFromSearch(search) {
   if (t === 'tasks') return 'tasks';
   if (t === 'timesheets') return 'timesheets';
   return 'summary';
-}
-
-/** Avoid React child errors when Firestore stored a map/object in a text field. */
-function safeDisplayForReact(v) {
-  if (v == null) return '';
-  const t = typeof v;
-  if (t === 'string' || t === 'number' || t === 'boolean') return String(v);
-  if (t === 'object') {
-    try {
-      return JSON.stringify(v);
-    } catch {
-      return '[Invalid value]';
-    }
-  }
-  return String(v);
 }
 
 function safeProjectStatus(p) {
@@ -2667,7 +2653,9 @@ const AdminDashboard = ({
                 );
               }
 
-              return filtered.map((row) => {
+              return filtered
+                .filter((row) => row?.item?.id != null && row.item.id !== '')
+                .map((row) => {
                 const styles = getTodoUrgencyStyles(row.item);
                 const assignees = normalizeTodoAssignees(row.item);
                 const rowClient = clients.find((c) => c.id === row.clientId);
@@ -2712,7 +2700,7 @@ const AdminDashboard = ({
                     />
                     <div className="flex-1 min-w-0">
                       <div className={`font-black text-sm ${styles.textClass}`}>
-                        {row.item.text}
+                        {safeDisplayForReact(row.item.text) || '(no text)'}
                       </div>
                       <div className={`text-[10px] font-bold uppercase tracking-widest ${styles.metaClass}`}>
                         <button
@@ -5046,7 +5034,6 @@ const AdminDashboard = ({
                               const carryoverForCat = Number(catStats?.carryover || 0);
                               const allottedForCat = Number(catStats?.adjustedAllotted ?? baseNum);
                               const usedDisplay = Number(used || 0).toFixed(2);
-                              const baseDisplay = Number(baseNum || 0).toFixed(2);
                               const allottedDisplay = Number(allottedForCat || 0).toFixed(2);
                               const pct =
                                 allottedForCat > 0
