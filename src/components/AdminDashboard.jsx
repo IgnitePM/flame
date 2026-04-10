@@ -169,24 +169,24 @@ function ClientCustomProjectsPanelInner({
               prev === openKey ? null : openKey,
             )
           }
-          className="min-w-[160px] max-w-[240px] bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-black text-slate-700 outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px] flex items-center justify-between gap-2 disabled:opacity-40"
+          className="min-w-[160px] max-w-[240px] rounded-xl border border-white/20 bg-zinc-950/95 px-3 py-2 text-xs font-black text-white outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px] flex items-center justify-between gap-2 disabled:opacity-40"
           title="Assign to users"
         >
           <span className="truncate">{summary}</span>
-          <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+          <ChevronDown className="w-4 h-4 shrink-0 text-zinc-400" />
         </button>
         {isOpen && (
-          <div className="absolute right-0 mt-2 w-[320px] max-w-[min(92vw,320px)] bg-white border border-slate-200 rounded-2xl shadow-xl p-3 z-[120]">
-            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+          <div className="absolute right-0 z-[120] mt-2 w-[320px] max-w-[min(92vw,320px)] rounded-2xl border border-white/20 bg-zinc-950 p-3 shadow-xl">
+            <div className="mb-2 text-[10px] font-black uppercase tracking-widest text-zinc-400">
               Assign to
             </div>
-            <div className="max-h-[240px] overflow-y-auto space-y-1 pr-1">
+            <div className="max-h-[240px] space-y-1 overflow-y-auto pr-1">
               {(assignableEmails || []).map((email) => {
                 const checked = cleaned.includes(email);
                 return (
                   <label
                     key={email}
-                    className="flex items-center gap-2 px-2 py-2 rounded-xl hover:bg-slate-50 cursor-pointer"
+                    className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-2 hover:bg-white/10"
                   >
                     <input
                       type="checkbox"
@@ -201,7 +201,7 @@ function ClientCustomProjectsPanelInner({
                         onChange(sorted);
                       }}
                     />
-                    <span className="text-xs font-bold text-slate-700 truncate">
+                    <span className="truncate text-xs font-bold text-zinc-100">
                       {email}
                     </span>
                   </label>
@@ -211,14 +211,14 @@ function ClientCustomProjectsPanelInner({
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
-                className="px-3 py-2 rounded-xl text-xs font-black text-slate-600 bg-slate-100 hover:bg-slate-200 uppercase tracking-widest"
+                className="rounded-xl bg-zinc-800 px-3 py-2 text-xs font-black uppercase tracking-widest text-zinc-200 hover:bg-zinc-700"
                 onClick={() => onChange([])}
               >
                 Clear
               </button>
               <button
                 type="button"
-                className="px-3 py-2 rounded-xl text-xs font-black text-white bg-[#fd7414] hover:brightness-95 uppercase tracking-widest"
+                className="rounded-xl bg-[#fd7414] px-3 py-2 text-xs font-black uppercase tracking-widest text-white hover:brightness-95"
                 onClick={() => setProjectAssigneePickerOpenKey(null)}
               >
                 Done
@@ -1875,24 +1875,24 @@ const AdminDashboard = ({
           onClick={() =>
             setAssigneePickerOpenKey((prev) => (prev === openKey ? null : openKey))
           }
-          className="min-w-[160px] max-w-[240px] bg-white/90 border border-slate-200 rounded-xl px-3 py-2 text-xs font-black text-slate-700 outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px] flex items-center justify-between gap-2 disabled:opacity-40"
+          className="min-w-[160px] max-w-[240px] rounded-xl border border-white/20 bg-zinc-950/95 px-3 py-2 text-xs font-black text-white outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px] flex items-center justify-between gap-2 disabled:opacity-40"
           title="Assign to users"
         >
           <span className="truncate">{summary}</span>
-          <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+          <ChevronDown className="w-4 h-4 shrink-0 text-zinc-400" />
         </button>
         {isOpen && (
-          <div className="absolute right-0 mt-2 w-[320px] max-w-[min(92vw,320px)] bg-white border border-slate-200 rounded-2xl shadow-xl p-3 z-[120]">
-            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+          <div className="absolute right-0 z-[120] mt-2 w-[320px] max-w-[min(92vw,320px)] rounded-2xl border border-white/20 bg-zinc-950 p-3 shadow-xl">
+            <div className="mb-2 text-[10px] font-black uppercase tracking-widest text-zinc-400">
               Assign to
             </div>
-            <div className="max-h-[240px] overflow-y-auto space-y-1 pr-1">
+            <div className="max-h-[240px] space-y-1 overflow-y-auto pr-1">
               {assignableEmails.map((email) => {
                 const checked = cleaned.includes(email);
                 return (
                   <label
                     key={email}
-                    className="flex items-center gap-2 px-2 py-2 rounded-xl hover:bg-slate-50 cursor-pointer"
+                    className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-2 hover:bg-white/10"
                   >
                     <input
                       type="checkbox"
@@ -1907,7 +1907,7 @@ const AdminDashboard = ({
                         onChange(sorted);
                       }}
                     />
-                    <span className="text-xs font-bold text-slate-700 truncate">
+                    <span className="truncate text-xs font-bold text-zinc-100">
                       {email}
                     </span>
                   </label>
@@ -1917,14 +1917,14 @@ const AdminDashboard = ({
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
-                className="px-3 py-2 rounded-xl text-xs font-black text-slate-600 bg-slate-100 hover:bg-slate-200 uppercase tracking-widest"
+                className="rounded-xl bg-zinc-800 px-3 py-2 text-xs font-black uppercase tracking-widest text-zinc-200 hover:bg-zinc-700"
                 onClick={() => onChange([])}
               >
                 Clear
               </button>
               <button
                 type="button"
-                className="px-3 py-2 rounded-xl text-xs font-black text-white bg-[#fd7414] hover:brightness-95 uppercase tracking-widest"
+                className="rounded-xl bg-[#fd7414] px-3 py-2 text-xs font-black uppercase tracking-widest text-white hover:brightness-95"
                 onClick={() => setAssigneePickerOpenKey(null)}
               >
                 Done
