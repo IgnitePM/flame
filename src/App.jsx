@@ -281,9 +281,6 @@ export default function App() {
     activeShift: null,
     activeTaskNotes: '',
   });
-  useEffect(() => {
-    idleShutdownRef.current = { activeTask, activeShift, activeTaskNotes };
-  }, [activeTask, activeShift, activeTaskNotes]);
 
   // Client Portal State
   const [portalOffset, setPortalOffset] = useState(0);
@@ -602,6 +599,10 @@ export default function App() {
   );
   const activeShift = timesheets.find(t => t.userId === user?.uid && (t.status === 'active' || t.status === 'break'));
   const activeTask = activeShift ? taskLogs.find(t => t.shiftId === activeShift.id && t.status === 'active') : null;
+
+  useEffect(() => {
+    idleShutdownRef.current = { activeTask, activeShift, activeTaskNotes };
+  }, [activeTask, activeShift, activeTaskNotes]);
 
   // Active Billing Targets
   const clientActiveProjects = projects.filter(p => !p.archived && p.clientName === selectedClient && (p.status === 'active' || p.status === 'approved'));
