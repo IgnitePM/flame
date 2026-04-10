@@ -1,1 +1,142 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&display=swap");
+
 @import "tailwindcss";
+
+@theme {
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+}
+
+html {
+  font-family: var(--font-sans);
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Ignite PM–aligned kiosk: charcoal surfaces, zinc text, same orange accent (#fd7414) */
+[data-kiosk-theme="dark"] {
+  color: rgb(244 244 245);
+}
+
+[data-kiosk-theme="dark"] ::placeholder {
+  color: rgb(161 161 170);
+}
+
+[data-kiosk-theme="dark"] .bg-white {
+  background-color: rgb(24 24 27 / 0.92) !important;
+}
+
+[data-kiosk-theme="dark"] .bg-white\/70 {
+  background-color: rgb(39 39 42 / 0.72) !important;
+}
+
+[data-kiosk-theme="dark"] .bg-slate-50,
+[data-kiosk-theme="dark"] .bg-slate-50\/30,
+[data-kiosk-theme="dark"] .bg-slate-50\/50 {
+  background-color: rgb(39 39 42 / 0.55) !important;
+}
+
+[data-kiosk-theme="dark"] .bg-slate-100 {
+  background-color: rgb(63 63 70 / 0.45) !important;
+}
+
+[data-kiosk-theme="dark"] .hover\:bg-slate-100:hover {
+  background-color: rgb(63 63 70 / 0.65) !important;
+}
+
+[data-kiosk-theme="dark"] .hover\:bg-slate-200:hover {
+  background-color: rgb(82 82 91 / 0.55) !important;
+}
+
+[data-kiosk-theme="dark"] .border-slate-50,
+[data-kiosk-theme="dark"] .border-slate-100,
+[data-kiosk-theme="dark"] .border-slate-200 {
+  border-color: rgb(255 255 255 / 0.1) !important;
+}
+
+[data-kiosk-theme="dark"] .text-slate-900,
+[data-kiosk-theme="dark"] .text-slate-800 {
+  color: rgb(250 250 250) !important;
+}
+
+[data-kiosk-theme="dark"] .text-slate-700 {
+  color: rgb(228 228 231) !important;
+}
+
+[data-kiosk-theme="dark"] .text-slate-600 {
+  color: rgb(212 212 216) !important;
+}
+
+[data-kiosk-theme="dark"] .text-slate-500 {
+  color: rgb(161 161 170) !important;
+}
+
+[data-kiosk-theme="dark"] .text-slate-400 {
+  color: rgb(161 161 170) !important;
+}
+
+[data-kiosk-theme="dark"] .text-slate-300 {
+  color: rgb(180 180 189) !important;
+}
+
+[data-kiosk-theme="dark"] .bg-slate-50\/50 {
+  background-color: rgb(39 39 42 / 0.45) !important;
+}
+
+[data-kiosk-theme="dark"] .bg-blue-50 {
+  background-color: rgb(30 58 138 / 0.28) !important;
+}
+
+[data-kiosk-theme="dark"] .border-blue-200 {
+  border-color: rgb(59 130 246 / 0.35) !important;
+}
+
+[data-kiosk-theme="dark"] .bg-orange-50 {
+  background-color: rgb(253 116 20 / 0.09) !important;
+}
+
+[data-kiosk-theme="dark"] .border-orange-200 {
+  border-color: rgb(253 116 20 / 0.32) !important;
+}
+
+[data-kiosk-theme="dark"] .hover\:bg-orange-50:hover {
+  background-color: rgb(253 116 20 / 0.12) !important;
+}
+
+[data-kiosk-theme="dark"] .bg-amber-50,
+[data-kiosk-theme="dark"] .hover\:bg-amber-50\/80:hover {
+  background-color: rgb(245 158 11 / 0.12) !important;
+}
+
+[data-kiosk-theme="dark"] .border-amber-200 {
+  border-color: rgb(245 158 11 / 0.35) !important;
+}
+
+[data-kiosk-theme="dark"] .text-amber-700 {
+  color: rgb(251 191 36) !important;
+}
+
+[data-kiosk-theme="dark"] .text-amber-800\/90,
+[data-kiosk-theme="dark"] .text-amber-800 {
+  color: rgb(253 224 71) !important;
+}
+
+[data-kiosk-theme="dark"] .hover\:text-amber-600:hover {
+  color: rgb(251 191 36) !important;
+}
+
+[data-kiosk-theme="dark"] .bg-emerald-100 {
+  background-color: rgb(16 185 129 / 0.2) !important;
+}
+
+[data-kiosk-theme="dark"] .text-emerald-700 {
+  color: rgb(52 211 153) !important;
+}
+
+[data-kiosk-theme="dark"] select option,
+[data-kiosk-theme="dark"] optgroup {
+  background-color: rgb(24 24 27);
+  color: rgb(244 244 245);
+}

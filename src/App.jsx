@@ -1861,7 +1861,7 @@ export default function App() {
   // Render Checks
   if (loading || (user && !adminDocReady)) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0b1120]">
+      <div className="min-h-screen flex items-center justify-center bg-[#0f0f11]">
         <RotateCw className="w-8 h-8 text-[#fd7414] animate-spin" />
       </div>
     );
@@ -1876,7 +1876,7 @@ export default function App() {
     !(ENABLE_DEMOS && (user.uid === 'demo-user-123' || user.uid === 'demo-client-123'))
   ) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-[#0b1120] p-6">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#0f0f11] p-6">
         <div className="bg-white p-12 rounded-[40px] shadow-2xl border border-slate-100 text-center max-w-sm w-full">
           <Shield className="w-16 h-16 text-red-500 mx-auto mb-6" />
           <h2 className="text-2xl font-black mb-2">Access Denied</h2>
@@ -1890,7 +1890,7 @@ export default function App() {
   // --- LOGIN SCREEN ---
   if (!user) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-[#0b1120] p-6">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#0f0f11] p-6">
         <div className="bg-white p-10 rounded-[40px] shadow-2xl border border-slate-100 flex flex-col items-center max-w-sm w-full text-center">
           <div className="w-28 h-28 mb-4 flex items-center justify-center"><IgniteLogo className="w-full h-full object-contain" /></div>
           <h1 className="text-3xl font-black text-slate-900 mb-1 tracking-tight">Ignite PM</h1>
@@ -2095,9 +2095,9 @@ export default function App() {
         auth={auth}
       />
     ) : (
-      <div className="min-h-screen bg-[#0b1120] text-slate-900 font-sans">
-        <nav className="bg-white border-b border-slate-100 p-4 sticky top-0 z-40 shadow-sm">
-          <div className="max-w-6xl mx-auto flex justify-between items-center">
+      <div className="min-h-screen bg-[#0f0f11] text-zinc-100 font-sans">
+        <nav className="sticky top-0 z-40 border-b border-white/10 bg-[#0f0f11]/90 backdrop-blur-md">
+          <div className="mx-auto flex w-full max-w-[min(1720px,calc(100vw-1.5rem))] items-center justify-between px-4 py-3 sm:px-6">
             <div
               className="flex items-center gap-2 group cursor-pointer"
               onClick={() => navigate('/kiosk')}
@@ -2105,18 +2105,18 @@ export default function App() {
               <div className="w-10 h-10 flex items-center justify-center group-hover:scale-110 transition-transform">
                 <IgniteLogo className="w-full h-full object-contain" />
               </div>
-              <span className="font-black text-xl tracking-tighter hidden sm:inline">
+              <span className="font-black text-xl tracking-tighter text-white hidden sm:inline">
                 TimeTracker
               </span>
             </div>
 
-          <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-2xl">
+          <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 p-1.5">
               <button
                 onClick={() => navigate('/kiosk')}
                 className={`px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
                   view === 'employee'
-                    ? 'bg-white shadow-md text-[#fd7414]'
-                    : 'text-slate-400 hover:text-slate-600'
+                    ? 'bg-[#fd7414] text-white shadow-md shadow-[#fd7414]/25'
+                    : 'text-zinc-400 hover:text-white'
                 }`}
               >
                 Kiosk
@@ -2126,8 +2126,8 @@ export default function App() {
                 onClick={() => navigate('/workspace')}
                 className={`px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
                   view === 'admin'
-                    ? 'bg-white shadow-md text-[#fd7414]'
-                    : 'text-slate-400 hover:text-slate-600'
+                    ? 'bg-[#fd7414] text-white shadow-md shadow-[#fd7414]/25'
+                    : 'text-zinc-400 hover:text-white'
                 }`}
               >
                 Workspace
@@ -2137,8 +2137,8 @@ export default function App() {
                 onClick={() => navigate('/admin')}
                 className={`px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
                   view === 'admin'
-                    ? 'bg-white shadow-md text-[#fd7414]'
-                    : 'text-slate-400 hover:text-slate-600'
+                    ? 'bg-[#fd7414] text-white shadow-md shadow-[#fd7414]/25'
+                    : 'text-zinc-400 hover:text-white'
                 }`}
               >
                 Admin
@@ -2149,7 +2149,8 @@ export default function App() {
                   setUser(null);
                   signOut(auth);
                 }}
-                className="ml-2 p-2 text-slate-300 hover:text-red-500 transition-colors"
+                className="ml-1 p-2 text-zinc-500 hover:text-white transition-colors"
+                title="Sign out"
               >
                 <LogOut className="w-5 h-5" />
               </button>
@@ -2157,10 +2158,17 @@ export default function App() {
           </div>
         </nav>
 
-        <main className="max-w-6xl mx-auto p-6 pb-24">
+        <main className="mx-auto w-full max-w-[min(1720px,calc(100vw-1.5rem))] px-4 py-6 pb-24 sm:px-6 sm:py-8">
           <Routes>
             <Route path="/" element={<Navigate to="/kiosk" replace />} />
-            <Route path="/kiosk" element={<KioskRouteView {...kioskRouteProps} />} />
+            <Route
+              path="/kiosk"
+              element={
+                <div data-kiosk-theme="dark" className="w-full">
+                  <KioskRouteView {...kioskRouteProps} />
+                </div>
+              }
+            />
             <Route
               path="/admin"
               element={
