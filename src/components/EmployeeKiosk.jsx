@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   Activity,
+  ChevronDown,
   Coffee,
   GripVertical,
   History,
@@ -19,6 +20,7 @@ import {
   buildKioskBillingTargetFromTodoRow,
   todoRowMatchesFilters,
   sortTodoRowsByDueThenClient,
+  sortTodoRowsByClientThenDue,
 } from '../utils/todoFilters.js';
 
 const EmployeeKiosk = ({
@@ -57,6 +59,10 @@ const EmployeeKiosk = ({
   todoCategoryKey,
   projects = [],
   queueKioskTaskStart = () => {},
+  userTodos = [],
+  updateUserTodos,
+  adminUsers = [],
+  handleIdleAutoClockOut,
 }) => {
   const [clientSearch, setClientSearch] = React.useState('');
   const [socialAdAmount, setSocialAdAmount] = React.useState('');
@@ -69,6 +75,7 @@ const EmployeeKiosk = ({
   const [categoryTodoMineOnly, setCategoryTodoMineOnly] = React.useState(true);
   const [kioskTaskStatusFilter, setKioskTaskStatusFilter] = React.useState('open');
   const [kioskTaskDueFilter, setKioskTaskDueFilter] = React.useState('next7');
+  const [kioskTaskSortMode, setKioskTaskSortMode] = React.useState('due');
   const [todoRecurrenceMode, setTodoRecurrenceMode] = React.useState('none');
   const [todoOptionsOpen, setTodoOptionsOpen] = React.useState(false);
   const [kioskExpenseAmount, setKioskExpenseAmount] = React.useState('');
@@ -76,6 +83,18 @@ const EmployeeKiosk = ({
   const [kioskExpenseCurrency, setKioskExpenseCurrency] = React.useState('CAD');
   const [kioskExpenseApplyMarkup, setKioskExpenseApplyMarkup] = React.useState(true);
   const [kioskExpenseSubmitting, setKioskExpenseSubmitting] = React.useState(false);
+  const [personalListDraft, setPersonalListDraft] = React.useState('');
+  const [personalListSaving, setPersonalListSaving] = React.useState(false);
+  const [personalAssigneeOpenId, setPersonalAssigneeOpenId] = React.useState(null);
+  const [personalLinkItem, setPersonalLinkItem] = React.useState(null);
+  const [linkPickClientId, setLinkPickClientId] = React.useState('');
+  const [linkPickKind, setLinkPickKind] = React.useState('retainer');
+  const [linkPickRetainerName, setLinkPickRetainerName] = React.useState('');
+  const [linkPickProjectId, setLinkPickProjectId] = React.useState('');
+  const [personalOptionsItemId, setPersonalOptionsItemId] = React.useState(null);
+  const [personalOptionsDue, setPersonalOptionsDue] = React.useState('');
+  const [personalOptionsRecurrence, setPersonalOptionsRecurrence] =
+    React.useState('none');
 
   const safeCategoryKey = (category) =>
     String(category)
@@ -254,7 +273,133 @@ const EmployeeKiosk = ({
     return () => clearInterval(timer);
   }, [policy?.idleReminderMinutes, activeTask, activeTaskNotes]);
 
+  const lastActivityRef = React.useRef(Date.now());
+  const [idleFailsafeOpen, setIdleFailsafeOpen] = React.useState(null);
+
+  React.useEffect(() => {
+    if (activeShift) {
+      lastActivityRef.current = Date.now();
+    } else {
+      setIdleFailsafeOpen(null);
+    }
+  }, [activeShift?.id]);
+
+  React.useEffect(() => {
+    if (!activeShift || typeof handleIdleAutoClockOut !== 'function') return;
+    const failsafeMin = Number(policy?.idleFailsafeMinutes || 0);
+    if (failsafeMin <= 0) return;
+
+    const bump = () => {
+      if (!idleFailsafeOpen) {
+        lastActivityRef.current = Date.now();
+      }
+    };
+    window.addEventListener('pointerdown', bump);
+    window.addEventListener('keydown', bump);
+    window.addEventListener('scroll', bump, true);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') bump();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('pointerdown', bump);
+      window.removeEventListener('keydown', bump);
+      window.removeEventListener('scroll', bump, true);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [activeShift, handleIdleAutoClockOut, idleFailsafeOpen, policy?.idleFailsafeMinutes]);
+
+  React.useEffect(() => {
+    if (!activeShift || typeof handleIdleAutoClockOut !== 'function') return;
+    const failsafeMin = Number(policy?.idleFailsafeMinutes || 0);
+    if (failsafeMin <= 0) return;
+    const iv = window.setInterval(() => {
+      if (idleFailsafeOpen) return;
+      const idleMs = Date.now() - lastActivityRef.current;
+      if (idleMs >= failsafeMin * 60 * 1000) {
+        const sec = Math.max(
+          10,
+          Number(policy?.idleFailsafeConfirmSeconds) || 120,
+        );
+        setIdleFailsafeOpen({ seconds: sec });
+      }
+    }, 4000);
+    return () => window.clearInterval(iv);
+  }, [
+    activeShift,
+    handleIdleAutoClockOut,
+    idleFailsafeOpen,
+    policy?.idleFailsafeMinutes,
+    policy?.idleFailsafeConfirmSeconds,
+  ]);
+
+  React.useEffect(() => {
+    if (!idleFailsafeOpen || typeof handleIdleAutoClockOut !== 'function') return;
+    const { seconds } = idleFailsafeOpen;
+    if (seconds <= 0) {
+      handleIdleAutoClockOut();
+      setIdleFailsafeOpen(null);
+      return;
+    }
+    const t = window.setTimeout(() => {
+      setIdleFailsafeOpen((prev) =>
+        prev ? { seconds: Math.max(0, prev.seconds - 1) } : null,
+      );
+    }, 1000);
+    return () => window.clearTimeout(t);
+  }, [idleFailsafeOpen, handleIdleAutoClockOut]);
+
   const meLower = String(user?.email || '').trim().toLowerCase();
+
+  const assignableEmails = React.useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...(adminUsers || [])
+            .map((a) => String(a?.email || '').trim().toLowerCase())
+            .filter(Boolean),
+          meLower,
+        ]),
+      ).filter(Boolean),
+    [adminUsers, meLower],
+  );
+
+  const asDateInputMs = (ms) => {
+    if (!ms) return '';
+    const d = new Date(ms);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const buildPersonalRecurrenceFromMode = (mode, dueDateMs) => {
+    const m = String(mode || 'none');
+    if (m === 'none') return null;
+    const hasMs = dueDateMs != null && !Number.isNaN(Number(dueDateMs));
+    const src = hasMs ? new Date(dueDateMs) : new Date();
+    if (Number.isNaN(src.getTime())) return null;
+    src.setHours(12, 0, 0, 0);
+    if (m === 'weekly') {
+      return { type: 'weekly_weekday', weekday: src.getDay() };
+    }
+    if (m === 'monthly') {
+      return { type: 'monthly_fixed_day', dayOfMonth: src.getDate() };
+    }
+    if (m === 'annual') {
+      return {
+        type: 'annual_fixed',
+        month: src.getMonth(),
+        day: src.getDate(),
+      };
+    }
+    return null;
+  };
+
+  const personalOptionsTargetItem = React.useMemo(() => {
+    if (!personalOptionsItemId) return null;
+    return (userTodos || []).find((t) => t.id === personalOptionsItemId) || null;
+  }, [personalOptionsItemId, userTodos]);
 
   const globalTodoRows = React.useMemo(
     () =>
@@ -285,11 +430,14 @@ const EmployeeKiosk = ({
         return assignees.includes(meLower);
       });
     }
-    return sortTodoRowsByDueThenClient(rows);
+    return kioskTaskSortMode === 'client'
+      ? sortTodoRowsByClientThenDue(rows)
+      : sortTodoRowsByDueThenClient(rows);
   }, [
     globalTodoRows,
     kioskTaskStatusFilter,
     kioskTaskDueFilter,
+    kioskTaskSortMode,
     todoMineOnly,
     meLower,
     user,
@@ -297,7 +445,7 @@ const EmployeeKiosk = ({
 
   return (
     <div className="max-w-6xl mx-auto px-3">
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_300px] gap-6 items-start">
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(360px,42vw)] gap-6 items-start">
         <div className="space-y-6 min-w-0">
       <div className="bg-white rounded-[32px] shadow-xl border border-slate-100 overflow-hidden">
         <div className="p-8 text-center border-b border-slate-50 bg-slate-50/30">
@@ -1442,9 +1590,9 @@ const EmployeeKiosk = ({
         )}
       </div>
         </div>
-        <aside className="rounded-[24px] border border-slate-100 bg-white p-4 shadow-sm xl:sticky xl:top-4 xl:self-start space-y-3">
+        <aside className="rounded-[24px] border border-slate-100 bg-white p-4 shadow-sm xl:sticky xl:top-4 xl:self-start space-y-3 min-w-0">
           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-            Your tasks
+            Client to-dos
           </div>
           <div className="grid grid-cols-2 gap-2">
             <select
@@ -1464,6 +1612,14 @@ const EmployeeKiosk = ({
               <option value="next14">Next 14d</option>
               <option value="next30">Next 30d</option>
               <option value="all_future">All future</option>
+            </select>
+            <select
+              value={kioskTaskSortMode}
+              onChange={(e) => setKioskTaskSortMode(e.target.value)}
+              className="col-span-2 bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-[#fd7414]/40"
+            >
+              <option value="due">Sort: Due date</option>
+              <option value="client">Sort: Client</option>
             </select>
           </div>
           <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600">
@@ -1526,8 +1682,550 @@ const EmployeeKiosk = ({
               })
             )}
           </div>
+
+          <div className="border-t border-slate-100 pt-4 mt-4 space-y-3">
+            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+              Your To-Do List
+            </div>
+            <p className="text-[10px] font-bold text-slate-400 leading-snug">
+              Personal items stay here until you link one to a client and category or project — then it moves to Client to-dos.
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={personalListDraft}
+                onChange={(e) => setPersonalListDraft(e.target.value)}
+                placeholder="Add a to-do…"
+                className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-[#fd7414]/40"
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return;
+                  e.preventDefault();
+                  (async () => {
+                    const text = String(personalListDraft || '').trim();
+                    if (!text || !updateUserTodos) return;
+                    setPersonalListSaving(true);
+                    try {
+                      const nid = `user_todo_${Date.now()}_${Math.random()
+                        .toString(36)
+                        .slice(2)}`;
+                      await updateUserTodos([
+                        ...(userTodos || []),
+                        {
+                          id: nid,
+                          text,
+                          done: false,
+                          doneAt: null,
+                          createdAt: Date.now(),
+                          assigneeEmails: meLower ? [meLower] : [],
+                        },
+                      ]);
+                      setPersonalListDraft('');
+                    } finally {
+                      setPersonalListSaving(false);
+                    }
+                  })();
+                }}
+              />
+              <button
+                type="button"
+                disabled={
+                  personalListSaving ||
+                  !updateUserTodos ||
+                  !String(personalListDraft || '').trim()
+                }
+                onClick={async () => {
+                  const text = String(personalListDraft || '').trim();
+                  if (!text || !updateUserTodos) return;
+                  setPersonalListSaving(true);
+                  try {
+                    const nid = `user_todo_${Date.now()}_${Math.random()
+                      .toString(36)
+                      .slice(2)}`;
+                    await updateUserTodos([
+                      ...(userTodos || []),
+                      {
+                        id: nid,
+                        text,
+                        done: false,
+                        doneAt: null,
+                        createdAt: Date.now(),
+                        assigneeEmails: meLower ? [meLower] : [],
+                      },
+                    ]);
+                    setPersonalListDraft('');
+                  } finally {
+                    setPersonalListSaving(false);
+                  }
+                }}
+                className="shrink-0 px-4 py-2 rounded-xl bg-black text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-40"
+              >
+                Add
+              </button>
+            </div>
+            <div className="max-h-[min(360px,50vh)] overflow-y-auto space-y-2 pr-1">
+              {(userTodos || []).length === 0 ? (
+                <p className="text-xs text-slate-400">No personal to-dos yet.</p>
+              ) : (
+                [...(userTodos || [])]
+                  .sort((a, b) => {
+                    if (!!a.done === !!b.done) return 0;
+                    return a.done ? 1 : -1;
+                  })
+                  .map((t) => {
+                    const rawAssign = Array.isArray(t.assigneeEmails)
+                      ? t.assigneeEmails
+                          .map((e) => String(e || '').trim().toLowerCase())
+                          .filter(Boolean)
+                      : [];
+                    const assignOpen = personalAssigneeOpenId === t.id;
+                    return (
+                      <div
+                        key={t.id}
+                        className="rounded-xl p-2 border border-slate-100 bg-slate-50/50 space-y-1"
+                      >
+                        <label className="flex items-start gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={!!t.done}
+                            disabled={personalListSaving || !updateUserTodos}
+                            onChange={async () => {
+                              if (!updateUserTodos) return;
+                              setPersonalListSaving(true);
+                              try {
+                                await updateUserTodos(
+                                  (userTodos || []).map((x) =>
+                                    x.id === t.id
+                                      ? {
+                                          ...x,
+                                          done: !x.done,
+                                          doneAt: !x.done ? Date.now() : null,
+                                        }
+                                      : x,
+                                  ),
+                                );
+                              } finally {
+                                setPersonalListSaving(false);
+                              }
+                            }}
+                            className="mt-0.5"
+                          />
+                          <span
+                            className={`text-xs font-bold flex-1 min-w-0 ${
+                              t.done ? 'line-through text-slate-400' : 'text-slate-800'
+                            }`}
+                          >
+                            {t.text || '(no text)'}
+                          </span>
+                        </label>
+                        <div className="text-[9px] font-bold text-slate-400 pl-6">
+                          {t.dueDate
+                            ? `Due ${new Date(t.dueDate).toLocaleDateString()}`
+                            : 'No due date'}
+                          {' · '}
+                          {rawAssign.length
+                            ? `Assigned: ${rawAssign.join(', ')}`
+                            : 'Unassigned'}
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 pl-6">
+                          <div className="relative">
+                            <button
+                              type="button"
+                              disabled={personalListSaving}
+                              onClick={() =>
+                                setPersonalAssigneeOpenId((prev) =>
+                                  prev === t.id ? null : t.id,
+                                )
+                              }
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white border border-slate-200 text-[9px] font-black uppercase tracking-widest text-slate-600"
+                            >
+                              Assign
+                              <ChevronDown className="w-3 h-3" />
+                            </button>
+                            {assignOpen && (
+                              <div className="absolute left-0 z-[130] mt-1 w-[260px] max-w-[85vw] bg-white border border-slate-200 rounded-xl shadow-xl p-2">
+                                <div className="max-h-[180px] overflow-y-auto space-y-1">
+                                  {assignableEmails.map((email) => {
+                                    const checked = rawAssign.includes(email);
+                                    return (
+                                      <label
+                                        key={email}
+                                        className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer text-xs font-bold"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={async () => {
+                                            if (!updateUserTodos) return;
+                                            const next = checked
+                                              ? rawAssign.filter((e) => e !== email)
+                                              : [...rawAssign, email].sort();
+                                            setPersonalListSaving(true);
+                                            try {
+                                              await updateUserTodos(
+                                                (userTodos || []).map((x) =>
+                                                  x.id === t.id
+                                                    ? { ...x, assigneeEmails: next }
+                                                    : x,
+                                                ),
+                                              );
+                                            } finally {
+                                              setPersonalListSaving(false);
+                                            }
+                                          }}
+                                        />
+                                        <span className="truncate">{email}</span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                                <button
+                                  type="button"
+                                  className="mt-2 w-full text-[9px] font-black uppercase text-slate-500"
+                                  onClick={() => setPersonalAssigneeOpenId(null)}
+                                >
+                                  Done
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            disabled={personalListSaving}
+                            onClick={() => {
+                              setPersonalOptionsItemId(t.id);
+                              setPersonalOptionsDue(asDateInputMs(t.dueDate));
+                              const tp = t?.recurrence?.type;
+                              let mode = 'none';
+                              if (tp === 'weekly_weekday') mode = 'weekly';
+                              else if (tp === 'annual_fixed') mode = 'annual';
+                              else if (tp === 'monthly_fixed_day' || t?.recurring) mode = 'monthly';
+                              setPersonalOptionsRecurrence(mode);
+                            }}
+                            className="px-2 py-1 rounded-lg bg-white border border-slate-200 text-[9px] font-black uppercase tracking-widest text-slate-600"
+                          >
+                            Options
+                          </button>
+                          <button
+                            type="button"
+                            disabled={personalListSaving || !updateClientTodo}
+                            onClick={() => {
+                              setPersonalLinkItem(t);
+                              const first = (clients || [])[0];
+                              setLinkPickClientId(first?.id || '');
+                              setLinkPickKind('retainer');
+                              setLinkPickRetainerName('');
+                              setLinkPickProjectId('');
+                            }}
+                            className="px-2 py-1 rounded-lg bg-[#fd7414]/10 border border-[#fd7414]/30 text-[9px] font-black uppercase tracking-widest text-[#fd7414]"
+                          >
+                            Link to client
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+              )}
+            </div>
+          </div>
         </aside>
       </div>
+
+      {personalLinkItem && (
+        <div className="fixed inset-0 z-[140] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-start gap-2">
+              <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">
+                Link to client list
+              </h4>
+              <button
+                type="button"
+                className="text-xs font-bold text-slate-400 hover:text-slate-600"
+                onClick={() => setPersonalLinkItem(null)}
+              >
+                Close
+              </button>
+            </div>
+            <p className="text-xs font-bold text-slate-500">
+              Choose where this to-do should live. It will be removed from your personal list after linking.
+            </p>
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">
+                Client
+              </label>
+              <select
+                value={linkPickClientId}
+                onChange={(e) => {
+                  setLinkPickClientId(e.target.value);
+                  setLinkPickRetainerName('');
+                  setLinkPickProjectId('');
+                }}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold"
+              >
+                <option value="">Select client…</option>
+                {(clients || []).map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">
+                Target type
+              </label>
+              <select
+                value={linkPickKind}
+                onChange={(e) => {
+                  setLinkPickKind(e.target.value);
+                  setLinkPickRetainerName('');
+                  setLinkPickProjectId('');
+                }}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold"
+              >
+                <option value="retainer">Retainer category</option>
+                <option value="project">Custom project</option>
+              </select>
+            </div>
+            {linkPickKind === 'retainer' ? (
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">
+                  Category
+                </label>
+                <select
+                  value={linkPickRetainerName}
+                  onChange={(e) => setLinkPickRetainerName(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold"
+                >
+                  <option value="">Select category…</option>
+                  {Object.keys(
+                    (clients || []).find((c) => c.id === linkPickClientId)?.retainers ||
+                      {},
+                  ).map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">
+                  Project
+                </label>
+                <select
+                  value={linkPickProjectId}
+                  onChange={(e) => setLinkPickProjectId(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold"
+                >
+                  <option value="">Select project…</option>
+                  {(projects || [])
+                    .filter(
+                      (p) =>
+                        p &&
+                        String(p.clientId || '') === String(linkPickClientId) &&
+                        !p.archived,
+                    )
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.title || p.id}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
+            <div className="flex gap-2 justify-end pt-2">
+              <button
+                type="button"
+                className="px-4 py-2 rounded-xl text-xs font-black bg-slate-100 text-slate-600"
+                onClick={() => setPersonalLinkItem(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={
+                  personalListSaving ||
+                  !linkPickClientId ||
+                  (linkPickKind === 'retainer' && !linkPickRetainerName) ||
+                  (linkPickKind === 'project' && !linkPickProjectId) ||
+                  !updateUserTodos ||
+                  !updateClientTodo ||
+                  !getTodoStateForCycle
+                }
+                onClick={async () => {
+                  const client = (clients || []).find((c) => c.id === linkPickClientId);
+                  if (!client || !personalLinkItem) return;
+                  const cycleStart = getBillingPeriod(client.billingDay || 1, 0).start;
+                  if (client?.cycleLocks?.[String(cycleStart)]?.locked) {
+                    window.alert('This billing cycle is locked. Unlock it on the client page first.');
+                    return;
+                  }
+                  const categoryKey =
+                    linkPickKind === 'project'
+                      ? todoCategoryKey(`project_${linkPickProjectId}`)
+                      : todoCategoryKey(linkPickRetainerName);
+                  const todoState = getTodoStateForCycle(client, cycleStart);
+                  const catTodo = todoState[categoryKey] || {
+                    closed: false,
+                    items: [],
+                  };
+                  const items = catTodo.items || [];
+                  const newId = `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+                  const newItem = {
+                    id: newId,
+                    text: personalLinkItem.text,
+                    done: !!personalLinkItem.done,
+                    doneAt: personalLinkItem.doneAt || null,
+                    assigneeEmails: Array.isArray(personalLinkItem.assigneeEmails)
+                      ? personalLinkItem.assigneeEmails.filter(Boolean)
+                      : [],
+                    dueDate: personalLinkItem.dueDate ?? null,
+                    recurrence: personalLinkItem.recurrence || null,
+                    recurring: !!personalLinkItem.recurring,
+                    recurringId: personalLinkItem.recurringId || null,
+                    pinned: !!personalLinkItem.pinned,
+                  };
+                  setPersonalListSaving(true);
+                  try {
+                    await updateClientTodo(client, cycleStart, categoryKey, {
+                      ...catTodo,
+                      items: [...items, newItem],
+                    });
+                    await updateUserTodos(
+                      (userTodos || []).filter((x) => x.id !== personalLinkItem.id),
+                    );
+                    setPersonalLinkItem(null);
+                  } catch (err) {
+                    window.alert(err?.message || String(err));
+                  } finally {
+                    setPersonalListSaving(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-black bg-black text-white disabled:opacity-40"
+              >
+                {personalListSaving ? 'Linking…' : 'Link & move'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {personalOptionsItemId && personalOptionsTargetItem && (
+        <div className="fixed inset-0 z-[140] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 p-5 space-y-4">
+            <div className="flex justify-between items-start">
+              <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">
+                To-do options
+              </h4>
+              <button
+                type="button"
+                className="text-xs font-bold text-slate-400"
+                onClick={() => setPersonalOptionsItemId(null)}
+              >
+                Close
+              </button>
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">
+                Due date
+              </label>
+              <input
+                type="date"
+                value={personalOptionsDue}
+                onChange={(e) => setPersonalOptionsDue(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">
+                Recurrence
+              </label>
+              <select
+                value={personalOptionsRecurrence}
+                onChange={(e) => setPersonalOptionsRecurrence(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm"
+              >
+                <option value="none">No repeat</option>
+                <option value="weekly">Weekly (same weekday)</option>
+                <option value="monthly">Monthly (same day of month)</option>
+                <option value="annual">Annually (same calendar date)</option>
+              </select>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className="px-3 py-2 rounded-xl text-xs font-black bg-slate-100"
+                onClick={() => {
+                  setPersonalOptionsDue('');
+                  setPersonalOptionsRecurrence('none');
+                }}
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                disabled={personalListSaving || !updateUserTodos}
+                onClick={async () => {
+                  if (!updateUserTodos) return;
+                  const dueDate = parseDateInputToMs(personalOptionsDue);
+                  const recurrence = buildPersonalRecurrenceFromMode(
+                    personalOptionsRecurrence,
+                    dueDate,
+                  );
+                  const tid = personalOptionsTargetItem.id;
+                  setPersonalListSaving(true);
+                  try {
+                    await updateUserTodos(
+                      (userTodos || []).map((x) =>
+                        x.id === tid
+                          ? {
+                              ...x,
+                              dueDate,
+                              recurrence,
+                              recurring: !!recurrence,
+                              recurringId: recurrence ? x.recurringId || x.id : null,
+                            }
+                          : x,
+                      ),
+                    );
+                    setPersonalOptionsItemId(null);
+                  } finally {
+                    setPersonalListSaving(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-black bg-[#fd7414] text-white"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {idleFailsafeOpen && activeShift && (
+        <div className="fixed inset-0 z-[200] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 space-y-4 text-center">
+            <h3 className="text-lg font-black text-slate-900">Still working?</h3>
+            <p className="text-sm font-bold text-slate-600">
+              We haven&apos;t seen any activity for a while. Confirm you&apos;re still at
+              the kiosk, or your shift will end automatically.
+            </p>
+            <div className="text-3xl font-black text-[#fd7414] font-mono">
+              {idleFailsafeOpen.seconds}s
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                lastActivityRef.current = Date.now();
+                setIdleFailsafeOpen(null);
+              }}
+              className="w-full py-4 rounded-2xl bg-black text-white font-black text-sm uppercase tracking-widest hover:bg-slate-800"
+            >
+              I&apos;m here
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,4 +1,4 @@
-﻿/** @typedef {"open" | "completed"} TodoStatusFilter */
+/** @typedef {"open" | "completed"} TodoStatusFilter */
 /** @typedef {"next7" | "next14" | "next30" | "all_future"} TodoDueWindowFilter */
 
 export function startOfTodayMs(now = Date.now()) {
@@ -39,18 +39,30 @@ export function todoRowMatchesFilters(row, statusFilter, dueFilter, now = Date.n
   );
 }
 
+function compareTodoRowsByDueThenClient(a, b, t0) {
+  const ad = Number(a.item?.dueDate || 0);
+  const bd = Number(b.item?.dueDate || 0);
+  const aOver = ad > 0 && ad < t0;
+  const bOver = bd > 0 && bd < t0;
+  if (aOver !== bOver) return aOver ? -1 : 1;
+  if (ad && bd) return ad - bd;
+  if (ad && !bd) return -1;
+  if (!ad && bd) return 1;
+  return String(a.clientName || "").localeCompare(String(b.clientName || ""));
+}
+
 export function sortTodoRowsByDueThenClient(rows) {
   const t0 = startOfTodayMs();
+  return [...rows].sort((a, b) => compareTodoRowsByDueThenClient(a, b, t0));
+}
+
+/** Group by client name first, then due date (overdue first, etc.). */
+export function sortTodoRowsByClientThenDue(rows) {
+  const t0 = startOfTodayMs();
   return [...rows].sort((a, b) => {
-    const ad = Number(a.item?.dueDate || 0);
-    const bd = Number(b.item?.dueDate || 0);
-    const aOver = ad > 0 && ad < t0;
-    const bOver = bd > 0 && bd < t0;
-    if (aOver !== bOver) return aOver ? -1 : 1;
-    if (ad && bd) return ad - bd;
-    if (ad && !bd) return -1;
-    if (!ad && bd) return 1;
-    return String(a.clientName || "").localeCompare(String(b.clientName || ""));
+    const c = String(a.clientName || '').localeCompare(String(b.clientName || ''));
+    if (c !== 0) return c;
+    return compareTodoRowsByDueThenClient(a, b, t0);
   });
 }
 

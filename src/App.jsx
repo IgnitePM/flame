@@ -261,6 +261,7 @@ export default function App() {
     requestDescription: '',
     estimatedBudget: '',
     estimatedHours: '',
+    deadline: '',
   });
   const [projectBudgetOverride, setProjectBudgetOverride] = useState(false);
   const [projectSubmitting, setProjectSubmitting] = useState(false);
@@ -275,16 +276,33 @@ export default function App() {
   const recurringExpenseSyncInProgressRef = useRef(false);
   const [activeTaskNotes, setActiveTaskNotes] = useState('');
 
+  const idleShutdownRef = useRef({
+    activeTask: null,
+    activeShift: null,
+    activeTaskNotes: '',
+  });
+  useEffect(() => {
+    idleShutdownRef.current = { activeTask, activeShift, activeTaskNotes };
+  }, [activeTask, activeShift, activeTaskNotes]);
+
   // Client Portal State
   const [portalOffset, setPortalOffset] = useState(0);
   const [policy, setPolicy] = useState(() => {
+    const defaults = {
+      requireClockOutNote: false,
+      idleReminderMinutes: 0,
+      idleFailsafeMinutes: 0,
+      idleFailsafeConfirmSeconds: 120,
+    };
     try {
       const raw = localStorage.getItem('ignite_policy');
-      return raw
-        ? JSON.parse(raw)
-        : { requireClockOutNote: false, idleReminderMinutes: 0 };
+      if (!raw) return defaults;
+      const parsed = JSON.parse(raw);
+      return typeof parsed === 'object' && parsed
+        ? { ...defaults, ...parsed }
+        : defaults;
     } catch {
-      return { requireClockOutNote: false, idleReminderMinutes: 0 };
+      return defaults;
     }
   });
 
@@ -774,6 +792,47 @@ export default function App() {
     await updateDoc(doc(db, 'timesheets', activeShift.id), { clockOutTime: endTime, status: 'completed', totalSavedDuration: newTotal, duration: newTotal });
   };
 
+  const handleIdleAutoClockOut = useCallback(async () => {
+    const { activeTask: task, activeShift: shift, activeTaskNotes: notes } =
+      idleShutdownRef.current;
+    const IDLE_TAG =
+      '[Clock stopped automatically: session was idle — Ignite PM kiosk]';
+    const endTime = Date.now();
+    try {
+      if (task?.id) {
+        const segment = endTime - (task.lastResumeTime || task.clockInTime);
+        const newTotal = (task.totalSavedDuration || 0) + segment;
+        const base = String(notes || '').trim() || String(task.notes || '').trim();
+        const finalNotes = base ? `${base}\n\n${IDLE_TAG}` : IDLE_TAG;
+        await updateDoc(doc(db, 'taskLogs', task.id), {
+          clockOutTime: endTime,
+          status: 'completed',
+          totalSavedDuration: newTotal,
+          duration: newTotal,
+          notes: finalNotes,
+        });
+        setActiveTaskNotes('');
+      }
+      if (shift?.id) {
+        let newTotal = shift.totalSavedDuration || 0;
+        if (shift.status === 'active') {
+          newTotal += endTime - (shift.lastResumeTime || shift.clockInTime);
+        }
+        await updateDoc(doc(db, 'timesheets', shift.id), {
+          clockOutTime: endTime,
+          status: 'completed',
+          totalSavedDuration: newTotal,
+          duration: newTotal,
+          autoStoppedReason: 'idle_timeout',
+          autoStoppedAt: endTime,
+          shiftNote: IDLE_TAG,
+        });
+      }
+    } catch (err) {
+      console.error('Idle auto clock-out failed:', err);
+    }
+  }, []);
+
   // Smart Extract from HubSpot Notes
   const extractFromNotes = () => {
     const text = manualTaskValues.notes;
@@ -1012,6 +1071,13 @@ export default function App() {
     setAddonValues({ hours: '', notes: '', category: '' });
   };
 
+  const parseProjectDeadlineMs = (value) => {
+    if (!value || typeof value !== 'string') return null;
+    const [y, m, d] = value.split('-').map(Number);
+    if (!y || !m || !d) return null;
+    return new Date(y, m - 1, d, 12, 0, 0, 0).getTime();
+  };
+
   const submitProjectRequest = async () => {
     const clientId = projectValues.clientId || (projectModal && projectModal.id);
     const clientName = projectValues.clientName || (projectModal && projectModal.name);
@@ -1024,6 +1090,7 @@ export default function App() {
         if (!projectValues.category || !projectValues.requestDescription || !clientId)
           return;
 
+        const portalDue = parseProjectDeadlineMs(projectValues.deadline);
         await addDoc(collection(db, 'projects'), {
           clientId,
           clientName,
@@ -1034,6 +1101,7 @@ export default function App() {
           createdAt: Date.now(),
           estimate: null,
           clientDecision: null,
+          dueDate: portalDue || null,
           notificationState: {
             adminNeedsReview: true,
             clientVisible: true,
@@ -1051,12 +1119,14 @@ export default function App() {
           requestDescription: '',
           estimatedBudget: '',
           estimatedHours: '',
+          deadline: '',
         });
         return;
       }
 
       if (!projectValues.title || !clientId) return;
 
+      const adminDue = parseProjectDeadlineMs(projectValues.deadline);
       await addDoc(collection(db, 'projects'), {
         clientId,
         clientName,
@@ -1066,6 +1136,7 @@ export default function App() {
         requestDescription: projectValues.requestDescription || null,
         estimatedBudget: Number(projectValues.estimatedBudget) || 0,
         estimatedHours: Number(projectValues.estimatedHours) || 0,
+        dueDate: adminDue || null,
         status: 'requested',
         invoiced: false,
         createdAt: Date.now(),
@@ -1082,6 +1153,7 @@ export default function App() {
         requestDescription: '',
         estimatedBudget: '',
         estimatedHours: '',
+        deadline: '',
       });
     } catch (err) {
       setProjectSubmitError(err?.message || String(err));
@@ -1898,6 +1970,10 @@ export default function App() {
     todoCategoryKey,
     projects,
     queueKioskTaskStart,
+    userTodos,
+    updateUserTodos,
+    adminUsers,
+    handleIdleAutoClockOut,
   };
 
   const adminDashboardBaseProps = {
@@ -2946,6 +3022,19 @@ export default function App() {
                       placeholder="Describe what you want completed..."
                     />
                   </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
+                      Target deadline (optional)
+                    </label>
+                    <input
+                      type="date"
+                      value={projectValues.deadline || ''}
+                      onChange={(e) =>
+                        setProjectValues({ ...projectValues, deadline: e.target.value })
+                      }
+                      className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-black outline-none focus:ring-2 focus:ring-[#fd7414]"
+                    />
+                  </div>
                   <button
                     onClick={submitProjectRequest}
                     disabled={!projectValues.category || !projectValues.requestDescription}
@@ -3077,6 +3166,19 @@ export default function App() {
                         placeholder="e.g. 40"
                       />
                     </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
+                      Project deadline (optional)
+                    </label>
+                    <input
+                      type="date"
+                      value={projectValues.deadline || ''}
+                      onChange={(e) =>
+                        setProjectValues({ ...projectValues, deadline: e.target.value })
+                      }
+                      className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-black outline-none focus:ring-2 focus:ring-[#fd7414]"
+                    />
                   </div>
                   <button
                     onClick={submitProjectRequest}
