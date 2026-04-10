@@ -446,8 +446,8 @@ const EmployeeKiosk = ({
 
   return (
     <div className="max-w-6xl mx-auto px-3">
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(360px,42vw)] gap-6 items-start">
-        <div className="space-y-6 min-w-0">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-6 items-start">
+        <div className="space-y-6 min-w-0 order-1">
       <div className="bg-white rounded-[32px] shadow-xl border border-slate-100 overflow-hidden">
         <div className="p-8 text-center border-b border-slate-50 bg-slate-50/30">
           <div className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mb-3">
@@ -1591,7 +1591,8 @@ const EmployeeKiosk = ({
         )}
       </div>
         </div>
-        <aside className="rounded-[24px] border border-slate-100 bg-white p-4 shadow-sm xl:sticky xl:top-4 xl:self-start space-y-3 min-w-0">
+        <aside className="order-2 rounded-[24px] border border-slate-100 bg-white p-4 shadow-sm lg:sticky lg:top-4 lg:self-start min-w-0 w-full lg:w-[360px] lg:max-w-[360px] flex flex-col gap-3 max-h-[calc(100dvh-5.5rem)] min-h-0">
+          <div className="shrink-0 space-y-3">
           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
             Client to-dos
           </div>
@@ -1631,7 +1632,8 @@ const EmployeeKiosk = ({
             />
             Only my tasks
           </label>
-          <div className="max-h-[min(900px,85vh)] overflow-y-auto space-y-2 pr-1">
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain space-y-2 pr-1 max-h-[min(280px,38vh)] lg:max-h-[min(360px,calc(100dvh-18rem))] [scrollbar-gutter:stable]">
             {kioskFilteredRows.length === 0 ? (
               <p className="text-xs text-slate-400">No tasks match these filters.</p>
             ) : (
@@ -1686,7 +1688,7 @@ const EmployeeKiosk = ({
             )}
           </div>
 
-          <div className="border-t border-slate-100 pt-4 mt-4 space-y-3">
+          <div className="shrink-0 border-t border-slate-100 pt-4 mt-1 space-y-3 min-h-0">
             <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
               Your To-Do List
             </div>
@@ -1765,7 +1767,7 @@ const EmployeeKiosk = ({
                 Add
               </button>
             </div>
-            <div className="max-h-[min(360px,50vh)] overflow-y-auto space-y-2 pr-1">
+            <div className="max-h-[min(220px,32vh)] lg:max-h-[min(260px,calc(100dvh-24rem))] overflow-y-auto overscroll-contain space-y-2 pr-1 [scrollbar-gutter:stable]">
               {(userTodos || []).length === 0 ? (
                 <p className="text-xs text-slate-400">No personal to-dos yet.</p>
               ) : (
