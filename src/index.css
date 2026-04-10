@@ -15,128 +15,178 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Ignite PM–aligned kiosk: charcoal surfaces, zinc text, same orange accent (#fd7414) */
-[data-kiosk-theme="dark"] {
+/*
+ * Ignite dark UI: kiosk + admin/workspace share the same remaps.
+ * Scope with data-kiosk-theme="dark" and/or data-ignite-theme="dark".
+ */
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) {
   color: rgb(244 244 245);
 }
 
-[data-kiosk-theme="dark"] ::placeholder {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) ::placeholder {
   color: rgb(161 161 170);
 }
 
-[data-kiosk-theme="dark"] .bg-white {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .bg-white {
   background-color: rgb(24 24 27 / 0.92) !important;
 }
 
-[data-kiosk-theme="dark"] .bg-white\/70 {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .bg-white\/70 {
   background-color: rgb(39 39 42 / 0.72) !important;
 }
 
-[data-kiosk-theme="dark"] .bg-slate-50,
-[data-kiosk-theme="dark"] .bg-slate-50\/30,
-[data-kiosk-theme="dark"] .bg-slate-50\/50 {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .bg-slate-50,
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .bg-slate-50\/30,
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .bg-slate-50\/50,
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .bg-slate-50\/80 {
   background-color: rgb(39 39 42 / 0.55) !important;
 }
 
-[data-kiosk-theme="dark"] .bg-slate-100 {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .bg-slate-100 {
   background-color: rgb(63 63 70 / 0.45) !important;
 }
 
-[data-kiosk-theme="dark"] .hover\:bg-slate-100:hover {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .hover\:bg-slate-100:hover,
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .hover\:bg-slate-100\/80:hover {
   background-color: rgb(63 63 70 / 0.65) !important;
 }
 
-[data-kiosk-theme="dark"] .hover\:bg-slate-200:hover {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .hover\:bg-slate-200:hover {
   background-color: rgb(82 82 91 / 0.55) !important;
 }
 
-[data-kiosk-theme="dark"] .border-slate-50,
-[data-kiosk-theme="dark"] .border-slate-100,
-[data-kiosk-theme="dark"] .border-slate-200 {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .hover\:bg-slate-50:hover {
+  background-color: rgb(39 39 42 / 0.65) !important;
+}
+
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .border-slate-50,
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .border-slate-100,
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .border-slate-200 {
   border-color: rgb(255 255 255 / 0.1) !important;
 }
 
-[data-kiosk-theme="dark"] .text-slate-900,
-[data-kiosk-theme="dark"] .text-slate-800 {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-slate-900,
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-slate-800 {
   color: rgb(250 250 250) !important;
 }
 
-[data-kiosk-theme="dark"] .text-slate-700 {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-slate-700 {
   color: rgb(228 228 231) !important;
 }
 
-[data-kiosk-theme="dark"] .text-slate-600 {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-slate-600 {
   color: rgb(212 212 216) !important;
 }
 
-[data-kiosk-theme="dark"] .text-slate-500 {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-slate-500 {
   color: rgb(161 161 170) !important;
 }
 
-[data-kiosk-theme="dark"] .text-slate-400 {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-slate-400 {
   color: rgb(161 161 170) !important;
 }
 
-[data-kiosk-theme="dark"] .text-slate-300 {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-slate-300 {
   color: rgb(180 180 189) !important;
 }
 
-[data-kiosk-theme="dark"] .bg-slate-50\/50 {
-  background-color: rgb(39 39 42 / 0.45) !important;
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-slate-200,
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-slate-100 {
+  color: rgb(228 228 231) !important;
 }
 
-[data-kiosk-theme="dark"] .bg-blue-50 {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .bg-blue-50 {
   background-color: rgb(30 58 138 / 0.28) !important;
 }
 
-[data-kiosk-theme="dark"] .border-blue-200 {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .border-blue-200 {
   border-color: rgb(59 130 246 / 0.35) !important;
 }
 
-[data-kiosk-theme="dark"] .bg-orange-50 {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .bg-orange-50 {
   background-color: rgb(253 116 20 / 0.09) !important;
 }
 
-[data-kiosk-theme="dark"] .border-orange-200 {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .border-orange-200 {
   border-color: rgb(253 116 20 / 0.32) !important;
 }
 
-[data-kiosk-theme="dark"] .hover\:bg-orange-50:hover {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .hover\:bg-orange-50:hover {
   background-color: rgb(253 116 20 / 0.12) !important;
 }
 
-[data-kiosk-theme="dark"] .bg-amber-50,
-[data-kiosk-theme="dark"] .hover\:bg-amber-50\/80:hover {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .bg-amber-50,
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .hover\:bg-amber-50\/80:hover {
   background-color: rgb(245 158 11 / 0.12) !important;
 }
 
-[data-kiosk-theme="dark"] .border-amber-200 {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .border-amber-200 {
   border-color: rgb(245 158 11 / 0.35) !important;
 }
 
-[data-kiosk-theme="dark"] .text-amber-700 {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-amber-700 {
   color: rgb(251 191 36) !important;
 }
 
-[data-kiosk-theme="dark"] .text-amber-800\/90,
-[data-kiosk-theme="dark"] .text-amber-800 {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-amber-800\/90,
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-amber-800 {
   color: rgb(253 224 71) !important;
 }
 
-[data-kiosk-theme="dark"] .hover\:text-amber-600:hover {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .hover\:text-amber-600:hover {
   color: rgb(251 191 36) !important;
 }
 
-[data-kiosk-theme="dark"] .bg-emerald-100 {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .bg-emerald-100 {
   background-color: rgb(16 185 129 / 0.2) !important;
 }
 
-[data-kiosk-theme="dark"] .text-emerald-700 {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-emerald-700 {
   color: rgb(52 211 153) !important;
 }
 
-[data-kiosk-theme="dark"] select option,
-[data-kiosk-theme="dark"] optgroup {
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) select option,
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) optgroup {
   background-color: rgb(24 24 27);
   color: rgb(244 244 245);
+}
+
+/* Admin: status chips, destructive hints, blue actions */
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .bg-red-50,
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .hover\:bg-red-50:hover {
+  background-color: rgb(127 29 29 / 0.35) !important;
+}
+
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .hover\:bg-red-100:hover {
+  background-color: rgb(127 29 29 / 0.5) !important;
+}
+
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .border-red-100,
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .border-red-200 {
+  border-color: rgb(248 113 113 / 0.35) !important;
+}
+
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-red-900,
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-red-700,
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-red-600 {
+  color: rgb(252 165 165) !important;
+}
+
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-red-400,
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-red-300 {
+  color: rgb(248 113 113) !important;
+}
+
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .bg-blue-100 {
+  background-color: rgb(30 64 175 / 0.45) !important;
+}
+
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-blue-600,
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-blue-500,
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-blue-400 {
+  color: rgb(147 197 253) !important;
+}
+
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-blue-900 {
+  color: rgb(219 234 254) !important;
 }

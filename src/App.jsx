@@ -101,6 +101,13 @@ const IgniteLogo = ({ className }) => (
 
 const KioskRouteView = (props) => <EmployeeKiosk {...props} />;
 
+/** Same dark zinc remaps as kiosk (`index.css` :is(..., [data-ignite-theme="dark"])) */
+const StaffThemeShell = ({ children }) => (
+  <div data-ignite-theme="dark" className="w-full">
+    {children}
+  </div>
+);
+
 /** Kiosk users must use /workspace URLs; preserve client deep-link. */
 function RedirectKioskAdminClientToWorkspace() {
   const { clientId } = useParams();
@@ -2175,10 +2182,12 @@ export default function App() {
                 currentUserRole === 'kiosk' ? (
                   <Navigate to="/workspace" replace />
                 ) : (
-                  <AdminDashboardRouteView
-                    adminDashboardProps={adminDashboardRouteProps}
-                    navigate={navigate}
-                  />
+                  <StaffThemeShell>
+                    <AdminDashboardRouteView
+                      adminDashboardProps={adminDashboardRouteProps}
+                      navigate={navigate}
+                    />
+                  </StaffThemeShell>
                 )
               }
             />
@@ -2188,10 +2197,12 @@ export default function App() {
                 currentUserRole === 'kiosk' ? (
                   <RedirectKioskAdminClientToWorkspace />
                 ) : (
-                  <AdminDashboardRouteView
-                    adminDashboardProps={adminDashboardRouteProps}
-                    navigate={navigate}
-                  />
+                  <StaffThemeShell>
+                    <AdminDashboardRouteView
+                      adminDashboardProps={adminDashboardRouteProps}
+                      navigate={navigate}
+                    />
+                  </StaffThemeShell>
                 )
               }
             />
@@ -2199,10 +2210,12 @@ export default function App() {
               path="/workspace"
               element={
                 currentUserRole === 'kiosk' ? (
-                  <AdminDashboardRouteView
-                    adminDashboardProps={workspaceDashboardRouteProps}
-                    navigate={navigate}
-                  />
+                  <StaffThemeShell>
+                    <AdminDashboardRouteView
+                      adminDashboardProps={workspaceDashboardRouteProps}
+                      navigate={navigate}
+                    />
+                  </StaffThemeShell>
                 ) : (
                   <Navigate to="/admin" replace />
                 )
@@ -2212,10 +2225,12 @@ export default function App() {
               path="/workspace/clients/:clientId"
               element={
                 currentUserRole === 'kiosk' ? (
-                  <AdminDashboardRouteView
-                    adminDashboardProps={workspaceDashboardRouteProps}
-                    navigate={navigate}
-                  />
+                  <StaffThemeShell>
+                    <AdminDashboardRouteView
+                      adminDashboardProps={workspaceDashboardRouteProps}
+                      navigate={navigate}
+                    />
+                  </StaffThemeShell>
                 ) : (
                   <RedirectStaffWorkspaceClientToAdmin />
                 )
