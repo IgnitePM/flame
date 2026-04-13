@@ -122,6 +122,31 @@ function RedirectStaffWorkspaceClientToAdmin() {
 // Use `custom_projects` (not `projects`) for ?tab= to avoid clashes with routers/proxies treating "projects" specially.
 const CLIENT_PAGE_TABS = ['summary', 'tasks', 'custom_projects', 'timesheets'];
 
+/** `<input type="datetime-local">` uses local wall time — never use `toISOString().slice(0,16)` (that is UTC). */
+function formatMsForDatetimeLocal(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n)) return '';
+  const d = new Date(n);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = (x) => String(x).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** Parse `YYYY-MM-DDTHH:mm` from datetime-local as local civil time → epoch ms. */
+function parseDatetimeLocalToMs(s) {
+  if (s == null || typeof s !== 'string') return NaN;
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(s.trim());
+  if (!m) return NaN;
+  const y = Number(m[1]);
+  const mo = Number(m[2]) - 1;
+  const day = Number(m[3]);
+  const h = Number(m[4]);
+  const min = Number(m[5]);
+  const sec = m[6] != null ? Number(m[6]) : 0;
+  const d = new Date(y, mo, day, h, min, sec, 0);
+  return d.getTime();
+}
+
 const AdminDashboardRouteView = ({ adminDashboardProps, navigate }) => {
   const adminBasePath = adminDashboardProps?.adminBasePath || '/admin';
   const params = useParams();
@@ -1695,8 +1720,10 @@ export default function App() {
 
   const startEditing = (type, item) => {
     setEditingItem({ type, id: item.id });
-    const clockInDate = new Date(item.clockInTime).toISOString().slice(0, 16);
-    const clockOutDate = item.clockOutTime ? new Date(item.clockOutTime).toISOString().slice(0, 16) : '';
+    const clockInDate = formatMsForDatetimeLocal(item.clockInTime);
+    const clockOutDate = item.clockOutTime
+      ? formatMsForDatetimeLocal(item.clockOutTime)
+      : '';
     if (type === 'shift') {
       setEditValues({ ...item, clockInDate, clockOutDate });
       return;
@@ -1720,10 +1747,20 @@ export default function App() {
     }
     const coll = editingItem.type === 'shift' ? 'timesheets' : 'taskLogs';
     const updates = { ...editValues };
-    updates.clockInTime = new Date(editValues.clockInDate).getTime();
+    const clockInMs = parseDatetimeLocalToMs(editValues.clockInDate);
+    if (!Number.isFinite(clockInMs)) {
+      window.alert('Clock in time is invalid. Use the date and time picker.');
+      return;
+    }
+    updates.clockInTime = clockInMs;
 
     if (editValues.clockOutDate) {
-      updates.clockOutTime = new Date(editValues.clockOutDate).getTime();
+      const clockOutMs = parseDatetimeLocalToMs(editValues.clockOutDate);
+      if (!Number.isFinite(clockOutMs)) {
+        window.alert('Clock out time is invalid. Use the date and time picker.');
+        return;
+      }
+      updates.clockOutTime = clockOutMs;
       updates.duration = updates.clockOutTime - updates.clockInTime;
       updates.totalSavedDuration = updates.duration;
     }
