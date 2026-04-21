@@ -1,6 +1,11 @@
 /** @typedef {"open" | "completed"} TodoStatusFilter */
 /** @typedef {"next7" | "next14" | "next30" | "all_future"} TodoDueWindowFilter */
 
+import {
+  collectEffectiveAssigneesForTodoTree,
+  getSubtasks,
+} from './todoSubtasks.js';
+
 export function startOfTodayMs(now = Date.now()) {
   const d = new Date(now);
   d.setHours(0, 0, 0, 0);
@@ -32,11 +37,46 @@ export function taskMatchesDueWindow(item, dueFilter, now = Date.now()) {
   return due < end;
 }
 
+export function itemMatchesDueWindowWithSubtasks(item, dueFilter, now = Date.now()) {
+  if (taskMatchesDueWindow(item, dueFilter, now)) return true;
+  return getSubtasks(item).some((s) => taskMatchesDueWindow(s, dueFilter, now));
+}
+
 export function todoRowMatchesFilters(row, statusFilter, dueFilter, now = Date.now()) {
   return (
     taskMatchesStatus(row.item, statusFilter) &&
-    taskMatchesDueWindow(row.item, dueFilter, now)
+    itemMatchesDueWindowWithSubtasks(row.item, dueFilter, now)
   );
+}
+
+/**
+ * Global task list: status/due on parent row; assignee matches parent or any sub-task.
+ */
+export function globalAdminTaskRowMatchesFilters(
+  row,
+  statusFilter,
+  dueFilter,
+  assigneeFilter,
+  assigneeSpecificEmail,
+  userEmail,
+  now = Date.now(),
+) {
+  if (
+    !taskMatchesStatus(row.item, statusFilter) ||
+    !itemMatchesDueWindowWithSubtasks(row.item, dueFilter, now)
+  ) {
+    return false;
+  }
+  const treeAssignees = collectEffectiveAssigneesForTodoTree(row.item, userEmail);
+  if (assigneeFilter === 'all') return true;
+  const me = String(userEmail || '')
+    .trim()
+    .toLowerCase();
+  if (assigneeFilter === 'me') return !!me && treeAssignees.includes(me);
+  const want = String(assigneeSpecificEmail || '')
+    .trim()
+    .toLowerCase();
+  return !!want && treeAssignees.includes(want);
 }
 
 function compareTodoRowsByDueThenClient(a, b, t0) {

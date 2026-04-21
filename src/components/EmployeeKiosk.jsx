@@ -3,18 +3,14 @@ import {
   Activity,
   ChevronDown,
   Coffee,
-  GripVertical,
   History,
   LogOut,
   Pause,
-  Pin,
   Play,
 } from 'lucide-react';
-import {
-  orderTodosForDisplay,
-  reorderTodosDisplay,
-  toggleTodoPinnedById,
-} from '../utils/todoListOrder.js';
+import { orderTodosForDisplay } from '../utils/todoListOrder.js';
+import { collectEffectiveAssigneesForTodoTree } from '../utils/todoSubtasks.js';
+import KioskClientTodoItem from './KioskClientTodoItem.jsx';
 import { buildGlobalTodoRows } from '../utils/todoGlobalRows.js';
 import {
   buildKioskBillingTargetFromTodoRow,
@@ -146,6 +142,16 @@ const EmployeeKiosk = ({
     src.setHours(12, 0, 0, 0);
     if (m === 'weekly') {
       return { type: 'weekly_weekday', weekday: src.getDay() };
+    }
+    if (m === 'biweekly') {
+      return {
+        type: 'biweekly_weekday',
+        weekday: src.getDay(),
+        anchorMs: src.getTime(),
+      };
+    }
+    if (m === 'daily') {
+      return { type: 'daily_fixed' };
     }
     if (m === 'monthly') {
       return { type: 'monthly_fixed_day', dayOfMonth: src.getDate() };
@@ -384,6 +390,16 @@ const EmployeeKiosk = ({
     if (m === 'weekly') {
       return { type: 'weekly_weekday', weekday: src.getDay() };
     }
+    if (m === 'biweekly') {
+      return {
+        type: 'biweekly_weekday',
+        weekday: src.getDay(),
+        anchorMs: src.getTime(),
+      };
+    }
+    if (m === 'daily') {
+      return { type: 'daily_fixed' };
+    }
     if (m === 'monthly') {
       return { type: 'monthly_fixed_day', dayOfMonth: src.getDate() };
     }
@@ -419,17 +435,9 @@ const EmployeeKiosk = ({
       todoRowMatchesFilters(row, kioskTaskStatusFilter, kioskTaskDueFilter),
     );
     if (todoMineOnly) {
-      rows = rows.filter((row) => {
-        const raw = Array.isArray(row.item?.assigneeEmails) ? row.item.assigneeEmails : [];
-        const cleaned = raw.map((e) => String(e || '').trim().toLowerCase()).filter(Boolean);
-        const assignees =
-          cleaned.length > 0
-            ? cleaned
-            : user?.email
-              ? [String(user.email).trim().toLowerCase()]
-              : [];
-        return assignees.includes(meLower);
-      });
+      rows = rows.filter((row) =>
+        collectEffectiveAssigneesForTodoTree(row.item, user?.email).includes(meLower),
+      );
     }
     return kioskTaskSortMode === 'client'
       ? sortTodoRowsByClientThenDue(rows)
@@ -686,7 +694,7 @@ const EmployeeKiosk = ({
                           const meLower = String(user?.email || '').trim().toLowerCase();
                           const displayItems = orderTodosForDisplay(allItems).filter((item) => {
                             if (!categoryTodoMineOnly) return true;
-                            return normalizeAssignees(item).includes(meLower);
+                            return collectEffectiveAssigneesForTodoTree(item, user?.email).includes(meLower);
                           });
                           const canDragReorder = !categoryTodoMineOnly;
                           return (
@@ -724,106 +732,21 @@ const EmployeeKiosk = ({
                                   ) : (
                                     <ul className="space-y-2 mb-3">
                                       {displayItems.map((item) => (
-                                        <li
+                                        <KioskClientTodoItem
                                           key={item.id}
-                                          className={`flex items-center gap-2 rounded-lg p-2 ${getUrgencyClass(item)}`}
-                                          onDragOver={
-                                            canDragReorder
-                                              ? (e) => {
-                                                  e.preventDefault();
-                                                  e.dataTransfer.dropEffect = 'move';
-                                                }
-                                              : undefined
-                                          }
-                                          onDrop={
-                                            canDragReorder
-                                              ? (e) => {
-                                                  e.preventDefault();
-                                                  const draggedId = e.dataTransfer.getData('text/plain');
-                                                  if (!draggedId || draggedId === item.id) return;
-                                                  const disp = orderTodosForDisplay(allItems);
-                                                  const fromIdx = disp.findIndex((i) => i.id === draggedId);
-                                                  const toIdx = disp.findIndex((i) => i.id === item.id);
-                                                  if (fromIdx < 0 || toIdx < 0) return;
-                                                  const next = reorderTodosDisplay(allItems, fromIdx, toIdx);
-                                                  setTodoSaving(true);
-                                                  updateClientTodo(selectedClientObj, cycleStart, catKey, {
-                                                    ...catTodo,
-                                                    items: next,
-                                                  }).finally(() => setTodoSaving(false));
-                                                }
-                                              : undefined
-                                          }
-                                        >
-                                          {canDragReorder && (
-                                            <span
-                                              draggable={!todoSaving}
-                                              onDragStart={(e) => {
-                                                e.dataTransfer.setData('text/plain', item.id);
-                                                e.dataTransfer.effectAllowed = 'move';
-                                              }}
-                                              className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0 select-none touch-none"
-                                              title="Drag to reorder"
-                                            >
-                                              <GripVertical className="w-4 h-4" aria-hidden />
-                                            </span>
-                                          )}
-                                          <button
-                                            type="button"
-                                            disabled={todoSaving}
-                                            title={item.pinned ? 'Unpin from top' : 'Pin to top'}
-                                            onClick={() => {
-                                              setTodoSaving(true);
-                                              const next = toggleTodoPinnedById(allItems, item.id);
-                                              updateClientTodo(selectedClientObj, cycleStart, catKey, {
-                                                ...catTodo,
-                                                items: next,
-                                              }).finally(() => setTodoSaving(false));
-                                            }}
-                                            className={`shrink-0 p-1.5 rounded-lg border transition-colors ${
-                                              item.pinned
-                                                ? 'border-amber-200 bg-amber-50 text-amber-700'
-                                                : 'border-transparent text-slate-300 hover:text-amber-600 hover:bg-amber-50/80'
-                                            }`}
-                                          >
-                                            <Pin className="w-4 h-4" />
-                                          </button>
-                                          <input
-                                            type="checkbox"
-                                            checked={!!item.done}
-                                            onChange={async () => {
-                                              setTodoSaving(true);
-                                              try {
-                                                const next = allItems.map((i) =>
-                                                  i.id === item.id
-                                                    ? { ...i, done: !i.done, doneAt: !i.done ? Date.now() : null }
-                                                    : i
-                                                );
-                                                await updateClientTodo(selectedClientObj, cycleStart, catKey, {
-                                                  ...catTodo,
-                                                  items: next,
-                                                });
-                                              } finally {
-                                                setTodoSaving(false);
-                                              }
-                                            }}
-                                            disabled={todoSaving}
-                                            className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
-                                          />
-                                          <span className={`text-sm flex-1 ${item.done ? 'line-through opacity-70' : ''}`}>
-                                            {safeDisplayForReact(item.text) || '(no text)'}
-                                            {item.recurring && (
-                                              <span className="ml-2 text-[9px] font-black uppercase tracking-widest text-[#fd7414]">
-                                                Recurring
-                                              </span>
-                                            )}
-                                            {item.dueDate && (
-                                              <span className="ml-2 text-[10px] font-black uppercase tracking-widest">
-                                                Due {new Date(item.dueDate).toLocaleDateString()}
-                                              </span>
-                                            )}
-                                          </span>
-                                        </li>
+                                          item={item}
+                                          allItems={allItems}
+                                          catTodo={catTodo}
+                                          catKey={catKey}
+                                          cycleStart={cycleStart}
+                                          client={selectedClientObj}
+                                          todoSaving={todoSaving}
+                                          setTodoSaving={setTodoSaving}
+                                          updateClientTodo={updateClientTodo}
+                                          canDragReorder={canDragReorder}
+                                          getUrgencyClass={getUrgencyClass}
+                                          user={user}
+                                        />
                                       ))}
                                     </ul>
                                   )}
@@ -1128,7 +1051,7 @@ const EmployeeKiosk = ({
                           const meLower = String(user?.email || '').trim().toLowerCase();
                           const displayItems = orderTodosForDisplay(allItems).filter((item) => {
                             if (!categoryTodoMineOnly) return true;
-                            return normalizeAssignees(item).includes(meLower);
+                            return collectEffectiveAssigneesForTodoTree(item, user?.email).includes(meLower);
                           });
                           const canDragReorder = !categoryTodoMineOnly;
                           return (
@@ -1166,106 +1089,21 @@ const EmployeeKiosk = ({
                                   ) : (
                                     <ul className="space-y-2 mb-3">
                                       {displayItems.map((item) => (
-                                        <li
+                                        <KioskClientTodoItem
                                           key={item.id}
-                                          className={`flex items-center gap-2 rounded-lg p-2 ${getUrgencyClass(item)}`}
-                                          onDragOver={
-                                            canDragReorder
-                                              ? (e) => {
-                                                  e.preventDefault();
-                                                  e.dataTransfer.dropEffect = 'move';
-                                                }
-                                              : undefined
-                                          }
-                                          onDrop={
-                                            canDragReorder
-                                              ? (e) => {
-                                                  e.preventDefault();
-                                                  const draggedId = e.dataTransfer.getData('text/plain');
-                                                  if (!draggedId || draggedId === item.id) return;
-                                                  const disp = orderTodosForDisplay(allItems);
-                                                  const fromIdx = disp.findIndex((i) => i.id === draggedId);
-                                                  const toIdx = disp.findIndex((i) => i.id === item.id);
-                                                  if (fromIdx < 0 || toIdx < 0) return;
-                                                  const next = reorderTodosDisplay(allItems, fromIdx, toIdx);
-                                                  setTodoSaving(true);
-                                                  updateClientTodo(selectedClientObj, cycleStart, catKey, {
-                                                    ...catTodo,
-                                                    items: next,
-                                                  }).finally(() => setTodoSaving(false));
-                                                }
-                                              : undefined
-                                          }
-                                        >
-                                          {canDragReorder && (
-                                            <span
-                                              draggable={!todoSaving}
-                                              onDragStart={(e) => {
-                                                e.dataTransfer.setData('text/plain', item.id);
-                                                e.dataTransfer.effectAllowed = 'move';
-                                              }}
-                                              className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0 select-none touch-none"
-                                              title="Drag to reorder"
-                                            >
-                                              <GripVertical className="w-4 h-4" aria-hidden />
-                                            </span>
-                                          )}
-                                          <button
-                                            type="button"
-                                            disabled={todoSaving}
-                                            title={item.pinned ? 'Unpin from top' : 'Pin to top'}
-                                            onClick={() => {
-                                              setTodoSaving(true);
-                                              const next = toggleTodoPinnedById(allItems, item.id);
-                                              updateClientTodo(selectedClientObj, cycleStart, catKey, {
-                                                ...catTodo,
-                                                items: next,
-                                              }).finally(() => setTodoSaving(false));
-                                            }}
-                                            className={`shrink-0 p-1.5 rounded-lg border transition-colors ${
-                                              item.pinned
-                                                ? 'border-amber-200 bg-amber-50 text-amber-700'
-                                                : 'border-transparent text-slate-300 hover:text-amber-600 hover:bg-amber-50/80'
-                                            }`}
-                                          >
-                                            <Pin className="w-4 h-4" />
-                                          </button>
-                                          <input
-                                            type="checkbox"
-                                            checked={!!item.done}
-                                            onChange={async () => {
-                                              setTodoSaving(true);
-                                              try {
-                                                const next = allItems.map((i) =>
-                                                  i.id === item.id
-                                                    ? { ...i, done: !i.done, doneAt: !i.done ? Date.now() : null }
-                                                    : i
-                                                );
-                                                await updateClientTodo(selectedClientObj, cycleStart, catKey, {
-                                                  ...catTodo,
-                                                  items: next,
-                                                });
-                                              } finally {
-                                                setTodoSaving(false);
-                                              }
-                                            }}
-                                            disabled={todoSaving}
-                                            className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
-                                          />
-                                          <span className={`text-sm flex-1 ${item.done ? 'line-through opacity-70' : ''}`}>
-                                            {safeDisplayForReact(item.text) || '(no text)'}
-                                            {item.recurring && (
-                                              <span className="ml-2 text-[9px] font-black uppercase tracking-widest text-[#fd7414]">
-                                                Recurring
-                                              </span>
-                                            )}
-                                            {item.dueDate && (
-                                              <span className="ml-2 text-[10px] font-black uppercase tracking-widest">
-                                                Due {new Date(item.dueDate).toLocaleDateString()}
-                                              </span>
-                                            )}
-                                          </span>
-                                        </li>
+                                          item={item}
+                                          allItems={allItems}
+                                          catTodo={catTodo}
+                                          catKey={catKey}
+                                          cycleStart={cycleStart}
+                                          client={selectedClientObj}
+                                          todoSaving={todoSaving}
+                                          setTodoSaving={setTodoSaving}
+                                          updateClientTodo={updateClientTodo}
+                                          canDragReorder={canDragReorder}
+                                          getUrgencyClass={getUrgencyClass}
+                                          user={user}
+                                        />
                                       ))}
                                     </ul>
                                   )}
@@ -1562,7 +1400,9 @@ const EmployeeKiosk = ({
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
                 >
                   <option value="none">No repeat</option>
+                  <option value="daily">Daily</option>
                   <option value="weekly">Weekly (same weekday)</option>
+                  <option value="biweekly">Bi-weekly (same weekday)</option>
                   <option value="monthly">Monthly (same day of month)</option>
                   <option value="annual">Annually (same calendar date)</option>
                 </select>
@@ -1902,6 +1742,8 @@ const EmployeeKiosk = ({
                               const tp = t?.recurrence?.type;
                               let mode = 'none';
                               if (tp === 'weekly_weekday') mode = 'weekly';
+                              else if (tp === 'biweekly_weekday') mode = 'biweekly';
+                              else if (tp === 'daily_fixed') mode = 'daily';
                               else if (tp === 'annual_fixed') mode = 'annual';
                               else if (tp === 'monthly_fixed_day' || t?.recurring) mode = 'monthly';
                               setPersonalOptionsRecurrence(mode);
@@ -2151,7 +1993,9 @@ const EmployeeKiosk = ({
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm"
               >
                 <option value="none">No repeat</option>
+                <option value="daily">Daily</option>
                 <option value="weekly">Weekly (same weekday)</option>
+                <option value="biweekly">Bi-weekly (same weekday)</option>
                 <option value="monthly">Monthly (same day of month)</option>
                 <option value="annual">Annually (same calendar date)</option>
               </select>

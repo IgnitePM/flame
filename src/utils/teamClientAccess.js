@@ -42,10 +42,21 @@ export function collectAssigneeEmailsFromTodoCycles(todoCycles) {
       if (!Array.isArray(items)) continue;
       for (const item of items) {
         const arr = item?.assigneeEmails;
-        if (!Array.isArray(arr)) continue;
-        for (const e of arr) {
-          const n = normalizeEmail(e);
-          if (n) set.add(n);
+        if (Array.isArray(arr)) {
+          for (const e of arr) {
+            const n = normalizeEmail(e);
+            if (n) set.add(n);
+          }
+        }
+        const subs = item?.subtasks;
+        if (!Array.isArray(subs)) continue;
+        for (const sub of subs) {
+          const sa = sub?.assigneeEmails;
+          if (!Array.isArray(sa)) continue;
+          for (const e of sa) {
+            const n = normalizeEmail(e);
+            if (n) set.add(n);
+          }
         }
       }
     }

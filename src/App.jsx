@@ -63,6 +63,8 @@ import ClientPortal from './components/ClientPortal.jsx';
 import EmployeeKiosk from './components/EmployeeKiosk.jsx';
 import AdminDashboard from './components/AdminDashboard.jsx';
 import { buildTeamAccessMergeForTodoAssignees } from './utils/teamClientAccess.js';
+import { reconcileRecurringTodoInstances } from './utils/recurringTodoMaterialize.js';
+import { getSubtasks, newSubtaskId, projectSubtaskDueDateForNewCycle } from './utils/todoSubtasks.js';
 import {
   Routes,
   Route,
@@ -306,6 +308,7 @@ export default function App() {
   const kioskAutostartSearchProcessedRef = useRef('');
   const kioskAutostartClockInAttemptedRef = useRef(false);
   const recurringExpenseSyncInProgressRef = useRef(false);
+  const recurringTodoReconcileInFlightRef = useRef(false);
   const [activeTaskNotes, setActiveTaskNotes] = useState('');
 
   const idleShutdownRef = useRef({
@@ -313,6 +316,7 @@ export default function App() {
     activeShift: null,
     activeTaskNotes: '',
   });
+  const idleAutoClockOutLockRef = useRef(false);
 
   // Client Portal State
   const [portalOffset, setPortalOffset] = useState(0);
@@ -747,9 +751,24 @@ export default function App() {
     navigate('/kiosk', { replace: true });
   }, [user, location.pathname, location.search, navigate]);
 
+  const handleStopTask = async () => {
+    if (!activeTask) return;
+    const endTime = Date.now();
+    const segment = endTime - (activeTask.lastResumeTime || activeTask.clockInTime);
+    const newTotal = (activeTask.totalSavedDuration || 0) + segment;
+    await updateDoc(doc(db, 'taskLogs', activeTask.id), { clockOutTime: endTime, status: 'completed', totalSavedDuration: newTotal, duration: newTotal, notes: activeTaskNotes });
+    setActiveTaskNotes('');
+  };
+
+  const handleResumeTask = async (task) => {
+    if (activeTask) await handleStopTask();
+    await updateDoc(doc(db, 'taskLogs', task.id), { status: 'active', lastResumeTime: Date.now() });
+    setActiveTaskNotes(task.notes || '');
+  };
+
   const handleStartTask = async () => {
-    if (!selectedClient || !selectedBillingTarget) return;
-    
+    if (!selectedClient || !selectedBillingTarget || !activeShift?.id) return;
+
     const isProject = selectedBillingTarget.startsWith('project_');
     const isGeneral = selectedBillingTarget === 'retainer_GENERAL_UNCLASSIFIED';
     const targetId = isProject ? selectedBillingTarget.replace('project_', '') : null;
@@ -759,12 +778,33 @@ export default function App() {
     else if (isGeneral) projName = GENERAL_LABEL;
     else projName = selectedBillingTarget.replace('retainer_', '');
 
-    await addDoc(collection(db, 'taskLogs'), { 
-      shiftId: activeShift.id, userId: user.uid, clientName: selectedClient, 
-      projectName: projName, projectId: targetId,
-      clockInTime: Date.now(), lastResumeTime: Date.now(), totalSavedDuration: 0, status: 'active', notes: '' 
+    const matchesPausedForSelection = (t) => {
+      if (t.shiftId !== activeShift.id || t.status !== 'completed') return false;
+      if (t.clientName !== selectedClient) return false;
+      if (isProject) return t.projectId === targetId;
+      if (isGeneral) return !t.projectId && t.projectName === GENERAL_LABEL;
+      return !t.projectId && t.projectName === projName;
+    };
+
+    const pausedCandidates = taskLogs.filter(matchesPausedForSelection);
+    if (pausedCandidates.length > 0) {
+      pausedCandidates.sort((a, b) => (b.clockOutTime || 0) - (a.clockOutTime || 0));
+      await handleResumeTask(pausedCandidates[0]);
+      return;
+    }
+
+    await addDoc(collection(db, 'taskLogs'), {
+      shiftId: activeShift.id,
+      userId: user.uid,
+      clientName: selectedClient,
+      projectName: projName,
+      projectId: targetId,
+      clockInTime: Date.now(),
+      lastResumeTime: Date.now(),
+      totalSavedDuration: 0,
+      status: 'active',
+      notes: '',
     });
-    // Keep selected client/target so kiosk notes (client + selected retainer category) remain visible
     setActiveTaskNotes('');
   };
 
@@ -794,21 +834,6 @@ export default function App() {
     activeTask,
   ]);
 
-  const handleStopTask = async () => {
-    if (!activeTask) return;
-    const endTime = Date.now();
-    const segment = endTime - (activeTask.lastResumeTime || activeTask.clockInTime);
-    const newTotal = (activeTask.totalSavedDuration || 0) + segment;
-    await updateDoc(doc(db, 'taskLogs', activeTask.id), { clockOutTime: endTime, status: 'completed', totalSavedDuration: newTotal, duration: newTotal, notes: activeTaskNotes });
-    setActiveTaskNotes('');
-  };
-
-  const handleResumeTask = async (task) => {
-    if (activeTask) await handleStopTask();
-    await updateDoc(doc(db, 'taskLogs', task.id), { status: 'active', lastResumeTime: Date.now() });
-    setActiveTaskNotes(task.notes || '');
-  };
-
   const handleTakeBreak = async () => {
     if (activeTask) await handleStopTask();
     const endTime = Date.now();
@@ -833,43 +858,60 @@ export default function App() {
   };
 
   const handleIdleAutoClockOut = useCallback(async () => {
+    if (idleAutoClockOutLockRef.current) return;
+    idleAutoClockOutLockRef.current = true;
     const { activeTask: task, activeShift: shift, activeTaskNotes: notes } =
       idleShutdownRef.current;
     const IDLE_TAG =
       '[Clock stopped automatically: session was idle — Ignite PM kiosk]';
     const endTime = Date.now();
+    let shiftUpdateError = null;
     try {
       if (task?.id) {
-        const segment = endTime - (task.lastResumeTime || task.clockInTime);
-        const newTotal = (task.totalSavedDuration || 0) + segment;
-        const base = String(notes || '').trim() || String(task.notes || '').trim();
-        const finalNotes = base ? `${base}\n\n${IDLE_TAG}` : IDLE_TAG;
-        await updateDoc(doc(db, 'taskLogs', task.id), {
-          clockOutTime: endTime,
-          status: 'completed',
-          totalSavedDuration: newTotal,
-          duration: newTotal,
-          notes: finalNotes,
-        });
-        setActiveTaskNotes('');
+        try {
+          const segment = endTime - (task.lastResumeTime || task.clockInTime);
+          const newTotal = (task.totalSavedDuration || 0) + segment;
+          const base = String(notes || '').trim() || String(task.notes || '').trim();
+          const finalNotes = base ? `${base}\n\n${IDLE_TAG}` : IDLE_TAG;
+          await updateDoc(doc(db, 'taskLogs', task.id), {
+            clockOutTime: endTime,
+            status: 'completed',
+            totalSavedDuration: newTotal,
+            duration: newTotal,
+            notes: finalNotes,
+          });
+          setActiveTaskNotes('');
+        } catch (err) {
+          console.error('Idle auto clock-out: task update failed:', err);
+        }
       }
       if (shift?.id) {
-        let newTotal = shift.totalSavedDuration || 0;
-        if (shift.status === 'active') {
-          newTotal += endTime - (shift.lastResumeTime || shift.clockInTime);
+        try {
+          let newTotal = shift.totalSavedDuration || 0;
+          if (shift.status === 'active') {
+            newTotal += endTime - (shift.lastResumeTime || shift.clockInTime);
+          }
+          await updateDoc(doc(db, 'timesheets', shift.id), {
+            clockOutTime: endTime,
+            status: 'completed',
+            totalSavedDuration: newTotal,
+            duration: newTotal,
+            autoStoppedReason: 'idle_timeout',
+            autoStoppedAt: endTime,
+            shiftNote: IDLE_TAG,
+          });
+        } catch (err) {
+          shiftUpdateError = err;
+          console.error('Idle auto clock-out: shift update failed:', err);
         }
-        await updateDoc(doc(db, 'timesheets', shift.id), {
-          clockOutTime: endTime,
-          status: 'completed',
-          totalSavedDuration: newTotal,
-          duration: newTotal,
-          autoStoppedReason: 'idle_timeout',
-          autoStoppedAt: endTime,
-          shiftNote: IDLE_TAG,
-        });
       }
-    } catch (err) {
-      console.error('Idle auto clock-out failed:', err);
+    } finally {
+      idleAutoClockOutLockRef.current = false;
+    }
+    if (shiftUpdateError) {
+      window.alert(
+        'Could not end your shift automatically after idle timeout. Please clock out manually or try again.',
+      );
     }
   }, []);
 
@@ -1230,18 +1272,25 @@ export default function App() {
     base.setHours(12, 0, 0, 0);
     const cycleStartMs = base.getTime();
 
+    if (recurrence.type === 'daily_fixed') {
+      return cycleStartMs;
+    }
+
     if (recurrence.type === 'monthly_fixed_day') {
       const day = Number(recurrence.dayOfMonth || 0);
       if (!day) return null;
-      const y = base.getFullYear();
-      const m = base.getMonth();
-      const lastDay = new Date(y, m + 1, 0).getDate();
-      const clamped = Math.min(Math.max(day, 1), lastDay);
-      return new Date(y, m, clamped, 12, 0, 0, 0).getTime();
+      const atMonth = (year, month) => {
+        const lastDay = new Date(year, month + 1, 0).getDate();
+        const clamped = Math.min(Math.max(day, 1), lastDay);
+        return new Date(year, month, clamped, 12, 0, 0, 0).getTime();
+      };
+      let t = atMonth(base.getFullYear(), base.getMonth());
+      if (t < cycleStartMs) t = atMonth(base.getFullYear(), base.getMonth() + 1);
+      return t;
     }
 
-    if (recurrence.type === 'weekly_weekday') {
-      const wd = Number(recurrence.weekday);
+    const getNextWeekday = (weekday) => {
+      const wd = Number(weekday);
       if (!Number.isFinite(wd) || wd < 0 || wd > 6) return null;
       const d = new Date(base);
       for (let step = 0; step < 7; step++) {
@@ -1249,6 +1298,20 @@ export default function App() {
         d.setDate(d.getDate() + 1);
       }
       return null;
+    };
+
+    if (recurrence.type === 'weekly_weekday') {
+      return getNextWeekday(recurrence.weekday);
+    }
+
+    if (recurrence.type === 'biweekly_weekday') {
+      const first = getNextWeekday(recurrence.weekday);
+      if (!first) return null;
+      const anchor = Number(recurrence.anchorMs || 0);
+      if (!anchor) return first;
+      const daysBetween = Math.floor((first - anchor) / 86400000);
+      const weeksBetween = Math.floor(daysBetween / 7);
+      return weeksBetween % 2 === 0 ? first : first + 7 * 86400000;
     }
 
     if (recurrence.type === 'annual_fixed') {
@@ -1333,6 +1396,7 @@ export default function App() {
                   dayOfMonth: new Date(i.dueDate).getDate(),
                 }
               : null);
+          const newParentDue = computeRecurringDueDate(effectiveRecurrence, cycleStart);
           return {
             id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
             text: i.text,
@@ -1345,7 +1409,14 @@ export default function App() {
               ? i.assigneeEmails.filter(Boolean)
               : [],
             recurrence: i.recurrence || effectiveRecurrence,
-            dueDate: computeRecurringDueDate(effectiveRecurrence, cycleStart),
+            dueDate: newParentDue,
+            subtasks: getSubtasks(i).map((s) => ({
+              ...s,
+              id: newSubtaskId(),
+              done: false,
+              doneAt: null,
+              dueDate: projectSubtaskDueDateForNewCycle(i.dueDate, newParentDue, s.dueDate),
+            })),
           };
         });
       result[ck] = { closed: false, items: [...carried, ...recurring] };
@@ -1404,6 +1475,7 @@ export default function App() {
                   dayOfMonth: new Date(i.dueDate).getDate(),
                 }
               : null);
+          const newParentDue = computeRecurringDueDate(effectiveRecurrence, cycleStart);
           return {
             id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
             text: i.text,
@@ -1416,7 +1488,14 @@ export default function App() {
               ? i.assigneeEmails.filter(Boolean)
               : [],
             recurrence: i.recurrence || effectiveRecurrence,
-            dueDate: computeRecurringDueDate(effectiveRecurrence, cycleStart),
+            dueDate: newParentDue,
+            subtasks: getSubtasks(i).map((s) => ({
+              ...s,
+              id: newSubtaskId(),
+              done: false,
+              doneAt: null,
+              dueDate: projectSubtaskDueDateForNewCycle(i.dueDate, newParentDue, s.dueDate),
+            })),
           };
         });
       cycles[String(cycleStart)][ck] = { closed: false, items: [...carried, ...recurring] };
@@ -1424,10 +1503,26 @@ export default function App() {
     return cycles;
   };
 
+  const newRecurringTodoRowId = useCallback(
+    () => `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    [],
+  );
+
   const updateClientTodo = async (client, cycleStart, categoryKey, nextCategoryData) => {
     const cycles = ensureCurrentCycleTodoData(client, cycleStart);
     const cycleData = cycles[String(cycleStart)] || {};
     cycles[String(cycleStart)] = { ...cycleData, [categoryKey]: nextCategoryData };
+    const period = getBillingPeriod(client.billingDay || 1, 0);
+    if (String(cycleStart) === String(period.start)) {
+      const slice = cycles[String(cycleStart)];
+      const { cycleDataByCategory, changed } = reconcileRecurringTodoInstances(
+        slice,
+        period.start,
+        period.end,
+        newRecurringTodoRowId,
+      );
+      if (changed) cycles[String(cycleStart)] = cycleDataByCategory;
+    }
     const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(client, cycles);
     await updateDoc(doc(db, 'clients', client.id), { todoCycles: cycles, ...teamAccessPatch });
   };
@@ -1442,6 +1537,17 @@ export default function App() {
       ...cycleData,
       ...categoryKeyToData,
     };
+    const period = getBillingPeriod(client.billingDay || 1, 0);
+    if (String(cycleStart) === String(period.start)) {
+      const slice = cycles[String(cycleStart)];
+      const { cycleDataByCategory, changed } = reconcileRecurringTodoInstances(
+        slice,
+        period.start,
+        period.end,
+        newRecurringTodoRowId,
+      );
+      if (changed) cycles[String(cycleStart)] = cycleDataByCategory;
+    }
     const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(client, cycles);
     await updateDoc(doc(db, 'clients', client.id), { todoCycles: cycles, ...teamAccessPatch });
   };
@@ -1467,6 +1573,51 @@ export default function App() {
 
     return { start, end };
   };
+
+  // Periodically materialize missing recurring rows (e.g. weekly anchors) even when
+  // no one edits a category that billing period.
+  useEffect(() => {
+    if (!user || !clients?.length) return;
+
+    const run = async () => {
+      if (recurringTodoReconcileInFlightRef.current) return;
+      recurringTodoReconcileInFlightRef.current = true;
+      try {
+        for (const client of clients) {
+          const bd = client.billingDay || 1;
+          const period = getBillingPeriod(bd, 0);
+          const key = String(period.start);
+          const existing = (client.todoCycles || {})[key];
+          if (!existing || typeof existing !== 'object') continue;
+
+          const { cycleDataByCategory, changed } = reconcileRecurringTodoInstances(
+            existing,
+            period.start,
+            period.end,
+            newRecurringTodoRowId,
+          );
+          if (!changed) continue;
+
+          const cycles = { ...(client.todoCycles || {}), [key]: cycleDataByCategory };
+          const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(client, cycles);
+          try {
+            await updateDoc(doc(db, 'clients', client.id), {
+              todoCycles: cycles,
+              ...teamAccessPatch,
+            });
+          } catch {
+            // Offline / permission — skip
+          }
+        }
+      } finally {
+        recurringTodoReconcileInFlightRef.current = false;
+      }
+    };
+
+    run();
+    const interval = setInterval(run, 2 * 60 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [clients, user, newRecurringTodoRowId]);
 
   const getPeriodsPassed = (firstDateMs, currentDateMs, billingDay) => {
     const first = new Date(firstDateMs);
