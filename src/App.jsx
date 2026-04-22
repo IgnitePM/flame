@@ -1619,28 +1619,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [clients, user, newRecurringTodoRowId]);
 
-  const getPeriodsPassed = (firstDateMs, currentDateMs, billingDay) => {
-    const first = new Date(firstDateMs);
-    const current = new Date(currentDateMs);
-
-    let firstMonth = first.getMonth();
-    let firstYear = first.getFullYear();
-    if (first.getDate() < billingDay) {
-        firstMonth--;
-        if(firstMonth < 0) { firstMonth = 11; firstYear--; }
-    }
-
-    let currentMonth = current.getMonth();
-    let currentYear = current.getFullYear();
-    if (current.getDate() < billingDay) {
-        currentMonth--;
-        if(currentMonth < 0) { currentMonth = 11; currentYear--; }
-    }
-
-    const monthsDiff = (currentYear - firstYear) * 12 + (currentMonth - firstMonth);
-    return Math.max(0, monthsDiff);
-  };
-
   const getGlobalRetainerStats = (client, mStart, mEnd) => {
     // Retainers pool math is in hours (task/expense equivalent hours). We exclude
     // dollar-only categories from the combined pool so the existing progress bars remain consistent.
@@ -1653,11 +1631,23 @@ export default function App() {
     const globalResetMs = client.lastCarryoverResetDate || 0;
     const perCategoryReset = client.carryoverResetByCategory || {};
 
-    const pastAddons = addons
-      .filter((a) => a.clientId === client.id && a.date < mStart)
+    const billingDay = client.billingDay || 1;
+    const cycleAnchor = new Date(mStart);
+    const prevStart = new Date(
+      cycleAnchor.getFullYear(),
+      cycleAnchor.getMonth() - 1,
+      billingDay,
+      0,
+      0,
+      0,
+      0,
+    ).getTime();
+
+    const previousCycleAddons = addons
+      .filter((a) => a.clientId === client.id && a.date >= prevStart && a.date < mStart)
       .filter((a) => !clientStartMs || a.date >= clientStartMs)
       .filter((a) => !globalResetMs || a.date >= globalResetMs);
-    const pastAddonHours = pastAddons.reduce(
+    const previousCycleAddonHours = previousCycleAddons.reduce(
       (acc, a) => acc + Number(a.hours || 0),
       0,
     );
@@ -1737,22 +1727,39 @@ export default function App() {
         return;
       }
 
-      const periodsPassed = getPeriodsPassed(
-        effectiveStartMs,
-        mStart,
-        client.billingDay || 1,
-      );
-      const totalAllottedPast = periodsPassed * base;
+      // Carryover = surplus/deficit from the billing period immediately before this one
+      // (not lifetime cumulative). Prorate allotment if the client started mid-period.
+      const periodLen = mStart - prevStart;
+      if (periodLen <= 0 || effectiveStartMs >= mStart) {
+        perCategory[cat] = {
+          isDollar: catIsDollar,
+          baseActive: isPaused ? 0 : base,
+          carryover: 0,
+        };
+        return;
+      }
 
-      const pastTaskHours =
+      const allottedPrev =
+        effectiveStartMs <= prevStart
+          ? base
+          : base * ((mStart - effectiveStartMs) / periodLen);
+
+      const prevTasks = !catIsDollar
+        ? pastTasksCat.filter(
+            (t) => t.clockInTime >= prevStart && t.clockInTime < mStart,
+          )
+        : [];
+      const prevExps = pastExpsCat.filter((e) => e.date >= prevStart && e.date < mStart);
+
+      const prevTaskHours =
         !catIsDollar
-          ? pastTasksCat.reduce((acc, t) => acc + getTaskDuration(t), 0) / 3600000
+          ? prevTasks.reduce((acc, t) => acc + getTaskDuration(t), 0) / 3600000
           : 0;
-      const pastExpUsed = catIsDollar
-        ? pastExpsCat.reduce((acc, e) => acc + Number(e.finalCost || 0), 0)
-        : pastExpsCat.reduce((acc, e) => acc + Number(e.equivalentHours || 0), 0);
+      const prevExpUsed = catIsDollar
+        ? prevExps.reduce((acc, e) => acc + Number(e.finalCost || 0), 0)
+        : prevExps.reduce((acc, e) => acc + Number(e.equivalentHours || 0), 0);
 
-      const carryover = totalAllottedPast - (pastTaskHours + pastExpUsed);
+      const carryover = allottedPrev - (prevTaskHours + prevExpUsed);
 
       perCategory[cat] = {
         isDollar: catIsDollar,
@@ -1767,8 +1774,8 @@ export default function App() {
       0,
     );
 
-    // Keep historical Add Hours behavior as a global carryover contributor.
-    carryover += pastAddonHours;
+    // Add-on hours from the prior cycle roll into this cycle's combined pool.
+    carryover += previousCycleAddonHours;
 
     const currentTasks = taskLogs.filter(t => t.clientName === client.name && t.clockInTime >= mStart && t.clockInTime <= mEnd && !t.projectId);
     const currentExps = expenses.filter(e => e.clientName === client.name && e.date >= mStart && e.date <= mEnd && !e.projectId);
@@ -2908,7 +2915,7 @@ export default function App() {
                   </label>
                   <button 
                     onClick={() => {
-                      if(confirm("Are you sure? This will permanently clear any compounded surplus or deficit carryover hours from past months, starting them fresh for this current period.")) {
+                      if(confirm("Are you sure? This will clear surplus/deficit carryover from prior billing periods for this client, starting fresh for the current period.")) {
                         setEditingClient({
                           ...editingClient,
                           lastCarryoverResetDate: Date.now(),
