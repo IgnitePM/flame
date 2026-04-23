@@ -251,20 +251,16 @@ const EmployeeKiosk = ({
     ? Number(categoryUsed || 0)
     : categoryUsedWithActive;
 
-  const combinedUsedWithActive = (retainerStats?.currentUsed || 0) + activeDeltaHours;
-
   const categoryAllotted =
     retainerStats?.perCategory?.[selectedRetainerCategory]?.adjustedAllotted ??
     ((selectedClientObj?.retainers &&
       selectedClientObj.retainers[selectedRetainerCategory]) ||
       0);
-  const activeExpenseCategory = activeTask?.projectId
-    ? 'Custom Project'
-    : activeTask?.projectName || selectedRetainerCategory || GENERAL_LABEL;
-  const activeExpenseProjectId = activeTask?.projectId || null;
-  const activeExpenseIsDollarCategory = categoryIsDollar(
+  // Retainer expenses must always hit the selected retainer line (no projectId), otherwise
+  // getGlobalRetainerStats ignores them and progress bars do not move.
+  const kioskRetainerExpenseIsDollar = categoryIsDollar(
     selectedClientObj,
-    activeExpenseCategory,
+    selectedRetainerCategory,
   );
 
   React.useEffect(() => {
@@ -814,7 +810,7 @@ const EmployeeKiosk = ({
                         })()
                       )}
 
-                      {/* Retainer progress (category + combined) for current cycle */}
+                      {/* Retainer progress (this category only) for current cycle */}
                       {retainerStats && selectedRetainerCategory && (
                         <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
                           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
@@ -845,22 +841,6 @@ const EmployeeKiosk = ({
                                     100,
                                 )}%`,
                               }}
-                            />
-                          </div>
-
-                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
-                            Combined Pool
-                          </div>
-                          <div className="text-xs font-black text-slate-700 mb-2">
-                            {combinedUsedWithActive.toFixed(2)}h used /{' '}
-                            {retainerStats.adjustedAllotted.toFixed(2)}h available
-                          </div>
-                          <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-2">
-                            <div
-                              className={`h-3 rounded-full transition-all duration-500 ${
-                                retainerStats.isOver ? 'bg-red-500' : 'bg-emerald-500'
-                              }`}
-                              style={{ width: `${Math.min(100, retainerStats.percent || 0)}%` }}
                             />
                           </div>
 
@@ -996,31 +976,6 @@ const EmployeeKiosk = ({
                                   ((categoryUsedWithActive || 0) /
                                     ((Number(categoryAllotted || 0) || 1))) *
                                     100,
-                                )}%`,
-                              }}
-                            />
-                          </div>
-
-                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
-                            Combined Pool
-                          </div>
-                          <div className="text-xs font-black text-slate-700 mb-2">
-                            {combinedUsedWithActive.toFixed(2)}h used /{' '}
-                            {retainerStats.adjustedAllotted.toFixed(2)}h available
-                          </div>
-                          <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-2">
-                            <div
-                              className={`h-3 rounded-full transition-all duration-500 ${
-                                combinedUsedWithActive > retainerStats.adjustedAllotted
-                                  ? 'bg-red-500'
-                                  : 'bg-emerald-500'
-                              }`}
-                              style={{
-                                width: `${Math.min(
-                                  100,
-                                  retainerStats.adjustedAllotted > 0
-                                    ? (combinedUsedWithActive / retainerStats.adjustedAllotted) * 100
-                                    : 0,
                                 )}%`,
                               }}
                             />
@@ -1197,7 +1152,7 @@ const EmployeeKiosk = ({
                         </div>
                       )}
 
-                      {selectedClientObj && onLogClientExpense && (
+                      {selectedClientObj && selectedRetainerCategory && onLogClientExpense && (
                         <div className="mt-5 bg-white border border-slate-200 rounded-[24px] p-4">
                           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
                             Log Client Expense
@@ -1235,10 +1190,10 @@ const EmployeeKiosk = ({
                                 type="checkbox"
                                 checked={kioskExpenseApplyMarkup}
                                 onChange={(e) => setKioskExpenseApplyMarkup(e.target.checked)}
-                                disabled={activeExpenseIsDollarCategory}
+                                disabled={kioskRetainerExpenseIsDollar}
                               />
                               Add 30% markup (HST)
-                              {activeExpenseIsDollarCategory && (
+                              {kioskRetainerExpenseIsDollar && (
                                 <span className="text-slate-400">(disabled for dollar category)</span>
                               )}
                             </label>
@@ -1255,8 +1210,8 @@ const EmployeeKiosk = ({
                                   await onLogClientExpense({
                                     clientId: selectedClientObj.id,
                                     clientName: selectedClientObj.name,
-                                    category: activeExpenseCategory,
-                                    projectId: activeExpenseProjectId,
+                                    category: selectedRetainerCategory,
+                                    projectId: null,
                                     amount: amt,
                                     description: kioskExpenseDescription.trim(),
                                     currency: kioskExpenseCurrency,

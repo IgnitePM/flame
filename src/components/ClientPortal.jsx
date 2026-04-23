@@ -174,7 +174,7 @@ const ClientPortal = ({
         <div className="bg-white p-8 sm:p-10 rounded-[40px] shadow-sm border border-slate-100 space-y-8">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <h3 className="font-black text-xl text-slate-900">
-              Global Retainer Usage
+              Retainer usage (hour lines)
             </h3>
             <div className="flex gap-2">
               <button
@@ -201,7 +201,7 @@ const ClientPortal = ({
               <div className="bg-slate-50 p-6 sm:p-8 rounded-3xl border border-slate-100">
                 <div className="flex justify-between items-end mb-2">
                   <span className="font-black text-slate-700 text-lg">
-                    Total Pool
+                    All hour lines (rollup)
                   </span>
                   <span className="text-sm font-black text-slate-500">
                     {stats.currentUsed.toFixed(2)}h /{' '}

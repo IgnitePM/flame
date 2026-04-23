@@ -762,7 +762,12 @@ export default function App() {
 
   const handleResumeTask = async (task) => {
     if (activeTask) await handleStopTask();
-    await updateDoc(doc(db, 'taskLogs', task.id), { status: 'active', lastResumeTime: Date.now() });
+    await updateDoc(doc(db, 'taskLogs', task.id), {
+      status: 'active',
+      lastResumeTime: Date.now(),
+      shiftId: activeShift?.id || task.shiftId,
+      userId: user?.uid || task.userId,
+    });
     setActiveTaskNotes(task.notes || '');
   };
 
@@ -1620,13 +1625,36 @@ export default function App() {
   }, [clients, user, newRecurringTodoRowId]);
 
   const getGlobalRetainerStats = (client, mStart, mEnd) => {
-    // Retainers pool math is in hours (task/expense equivalent hours). We exclude
-    // dollar-only categories from the combined pool so the existing progress bars remain consistent.
-    const hourRetainerBase = Object.entries(client.retainers || {}).reduce(
-      (sum, [cat, val]) => (isDollarCategory(client, cat) ? sum : sum + (Number(val) || 0)),
-      0,
-    );
-    
+    /** Split add-on hours across hour retainer lines; matched category gets full amount, else even split. */
+    const allocateAddonHoursByCategory = (addonRows) => {
+      const hourCats = Object.keys(client.retainers || {}).filter(
+        (cat) => !isDollarCategory(client, cat),
+      );
+      const alloc = {};
+      hourCats.forEach((c) => {
+        alloc[c] = 0;
+      });
+      if (!hourCats.length) return alloc;
+      addonRows.forEach((a) => {
+        const h = Number(a.hours || 0);
+        if (!Number.isFinite(h) || h <= 0) return;
+        const cat = a.category;
+        if (
+          cat &&
+          client.retainers?.[cat] != null &&
+          !isDollarCategory(client, cat)
+        ) {
+          alloc[cat] = (alloc[cat] || 0) + h;
+        } else {
+          const share = h / hourCats.length;
+          hourCats.forEach((c) => {
+            alloc[c] += share;
+          });
+        }
+      });
+      return alloc;
+    };
+
     const clientStartMs = client.clientStartDate || 0;
     const globalResetMs = client.lastCarryoverResetDate || 0;
     const perCategoryReset = client.carryoverResetByCategory || {};
@@ -1647,10 +1675,6 @@ export default function App() {
       .filter((a) => a.clientId === client.id && a.date >= prevStart && a.date < mStart)
       .filter((a) => !clientStartMs || a.date >= clientStartMs)
       .filter((a) => !globalResetMs || a.date >= globalResetMs);
-    const previousCycleAddonHours = previousCycleAddons.reduce(
-      (acc, a) => acc + Number(a.hours || 0),
-      0,
-    );
 
     const retainerCategories = Object.keys(client.retainers || {});
     const perCategory = {};
@@ -1768,14 +1792,7 @@ export default function App() {
       };
     });
 
-    const hourCategories = retainerCategories.filter((cat) => !isDollarCategory(client, cat));
-    let carryover = hourCategories.reduce(
-      (acc, cat) => acc + Number(perCategory?.[cat]?.carryover || 0),
-      0,
-    );
-
-    // Add-on hours from the prior cycle roll into this cycle's combined pool.
-    carryover += previousCycleAddonHours;
+    const prevAddonByCat = allocateAddonHoursByCategory(previousCycleAddons);
 
     const currentTasks = taskLogs.filter(t => t.clientName === client.name && t.clockInTime >= mStart && t.clockInTime <= mEnd && !t.projectId);
     const currentExps = expenses.filter(e => e.clientName === client.name && e.date >= mStart && e.date <= mEnd && !e.projectId);
@@ -1786,10 +1803,23 @@ export default function App() {
     const currentTaskHours = completedTasksThisCycle.reduce((acc, t) => acc + getTaskDuration(t), 0) / 3600000;
     const currentExpHours = currentExps.reduce((acc, e) => acc + (e.equivalentHours || 0), 0);
     const currentAddonHours = currentAddons.reduce((acc, a) => acc + Number(a.hours), 0);
+    const currAddonByCat = allocateAddonHoursByCategory(currentAddons);
 
-    const currentUsed = currentTaskHours + currentExpHours;
-    const activeBase = client.status === 'paused' ? 0 : hourRetainerBase;
-    const adjustedAllotted = activeBase + carryover + currentAddonHours;
+    const moves = client.retainerHourMovesByCycle?.[String(mStart)] || [];
+    const netMove = {};
+    retainerCategories.forEach((cat) => {
+      netMove[cat] = 0;
+    });
+    moves.forEach((m) => {
+      const h = Number(m.hours || 0);
+      if (!Number.isFinite(h) || h <= 0 || m.from === m.to) return;
+      if (!m.from || !m.to) return;
+      if (!retainerCategories.includes(m.from) || !retainerCategories.includes(m.to))
+        return;
+      if (isDollarCategory(client, m.from) || isDollarCategory(client, m.to)) return;
+      netMove[m.from] = (netMove[m.from] || 0) - h;
+      netMove[m.to] = (netMove[m.to] || 0) + h;
+    });
 
     const categoryBreakdown = {};
 
@@ -1810,15 +1840,21 @@ export default function App() {
       }
     });
 
-    // Finalize per-category totals for current cycle (base + carryover, excluding addons which are global).
+    // Finalize per-category totals: base + carryover + prior-cycle add-ons + this cycle add-ons + hour moves.
     Object.keys(perCategory).forEach((cat) => {
       const used = Number(categoryBreakdown?.[cat] || 0);
       const baseActive = Number(perCategory[cat]?.baseActive || 0);
       const catCarry = Number(perCategory[cat]?.carryover || 0);
-      const adjustedAllottedCat = baseActive + catCarry;
+      const prevAdd = Number(prevAddonByCat[cat] || 0);
+      const currAdd = Number(currAddonByCat[cat] || 0);
+      const move = Number(netMove[cat] || 0);
+      const adjustedAllottedCat = baseActive + catCarry + prevAdd + currAdd + move;
       perCategory[cat] = {
         ...perCategory[cat],
         used,
+        addonHoursPriorCycle: prevAdd,
+        addonHoursThisCycle: currAdd,
+        hourMoveNet: move,
         adjustedAllotted: adjustedAllottedCat,
         isOver: adjustedAllottedCat > 0 ? used > adjustedAllottedCat : used > 0,
         percent:
@@ -1830,9 +1866,36 @@ export default function App() {
       };
     });
 
+    const hourCats = retainerCategories.filter((cat) => !isDollarCategory(client, cat));
+    const activeBase = hourCats.reduce(
+      (s, cat) => s + Number(perCategory[cat]?.baseActive || 0),
+      0,
+    );
+    const carryoverSum = hourCats.reduce(
+      (s, cat) => s + Number(perCategory[cat]?.carryover || 0),
+      0,
+    );
+    const adjustedAllotted = hourCats.reduce(
+      (s, cat) => s + Number(perCategory[cat]?.adjustedAllotted || 0),
+      0,
+    );
+    const usedOnHourRetainerLines = hourCats.reduce(
+      (s, cat) => s + Number(categoryBreakdown?.[cat] || 0),
+      0,
+    );
+    const retainerLineNames = new Set(Object.keys(client.retainers || {}));
+    const unattributedTaskHours = completedTasksThisCycle.reduce((acc, t) => {
+      const pn = t.projectName || '';
+      const h = getTaskDuration(t) / 3600000;
+      if (!pn || pn === GENERAL_LABEL) return acc + h;
+      if (!retainerLineNames.has(pn)) return acc + h;
+      return acc;
+    }, 0);
+    const currentUsed = usedOnHourRetainerLines + unattributedTaskHours;
+
     return {
       base: activeBase,
-      carryover,
+      carryover: carryoverSum,
       currentAddons: currentAddonHours,
       adjustedAllotted,
       currentUsed,
@@ -3080,7 +3143,7 @@ export default function App() {
 
             <div className="p-8 border-t border-slate-100 bg-white shrink-0">
               <button 
-                onClick={async () => { await updateDoc(doc(db, 'clients', editingClient.id), { retainers: editingClient.retainers, retainerUnits: editingClient.retainerUnits || {}, hourlyRate: editingClient.hourlyRate || 0, clientEmails: editingClient.clientEmails || [], billingDay: editingClient.billingDay || 1, status: editingClient.status || 'active', teamMemberAccessEmails: editingClient.teamMemberAccessEmails === undefined ? null : editingClient.teamMemberAccessEmails, lastCarryoverResetDate: editingClient.lastCarryoverResetDate || null, carryoverResetByCategory: editingClient.carryoverResetByCategory || {}, clientStartDate: editingClient.clientStartDate || null }); setEditingClient(null); }} 
+                onClick={async () => { await updateDoc(doc(db, 'clients', editingClient.id), { retainers: editingClient.retainers, retainerUnits: editingClient.retainerUnits || {}, hourlyRate: editingClient.hourlyRate || 0, clientEmails: editingClient.clientEmails || [], billingDay: editingClient.billingDay || 1, status: editingClient.status || 'active', teamMemberAccessEmails: editingClient.teamMemberAccessEmails === undefined ? null : editingClient.teamMemberAccessEmails, lastCarryoverResetDate: editingClient.lastCarryoverResetDate || null, carryoverResetByCategory: editingClient.carryoverResetByCategory || {}, clientStartDate: editingClient.clientStartDate || null, retainerHourMovesByCycle: editingClient.retainerHourMovesByCycle || {} }); setEditingClient(null); }} 
                 className="w-full bg-black hover:bg-slate-800 text-white p-5 rounded-2xl font-black text-lg shadow-xl flex items-center justify-center gap-3 transition-all active:scale-95"
               >
                 <Save className="w-5 h-5" /> Save Profile

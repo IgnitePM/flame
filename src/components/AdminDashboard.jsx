@@ -994,6 +994,9 @@ const AdminDashboard = ({
   const isRestrictedStaff = currentUserRole === 'kiosk';
   const visibleClients = useMemo(() => clients || [], [clients]);
 
+  /** Move hour budget between retainer lines for a billing cycle (admin / billing). */
+  const [retainerMoveModal, setRetainerMoveModal] = useState(null);
+
   // Keep retainer categories stable in the UI even if Firestore map key ordering changes.
   const retainerCategoryOrder = Array.from(
     new Set([...(activeTaskTypes || []), 'Social Ad Budget']),
@@ -2235,9 +2238,21 @@ const AdminDashboard = ({
 
           <div className="space-y-4">
             {filteredTimesheets.map((shift) => {
-              const shiftTasks = taskLogs.filter(
-                (t) => t.shiftId === shift.id,
+              const shiftEnd = shift.clockOutTime || Date.now();
+              const byShiftId = taskLogs.filter((t) => t.shiftId === shift.id);
+              const shiftIdSet = new Set(byShiftId.map((t) => t.id));
+              const byCompletedThisShift = taskLogs.filter(
+                (t) =>
+                  !shiftIdSet.has(t.id) &&
+                  t.status === 'completed' &&
+                  t.clockOutTime &&
+                  t.clockOutTime >= shift.clockInTime &&
+                  t.clockOutTime <= shiftEnd &&
+                  shift.userId &&
+                  t.userId &&
+                  t.userId === shift.userId,
               );
+              const shiftTasks = [...byShiftId, ...byCompletedThisShift];
               const isExpanded = expandedShifts[shift.id];
               const visibleTasks = clientFilter
                 ? shiftTasks.filter(
@@ -2353,7 +2368,7 @@ const AdminDashboard = ({
                               className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 group"
                             >
                               <div className="flex-1 text-left">
-                                <div className="flex items-center gap-2 mb-2">
+                                <div className="flex items-center gap-2 mb-2 flex-wrap">
                                   <span className="font-black text-sm text-slate-800">
                                     {task.clientName}
                                   </span>
@@ -2362,6 +2377,11 @@ const AdminDashboard = ({
                                       ? `Proj: ${task.projectName}`
                                       : task.projectName}
                                   </span>
+                                  {task.shiftId !== shift.id && (
+                                    <span className="bg-amber-50 text-amber-800 px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-tighter border border-amber-200">
+                                      Completed this shift
+                                    </span>
+                                  )}
                                 </div>
                                 {task.notes && (
                                   <p className="text-xs text-slate-500 leading-relaxed font-medium mb-3 italic">
@@ -3470,13 +3490,17 @@ const AdminDashboard = ({
               const mEnd = period.end;
               const _isExpanded = isClientPage ? true : expandedClients[c.id];
 
-              const periodTasks = taskLogs.filter(
-                (t) =>
-                  t.clientName === c.name &&
-                  t.clockInTime >= mStart &&
-                  t.clockInTime <= mEnd &&
-                  !t.projectId,
-              );
+              const periodTasks = taskLogs.filter((t) => {
+                if (t.clientName !== c.name || t.projectId) return false;
+                const startedThisCycle =
+                  t.clockInTime >= mStart && t.clockInTime <= mEnd;
+                const completedThisCycle =
+                  t.status === 'completed' &&
+                  t.clockOutTime &&
+                  t.clockOutTime >= mStart &&
+                  t.clockOutTime <= mEnd;
+                return startedThisCycle || completedThisCycle;
+              });
               const periodExps = expenses.filter(
                 (e) =>
                   e.clientName === c.name &&
@@ -3484,13 +3508,17 @@ const AdminDashboard = ({
                   e.date <= mEnd &&
                   !e.projectId,
               );
-              const periodProjectTasks = taskLogs.filter(
-                (t) =>
-                  t.clientName === c.name &&
-                  t.projectId &&
-                  t.clockInTime >= mStart &&
-                  t.clockInTime <= mEnd,
-              );
+              const periodProjectTasks = taskLogs.filter((t) => {
+                if (t.clientName !== c.name || !t.projectId) return false;
+                const startedThisCycle =
+                  t.clockInTime >= mStart && t.clockInTime <= mEnd;
+                const completedThisCycle =
+                  t.status === 'completed' &&
+                  t.clockOutTime &&
+                  t.clockOutTime >= mStart &&
+                  t.clockOutTime <= mEnd;
+                return startedThisCycle || completedThisCycle;
+              });
               const periodProjectExps = expenses.filter(
                 (e) =>
                   e.clientName === c.name &&
@@ -4124,6 +4152,38 @@ const AdminDashboard = ({
                                 <CheckSquare className="w-3 h-3" />
                                 Add Hours
                               </button>
+                              {canBilling && (
+                                <button
+                                  type="button"
+                                  disabled={isRestrictedStaff}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (isRestrictedStaff) return;
+                                    if (isCycleLocked(c, mStart)) {
+                                      window.alert(
+                                        'This billing cycle is locked. Unlock it to move hours between categories.',
+                                      );
+                                      return;
+                                    }
+                                    setRetainerMoveModal({
+                                      client: c,
+                                      mStart,
+                                      mEnd: period.end,
+                                      from: '',
+                                      to: '',
+                                      hours: '',
+                                    });
+                                  }}
+                                  className={`hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-slate-50 text-slate-700 border border-slate-200 transition-colors ${
+                                    isRestrictedStaff
+                                      ? 'opacity-40 cursor-not-allowed'
+                                      : 'hover:bg-slate-100'
+                                  }`}
+                                  title="Shift hour budget between retainer lines (this cycle only)"
+                                >
+                                  Move hours
+                                </button>
+                              )}
                             </>
                           )}
                         </div>
@@ -4134,51 +4194,25 @@ const AdminDashboard = ({
                           No active retainers configured for this period.
                         </p>
                       ) : (
-                        <div>
-                          <div className="flex justify-between items-end mb-1">
-                            <span className="font-bold text-sm text-slate-600">
-                              Combined Pool
-                            </span>
-                            <span
-                              className={`text-xs font-black ${
-                                stats.isOver
-                                  ? 'text-red-500'
-                                  : 'text-slate-500'
-                              }`}
-                            >
-                              {stats.currentUsed.toFixed(2)}h /{' '}
-                              {stats.adjustedAllotted.toFixed(2)}h
-                            </span>
-                          </div>
-                          <div className="text-[10px] font-bold text-slate-400 mb-2">
-                            Base: {stats.base.toFixed(2)}h | Carryover:{' '}
-                            {stats.carryover > 0 ? '+' : ''}
-                            {stats.carryover.toFixed(2)}h{' '}
-                            {stats.currentAddons > 0 &&
-                              `| Addons: +${stats.currentAddons.toFixed(2)}h`}
-                          </div>
-                          <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-1">
-                            <div
-                              className={`${
-                                stats.isOver
-                                  ? 'bg-red-500'
-                                  : stats.percent > 85
-                                  ? 'bg-orange-500'
-                                  : 'bg-emerald-500'
-                              } h-3 rounded-full transition-all duration-1000`}
-                              style={{ width: `${stats.percent}%` }}
-                            ></div>
-                          </div>
-                          {stats.isOver && (
-                            <div className="text-[9px] font-black text-red-500 uppercase tracking-widest text-right mt-1">
-                              Over Limit by{' '}
-                              {(
-                                stats.currentUsed -
-                                stats.adjustedAllotted
-                              ).toFixed(2)}
-                              h
-                            </div>
-                          )}
+                        <div className="text-[10px] text-slate-500 font-bold leading-relaxed">
+                          <span className="font-black text-slate-600">
+                            Hour retainers (per category)
+                          </span>
+                          : budgets and usage are tracked per line below. Roll up
+                          for this cycle:{' '}
+                          <span className="text-slate-800">
+                            {stats.currentUsed.toFixed(2)}h used /{' '}
+                            {stats.adjustedAllotted.toFixed(2)}h budget
+                          </span>{' '}
+                          (base {stats.base.toFixed(2)}h + carryover{' '}
+                          {stats.carryover > 0 ? '+' : ''}
+                          {stats.carryover.toFixed(2)}h
+                          {stats.currentAddons > 0
+                            ? ` + add-ons ${stats.currentAddons.toFixed(2)}h`
+                            : ''}
+                          , before category-to-category moves). Use{' '}
+                          <span className="text-[#fd7414]">Move hours</span> to
+                          shift spare allowance between hour categories this cycle.
                         </div>
                       )}
                   {isClientPage &&
@@ -7662,6 +7696,189 @@ const AdminDashboard = ({
                 Done
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {retainerMoveModal?.client && (
+        <div className="fixed inset-0 z-[160] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 p-6 space-y-4 text-left">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">
+                  Move retainer hours
+                </h4>
+                <p className="text-xs text-slate-500 font-medium mt-1">
+                  {retainerMoveModal.client.name} — shifts budget between hour
+                  categories for this billing cycle only (does not change logged
+                  time).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRetainerMoveModal(null)}
+                className="px-2 py-1 rounded-lg text-xs font-bold text-slate-500 hover:bg-slate-100 shrink-0"
+              >
+                Close
+              </button>
+            </div>
+            {(() => {
+              const c = retainerMoveModal.client;
+              const hourCats = Object.keys(c.retainers || {}).filter(
+                (cat) =>
+                  cat !== 'Social Ad Budget' &&
+                  c.retainerUnits?.[cat] !== 'dollar',
+              );
+              if (!hourCats.length) {
+                return (
+                  <p className="text-xs text-slate-500">
+                    No hour-based retainer lines to move between.
+                  </p>
+                );
+              }
+              return (
+                <>
+                  <div className="grid grid-cols-1 gap-3">
+                    <div>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                        From category (surplus)
+                      </label>
+                      <select
+                        value={retainerMoveModal.from}
+                        onChange={(e) =>
+                          setRetainerMoveModal((prev) => ({
+                            ...prev,
+                            from: e.target.value,
+                          }))
+                        }
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      >
+                        <option value="">Select…</option>
+                        {hourCats.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                        To category (needs capacity)
+                      </label>
+                      <select
+                        value={retainerMoveModal.to}
+                        onChange={(e) =>
+                          setRetainerMoveModal((prev) => ({
+                            ...prev,
+                            to: e.target.value,
+                          }))
+                        }
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      >
+                        <option value="">Select…</option>
+                        {hourCats.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                        Hours to move
+                      </label>
+                      <input
+                        type="number"
+                        min="0.25"
+                        step="0.25"
+                        value={retainerMoveModal.hours}
+                        onChange={(e) =>
+                          setRetainerMoveModal((prev) => ({
+                            ...prev,
+                            hours: e.target.value,
+                          }))
+                        }
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-black outline-none focus:ring-2 focus:ring-[#fd7414]"
+                        placeholder="e.g. 2.5"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setRetainerMoveModal(null)}
+                      className="px-4 py-2 rounded-xl text-xs font-black text-slate-600 bg-slate-100 hover:bg-slate-200 uppercase tracking-widest"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const from = retainerMoveModal.from;
+                        const to = retainerMoveModal.to;
+                        const h = Number(retainerMoveModal.hours);
+                        if (!from || !to || from === to) {
+                          window.alert('Pick two different categories.');
+                          return;
+                        }
+                        if (!Number.isFinite(h) || h <= 0) {
+                          window.alert('Enter a positive number of hours.');
+                          return;
+                        }
+                        const st = getGlobalRetainerStats(
+                          c,
+                          retainerMoveModal.mStart,
+                          retainerMoveModal.mEnd,
+                        );
+                        const fromRow = st.perCategory?.[from];
+                        const headroom =
+                          Number(fromRow?.adjustedAllotted || 0) -
+                          Number(fromRow?.used || 0);
+                        if (h > headroom + 0.0001) {
+                          window.alert(
+                            `Only about ${headroom.toFixed(2)}h can be moved from "${from}" without going under logged usage.`,
+                          );
+                          return;
+                        }
+                        const cycleKey = String(retainerMoveModal.mStart);
+                        const prev = c.retainerHourMovesByCycle || {};
+                        const list = [...(prev[cycleKey] || [])];
+                        list.push({
+                          from,
+                          to,
+                          hours: h,
+                          movedAt: Date.now(),
+                          movedBy: user?.email || user?.uid || 'unknown',
+                        });
+                        try {
+                          await updateDoc(doc('clients', c.id), {
+                            retainerHourMovesByCycle: { ...prev, [cycleKey]: list },
+                          });
+                          await logAudit?.({
+                            type: 'retainer_hour_move',
+                            entityType: 'client',
+                            entityId: c.id,
+                            clientId: c.id,
+                            cycleStart: retainerMoveModal.mStart,
+                            from,
+                            to,
+                            hours: h,
+                          });
+                          setRetainerMoveModal(null);
+                        } catch (err) {
+                          window.alert(
+                            err?.message || 'Could not save hour move.',
+                          );
+                        }
+                      }}
+                      className="px-4 py-2 rounded-xl text-xs font-black text-white bg-[#fd7414] hover:brightness-95 uppercase tracking-widest"
+                    >
+                      Save move
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
