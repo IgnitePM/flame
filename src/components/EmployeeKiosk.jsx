@@ -89,6 +89,7 @@ const EmployeeKiosk = ({
   const [linkPickRetainerName, setLinkPickRetainerName] = React.useState('');
   const [linkPickProjectId, setLinkPickProjectId] = React.useState('');
   const [personalOptionsItemId, setPersonalOptionsItemId] = React.useState(null);
+  const [personalOptionsTitle, setPersonalOptionsTitle] = React.useState('');
   const [personalOptionsDue, setPersonalOptionsDue] = React.useState('');
   const [personalOptionsRecurrence, setPersonalOptionsRecurrence] =
     React.useState('none');
@@ -1693,6 +1694,7 @@ const EmployeeKiosk = ({
                             disabled={personalListSaving}
                             onClick={() => {
                               setPersonalOptionsItemId(t.id);
+                              setPersonalOptionsTitle(String(t.text || ''));
                               setPersonalOptionsDue(asDateInputMs(t.dueDate));
                               const tp = t?.recurrence?.type;
                               let mode = 'none';
@@ -1929,6 +1931,18 @@ const EmployeeKiosk = ({
             </div>
             <div>
               <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">
+                Title
+              </label>
+              <input
+                type="text"
+                value={personalOptionsTitle}
+                onChange={(e) => setPersonalOptionsTitle(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm"
+                placeholder="Task title"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">
                 Due date
               </label>
               <input
@@ -1958,8 +1972,27 @@ const EmployeeKiosk = ({
             <div className="flex justify-end gap-2">
               <button
                 type="button"
+                className="px-3 py-2 rounded-xl text-xs font-black bg-red-50 text-red-600"
+                disabled={personalListSaving || !updateUserTodos}
+                onClick={async () => {
+                  if (!updateUserTodos) return;
+                  const tid = personalOptionsTargetItem.id;
+                  setPersonalListSaving(true);
+                  try {
+                    await updateUserTodos((userTodos || []).filter((x) => x.id !== tid));
+                    setPersonalOptionsItemId(null);
+                  } finally {
+                    setPersonalListSaving(false);
+                  }
+                }}
+              >
+                Delete
+              </button>
+              <button
+                type="button"
                 className="px-3 py-2 rounded-xl text-xs font-black bg-slate-100"
                 onClick={() => {
+                  setPersonalOptionsTitle('');
                   setPersonalOptionsDue('');
                   setPersonalOptionsRecurrence('none');
                 }}
@@ -1971,6 +2004,11 @@ const EmployeeKiosk = ({
                 disabled={personalListSaving || !updateUserTodos}
                 onClick={async () => {
                   if (!updateUserTodos) return;
+                  const nextTitle = String(personalOptionsTitle || '').trim();
+                  if (!nextTitle) {
+                    window.alert('Title cannot be empty.');
+                    return;
+                  }
                   const dueDate = parseDateInputToMs(personalOptionsDue);
                   const recurrence = buildPersonalRecurrenceFromMode(
                     personalOptionsRecurrence,
@@ -1984,6 +2022,7 @@ const EmployeeKiosk = ({
                         x.id === tid
                           ? {
                               ...x,
+                              text: nextTitle,
                               dueDate,
                               recurrence,
                               recurring: !!recurrence,

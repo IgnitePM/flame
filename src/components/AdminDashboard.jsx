@@ -1079,6 +1079,7 @@ const AdminDashboard = ({
   const [todoAddOptionsModalCatKey, setTodoAddOptionsModalCatKey] = useState(null);
   /** Existing to-do row: which item's due/recurrence is being edited in the Options modal. */
   const [todoEditOptionsTarget, setTodoEditOptionsTarget] = useState(null);
+  const [todoEditOptionsTitle, setTodoEditOptionsTitle] = useState('');
   const [todoEditOptionsDue, setTodoEditOptionsDue] = useState('');
   const [todoEditOptionsRecurrence, setTodoEditOptionsRecurrence] = useState('none');
   /** Global Tasks tab: inline add sub-task (one parent at a time). */
@@ -1811,6 +1812,7 @@ const AdminDashboard = ({
       itemId: item.id,
       subtaskId: subtask?.id || null,
     });
+    setTodoEditOptionsTitle(String(subtask ? subtask.text : item.text || ''));
     setTodoEditOptionsDue(asDateInput(subtask ? subtask.dueDate : item.dueDate));
     if (subtask) {
       setTodoEditOptionsRecurrence('none');
@@ -1852,11 +1854,16 @@ const AdminDashboard = ({
     }
     const { subtaskId } = todoEditOptionsTarget;
     const dueDate = parseDateInputToMs(todoEditOptionsDue);
+    const title = String(todoEditOptionsTitle || '').trim();
     let nextList;
     if (subtaskId) {
       const sub = getSubtasks(item).find((s) => s.id === subtaskId);
       if (!sub) {
         setTodoEditOptionsTarget(null);
+        return;
+      }
+      if (!title) {
+        window.alert('Title cannot be empty.');
         return;
       }
       const cap = parentDueCapMs(item);
@@ -1867,13 +1874,18 @@ const AdminDashboard = ({
       }
       const clamped = clampSubtaskDueToParent(item, dueDate);
       const nextItem = mapItemSubtasks(item, (s) =>
-        s.id === subtaskId ? { ...s, dueDate: clamped } : s,
+        s.id === subtaskId ? { ...s, text: title, dueDate: clamped } : s,
       );
       nextList = list.map((i) => (i.id === itemId ? nextItem : i));
     } else {
+      if (!title) {
+        window.alert('Title cannot be empty.');
+        return;
+      }
       const recurrence = buildRecurrenceFromMode(todoEditOptionsRecurrence, dueDate);
       let nextItem = {
         ...item,
+        text: title,
         dueDate,
         recurring: !!recurrence,
         recurringId: recurrence ? item.recurringId || item.id : null,
@@ -1891,6 +1903,55 @@ const AdminDashboard = ({
     } finally {
       setTodoSaving(false);
       setTodoEditOptionsTarget(null);
+    }
+  };
+
+  const deleteTodoEditOptionsTarget = async () => {
+    if (!todoEditOptionsTarget || !updateClientTodo || !getTodoStateForCycle) {
+      setTodoEditOptionsTarget(null);
+      return;
+    }
+    const { clientId, cycleStart, categoryKey, itemId, subtaskId } = todoEditOptionsTarget;
+    const client = clients.find((cl) => cl.id === clientId);
+    if (!client) {
+      setTodoEditOptionsTarget(null);
+      return;
+    }
+    if (isCycleLocked(client, cycleStart)) {
+      setTodoEditOptionsTarget(null);
+      return;
+    }
+    const todoState = getTodoStateForCycle(client, cycleStart);
+    const catTodo = todoState[categoryKey] || { closed: false, items: [] };
+    const list = catTodo.items || [];
+    const item = list.find((i) => i.id === itemId);
+    if (!item) {
+      setTodoEditOptionsTarget(null);
+      return;
+    }
+    const ok = window.confirm(
+      subtaskId
+        ? 'Delete this sub-task permanently?'
+        : 'Delete this task permanently?',
+    );
+    if (!ok) return;
+
+    let nextList = list;
+    if (subtaskId) {
+      nextList = removeSubtaskFromItems(list, itemId, subtaskId);
+    } else {
+      nextList = list.filter((i) => i.id !== itemId);
+    }
+
+    setTodoSaving(true);
+    try {
+      await updateClientTodo(client, cycleStart, categoryKey, {
+        ...catTodo,
+        items: nextList,
+      });
+      setTodoEditOptionsTarget(null);
+    } finally {
+      setTodoSaving(false);
     }
   };
 
@@ -7564,6 +7625,18 @@ const AdminDashboard = ({
             </p>
             <div>
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                Title
+              </label>
+              <input
+                type="text"
+                value={todoEditOptionsTitle}
+                onChange={(e) => setTodoEditOptionsTitle(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                placeholder={todoEditOptionsTarget.subtaskId ? 'Sub-task title' : 'Task title'}
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
                 Due date
               </label>
               <input
@@ -7604,7 +7677,16 @@ const AdminDashboard = ({
             <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"
+                disabled={todoSaving}
+                onClick={() => deleteTodoEditOptionsTarget()}
+                className="px-3 py-2 rounded-xl text-xs font-black text-red-600 bg-red-50 hover:bg-red-100 uppercase tracking-widest disabled:opacity-50 mr-auto"
+              >
+                Delete
+              </button>
+              <button
+                type="button"
                 onClick={() => {
+                  setTodoEditOptionsTitle('');
                   setTodoEditOptionsDue('');
                   setTodoEditOptionsRecurrence('none');
                 }}
