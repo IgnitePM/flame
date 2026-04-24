@@ -191,6 +191,19 @@ const EmployeeKiosk = ({
   // so the retainer progress bar doesn't lag behind when switching tasks.
   const effectiveClientName = activeTask?.clientName || selectedClient;
   const selectedClientObj = clientsFull?.find((c) => c.name === effectiveClientName);
+  const normalizeCategoryName = (value) =>
+    String(value || '').trim().toLowerCase();
+  const resolveClientCategoryName = React.useCallback(
+    (rawName) => {
+      const raw = String(rawName || '');
+      const keys = Object.keys(selectedClientObj?.retainers || {});
+      const byNorm = keys.find(
+        (k) => normalizeCategoryName(k) === normalizeCategoryName(raw),
+      );
+      return byNorm || raw;
+    },
+    [selectedClientObj],
+  );
   const cycleStart = selectedClientObj
     ? getBillingPeriod(selectedClientObj.billingDay || 1, 0).start
     : null;
@@ -200,10 +213,10 @@ const EmployeeKiosk = ({
     // If we're actively working a custom project (projectId is truthy), hide retainer UI.
     if (activeTask) {
       if (activeTask.projectId) return null;
-      return activeTask.projectName || null;
+      return resolveClientCategoryName(activeTask.projectName) || null;
     }
     return selectedBillingTarget?.startsWith('retainer_')
-      ? selectedBillingTarget.replace('retainer_', '')
+      ? resolveClientCategoryName(selectedBillingTarget.replace('retainer_', ''))
       : null;
   })();
 
@@ -245,7 +258,7 @@ const EmployeeKiosk = ({
     activeTask &&
     activeTask.projectName &&
     selectedRetainerCategory &&
-    activeTask.projectName === selectedRetainerCategory;
+    resolveClientCategoryName(activeTask.projectName) === selectedRetainerCategory;
 
   const categoryUsedWithActive = categoryUsed + (selectedCategoryMatchesActiveTask ? activeDeltaHours : 0);
   const categoryUsedWithActiveNormalized = isDollarCategory

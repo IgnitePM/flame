@@ -1677,6 +1677,16 @@ export default function App() {
       .filter((a) => !globalResetMs || a.date >= globalResetMs);
 
     const retainerCategories = Object.keys(client.retainers || {});
+    const normalizeCategory = (value) =>
+      String(value || '').trim().toLowerCase();
+    const categoryByNormalized = retainerCategories.reduce((acc, cat) => {
+      acc[normalizeCategory(cat)] = cat;
+      return acc;
+    }, {});
+    const canonicalCategory = (value) => {
+      const key = normalizeCategory(value);
+      return categoryByNormalized[key] || String(value || '');
+    };
     const perCategory = {};
 
     const getEffectiveStartMs = (effectiveResetMs, firstActivityMs) => {
@@ -1704,7 +1714,7 @@ export default function App() {
             t.clientName === client.name &&
             t.clockInTime < mStart &&
             !t.projectId &&
-            t.projectName === cat,
+            canonicalCategory(t.projectName) === cat,
         );
       }
 
@@ -1713,7 +1723,7 @@ export default function App() {
           e.clientName === client.name &&
           e.date < mStart &&
           !e.projectId &&
-          e.category === cat,
+          canonicalCategory(e.category) === cat,
       );
 
       if (clientStartMs) {
@@ -1826,17 +1836,20 @@ export default function App() {
     // Hours-based categories (from completed tasks only; active task live time is added in kiosk via activeDeltaHours).
     completedTasksThisCycle.reduce((acc, t) => {
       if (t.projectName === GENERAL_LABEL) return acc;
-      acc[t.projectName] = (acc[t.projectName] || 0) + (getTaskDuration(t) / 3600000);
+      const cat = canonicalCategory(t.projectName);
+      if (!client.retainers?.[cat]) return acc;
+      acc[cat] = (acc[cat] || 0) + (getTaskDuration(t) / 3600000);
       return acc;
     }, categoryBreakdown);
 
     // Dollar categories use finalCost; hour categories use equivalentHours.
     currentExps.forEach((e) => {
-      if (!e.category || !client.retainers) return;
-      if (isDollarCategory(client, e.category)) {
-        categoryBreakdown[e.category] = (categoryBreakdown[e.category] || 0) + (Number(e.finalCost) || 0);
+      const cat = canonicalCategory(e.category);
+      if (!cat || !client.retainers?.[cat]) return;
+      if (isDollarCategory(client, cat)) {
+        categoryBreakdown[cat] = (categoryBreakdown[cat] || 0) + (Number(e.finalCost) || 0);
       } else {
-        categoryBreakdown[e.category] = (categoryBreakdown[e.category] || 0) + (Number(e.equivalentHours) || 0);
+        categoryBreakdown[cat] = (categoryBreakdown[cat] || 0) + (Number(e.equivalentHours) || 0);
       }
     });
 
@@ -1885,7 +1898,7 @@ export default function App() {
     );
     const retainerLineNames = new Set(Object.keys(client.retainers || {}));
     const unattributedTaskHours = completedTasksThisCycle.reduce((acc, t) => {
-      const pn = t.projectName || '';
+      const pn = canonicalCategory(t.projectName || '');
       const h = getTaskDuration(t) / 3600000;
       if (!pn || pn === GENERAL_LABEL) return acc + h;
       if (!retainerLineNames.has(pn)) return acc + h;
