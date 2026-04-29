@@ -250,20 +250,8 @@ const EmployeeKiosk = ({
     ? retainerStats.categoryBreakdown[selectedRetainerCategory] || 0
     : 0;
 
-  // Include running task time so the progress bar updates in real time.
-  const activeDeltaHours =
-    activeTask && liveTaskDuration ? liveTaskDuration / 3600000 : 0;
-
-  const selectedCategoryMatchesActiveTask =
-    activeTask &&
-    activeTask.projectName &&
-    selectedRetainerCategory &&
-    resolveClientCategoryName(activeTask.projectName) === selectedRetainerCategory;
-
-  const categoryUsedWithActive = categoryUsed + (selectedCategoryMatchesActiveTask ? activeDeltaHours : 0);
-  const categoryUsedWithActiveNormalized = isDollarCategory
-    ? Number(categoryUsed || 0)
-    : categoryUsedWithActive;
+  // getGlobalRetainerStats already includes active-task time (via getTaskDuration); keep display in sync with admin/client.
+  const retainerCategoryUsedDisplay = Number(categoryUsed || 0);
 
   const categoryAllotted =
     retainerStats?.perCategory?.[selectedRetainerCategory]?.adjustedAllotted ??
@@ -836,13 +824,13 @@ const EmployeeKiosk = ({
                           </div>
                           <div className="text-xs font-black text-slate-700 mb-2">
                             {isDollarCategory
-                              ? `$${Number(categoryUsedWithActiveNormalized || 0).toFixed(2)} used / $${Number(categoryAllotted || 0).toFixed(2)} available`
-                              : `${Number(categoryUsedWithActiveNormalized || 0).toFixed(2)}h used / ${Number(categoryAllotted || 0).toFixed(2)}h available`}
+                              ? `$${Number(retainerCategoryUsedDisplay || 0).toFixed(2)} used / $${Number(categoryAllotted || 0).toFixed(2)} available`
+                              : `${Number(retainerCategoryUsedDisplay || 0).toFixed(2)}h used / ${Number(categoryAllotted || 0).toFixed(2)}h available`}
                           </div>
                           <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-3">
                             <div
                               className={`h-3 rounded-full transition-all duration-500 ${
-                                  (categoryUsedWithActiveNormalized >
+                                  (retainerCategoryUsedDisplay >
                                   Number(categoryAllotted || 0))
                                     ? 'bg-red-500'
                                     : 'bg-emerald-500'
@@ -850,7 +838,7 @@ const EmployeeKiosk = ({
                               style={{
                                 width: `${Math.min(
                                   100,
-                                  ((categoryUsedWithActiveNormalized || 0) /
+                                  ((retainerCategoryUsedDisplay || 0) /
                                     ((Number(categoryAllotted || 0) || 1))) *
                                     100,
                                 )}%`,
@@ -974,20 +962,20 @@ const EmployeeKiosk = ({
                           </div>
                           <div className="text-xs font-black text-slate-700 mb-2">
                             {isDollarCategory
-                              ? `$${Number(categoryUsedWithActiveNormalized || 0).toFixed(2)} used / $${Number(categoryAllotted || 0).toFixed(2)} available`
-                              : `${Number(categoryUsedWithActiveNormalized || 0).toFixed(2)}h used / ${Number(categoryAllotted || 0).toFixed(2)}h available`}
+                              ? `$${Number(retainerCategoryUsedDisplay || 0).toFixed(2)} used / $${Number(categoryAllotted || 0).toFixed(2)} available`
+                              : `${Number(retainerCategoryUsedDisplay || 0).toFixed(2)}h used / ${Number(categoryAllotted || 0).toFixed(2)}h available`}
                           </div>
                           <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-3">
                             <div
                               className={`h-3 rounded-full transition-all duration-500 ${
-                                categoryUsedWithActive > Number(categoryAllotted || 0)
+                                retainerCategoryUsedDisplay > Number(categoryAllotted || 0)
                                   ? 'bg-red-500'
                                   : 'bg-emerald-500'
                               }`}
                               style={{
                                 width: `${Math.min(
                                   100,
-                                  ((categoryUsedWithActive || 0) /
+                                  ((retainerCategoryUsedDisplay || 0) /
                                     ((Number(categoryAllotted || 0) || 1))) *
                                     100,
                                 )}%`,

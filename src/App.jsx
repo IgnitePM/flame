@@ -1804,13 +1804,44 @@ export default function App() {
 
     const prevAddonByCat = allocateAddonHoursByCategory(previousCycleAddons);
 
-    const currentTasks = taskLogs.filter(t => t.clientName === client.name && t.clockInTime >= mStart && t.clockInTime <= mEnd && !t.projectId);
+    const timelineEndMs = (t) => {
+      if (t.status === 'active') return Date.now();
+      const cin = Number(t.clockInTime || 0);
+      const out = Number(t.clockOutTime || 0);
+      if (out >= cin) return out;
+      return cin + getTaskDuration(t);
+    };
+
+    const taskOverlapsBillingWindow = (t) => {
+      const start = Number(t.clockInTime || 0);
+      if (!start) return false;
+      const end = timelineEndMs(t);
+      return start <= mEnd && end >= mStart;
+    };
+
+    /** Hours attributed to [mStart, mEnd] (prorates tasks that cross cycle boundaries; includes active tasks via getTaskDuration). */
+    const hoursInBillingWindow = (t) => {
+      const totalMs = getTaskDuration(t);
+      if (!totalMs || totalMs <= 0) return 0;
+      const start = Number(t.clockInTime || 0);
+      if (!start) return 0;
+      const end = timelineEndMs(t);
+      const span = end - start;
+      if (span <= 0) return 0;
+      const overlapStart = Math.max(start, mStart);
+      const overlapEnd = Math.min(end, mEnd);
+      if (overlapEnd <= overlapStart) return 0;
+      return (totalMs * (overlapEnd - overlapStart)) / span / 3600000;
+    };
+
+    const currentTasks = taskLogs.filter(
+      (t) =>
+        t.clientName === client.name &&
+        !t.projectId &&
+        taskOverlapsBillingWindow(t),
+    );
     const currentExps = expenses.filter(e => e.clientName === client.name && e.date >= mStart && e.date <= mEnd && !e.projectId);
     const currentAddons = addons.filter(a => a.clientId === client.id && a.date >= mStart && a.date <= mEnd);
-
-    // Exclude in-progress task from totals so the kiosk can add live time once via activeDeltaHours (avoids double-counting).
-    const completedTasksThisCycle = currentTasks.filter((t) => t.status !== 'active');
-    const currentTaskHours = completedTasksThisCycle.reduce((acc, t) => acc + getTaskDuration(t), 0) / 3600000;
     const currentExpHours = currentExps.reduce((acc, e) => acc + (e.equivalentHours || 0), 0);
     const currentAddonHours = currentAddons.reduce((acc, a) => acc + Number(a.hours), 0);
     const currAddonByCat = allocateAddonHoursByCategory(currentAddons);
@@ -1833,14 +1864,12 @@ export default function App() {
 
     const categoryBreakdown = {};
 
-    // Hours-based categories (from completed tasks only; active task live time is added in kiosk via activeDeltaHours).
-    completedTasksThisCycle.reduce((acc, t) => {
-      if (t.projectName === GENERAL_LABEL) return acc;
+    currentTasks.forEach((t) => {
+      if (t.projectName === GENERAL_LABEL) return;
       const cat = canonicalCategory(t.projectName);
-      if (!client.retainers?.[cat]) return acc;
-      acc[cat] = (acc[cat] || 0) + (getTaskDuration(t) / 3600000);
-      return acc;
-    }, categoryBreakdown);
+      if (!client.retainers?.[cat]) return;
+      categoryBreakdown[cat] = (categoryBreakdown[cat] || 0) + hoursInBillingWindow(t);
+    });
 
     // Dollar categories use finalCost; hour categories use equivalentHours.
     currentExps.forEach((e) => {
@@ -1897,9 +1926,9 @@ export default function App() {
       0,
     );
     const retainerLineNames = new Set(Object.keys(client.retainers || {}));
-    const unattributedTaskHours = completedTasksThisCycle.reduce((acc, t) => {
+    const unattributedTaskHours = currentTasks.reduce((acc, t) => {
       const pn = canonicalCategory(t.projectName || '');
-      const h = getTaskDuration(t) / 3600000;
+      const h = hoursInBillingWindow(t);
       if (!pn || pn === GENERAL_LABEL) return acc + h;
       if (!retainerLineNames.has(pn)) return acc + h;
       return acc;
