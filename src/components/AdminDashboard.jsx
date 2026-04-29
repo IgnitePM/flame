@@ -2807,11 +2807,11 @@ const AdminDashboard = ({
                   : [];
                 const subs = getSubtasks(row.item);
                 const globalComposerMatch =
-                  globalSubtaskComposer &&
-                  globalSubtaskComposer.clientId === row.clientId &&
-                  globalSubtaskComposer.cycleStart === row.cycleStart &&
-                  globalSubtaskComposer.categoryKey === row.categoryKey &&
-                  globalSubtaskComposer.parentId === row.item.id;
+                  !!globalSubtaskComposer &&
+                  String(globalSubtaskComposer.clientId) === String(row.clientId) &&
+                  Number(globalSubtaskComposer.cycleStart) === Number(row.cycleStart) &&
+                  String(globalSubtaskComposer.categoryKey) === String(row.categoryKey) &&
+                  String(globalSubtaskComposer.parentId) === String(row.item.id);
                 return (
                   <div
                     key={`${row.clientId}__${row.categoryKey}__${row.item.id}`}
@@ -5886,11 +5886,11 @@ const AdminDashboard = ({
                                                             const assignees = normalizeTodoAssignees(item);
                                                             const subs = getSubtasks(item);
                                                             const clientComposerMatch =
-                                                              clientSubtaskComposer &&
-                                                              clientSubtaskComposer.clientId === c.id &&
-                                                              clientSubtaskComposer.cycleStart === cycleStart &&
-                                                              clientSubtaskComposer.categoryKey === catKey &&
-                                                              clientSubtaskComposer.parentId === item.id;
+                                                              !!clientSubtaskComposer &&
+                                                              String(clientSubtaskComposer.clientId) === String(c.id) &&
+                                                              Number(clientSubtaskComposer.cycleStart) === Number(cycleStart) &&
+                                                              String(clientSubtaskComposer.categoryKey) === String(catKey) &&
+                                                              String(clientSubtaskComposer.parentId) === String(item.id);
                                                             return (
                                                             <li
                                                               key={item.id}
