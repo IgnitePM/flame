@@ -50,6 +50,7 @@ import {
   getSubtasks,
   mapItemSubtasks,
   newSubtaskTemplate,
+  openSubtaskCount,
   parentDueCapMs,
   removeSubtaskFromItems,
 } from '../utils/todoSubtasks.js';
@@ -4623,75 +4624,147 @@ const AdminDashboard = ({
                               <ul className="space-y-2 mb-2">
                                 {displayItems.map((item) => {
                                   const urgency = getTodoUrgencyStyles(item);
+                                  const subs = getSubtasks(item);
+                                  const stepsLeft = openSubtaskCount(item);
                                   return (
                                     <li
                                       key={item.id}
-                                      className={`flex items-center gap-2 rounded-lg p-2 ${urgency.rowClass}`}
+                                      className={`flex flex-col gap-2 rounded-lg p-2 ${urgency.rowClass}`}
                                     >
-                                      <input
-                                        type="checkbox"
-                                        checked={!!item.done}
-                                        onChange={async () => {
-                                          if (isCycleLocked(c, cycleStart))
-                                            return;
-                                          if (!item.done && !canMarkParentTodoDone(item)) {
-                                            window.alert(
-                                              'Complete every sub-task before marking this primary task complete.',
-                                            );
-                                            return;
-                                          }
-                                          setTodoSaving(true);
-                                          try {
-                                            const next = items.map((i) =>
-                                              i.id === item.id
-                                                ? {
-                                                    ...i,
-                                                    done: !i.done,
-                                                    doneAt: !i.done
-                                                      ? Date.now()
-                                                      : null,
-                                                  }
-                                                : i,
-                                            );
-                                            await updateClientTodo(
-                                              c,
-                                              cycleStart,
-                                              catKey,
-                                              { ...catTodo, items: next },
-                                            );
-                                          } finally {
-                                            setTodoSaving(false);
-                                          }
-                                        }}
-                                        disabled={todoSaving}
-                                        className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
-                                      />
-                                      <span
-                                        className={`flex-1 text-sm ${urgency.textClass}`}
-                                      >
-                                        {item.text || '(no text)'}
-                                      </span>
-                                      {item.pinned && (
-                                        <span className="text-[9px] font-black uppercase tracking-widest text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
-                                          Pinned
-                                        </span>
-                                      )}
-                                      {item.recurring && (
+                                      <div className="flex flex-wrap items-center gap-2 w-full">
+                                        <input
+                                          type="checkbox"
+                                          checked={!!item.done}
+                                          onChange={async () => {
+                                            if (isCycleLocked(c, cycleStart))
+                                              return;
+                                            if (!item.done && !canMarkParentTodoDone(item)) {
+                                              window.alert(
+                                                'Complete every sub-task before marking this primary task complete.',
+                                              );
+                                              return;
+                                            }
+                                            setTodoSaving(true);
+                                            try {
+                                              const next = items.map((i) =>
+                                                i.id === item.id
+                                                  ? {
+                                                      ...i,
+                                                      done: !i.done,
+                                                      doneAt: !i.done
+                                                        ? Date.now()
+                                                        : null,
+                                                    }
+                                                  : i,
+                                              );
+                                              await updateClientTodo(
+                                                c,
+                                                cycleStart,
+                                                catKey,
+                                                { ...catTodo, items: next },
+                                              );
+                                            } finally {
+                                              setTodoSaving(false);
+                                            }
+                                          }}
+                                          disabled={todoSaving}
+                                          className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
+                                        />
                                         <span
-                                          className={`text-[9px] font-black uppercase tracking-widest ${urgency.metaClass}`}
+                                          className={`flex-1 text-sm ${urgency.textClass}`}
                                         >
-                                          Recurring
+                                          {item.text || '(no text)'}
+                                          {subs.length > 0 && !item.done && (
+                                            <span className="ml-2 text-[9px] font-bold text-slate-500">
+                                              ({stepsLeft} step{stepsLeft === 1 ? '' : 's'}{' '}
+                                              left)
+                                            </span>
+                                          )}
                                         </span>
-                                      )}
-                                      {item.dueDate && (
-                                        <span
-                                          className={`text-[10px] font-black uppercase tracking-widest ${urgency.metaClass}`}
-                                        >
-                                          Due{' '}
-                                          {new Date(
-                                            item.dueDate,
-                                          ).toLocaleDateString()}
-                                        </span>
+                                        {item.pinned && (
+                                          <span className="text-[9px] font-black uppercase tracking-widest text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
+                                            Pinned
+                                          </span>
+                                        )}
+                                        {item.recurring && (
+                                          <span
+                                            className={`text-[9px] font-black uppercase tracking-widest ${urgency.metaClass}`}
+                                          >
+                                            Recurring
+                                          </span>
+                                        )}
+                                        {item.dueDate && (
+                                          <span
+                                            className={`text-[10px] font-black uppercase tracking-widest ${urgency.metaClass}`}
+                                          >
+                                            Due{' '}
+                                            {new Date(
+                                              item.dueDate,
+                                            ).toLocaleDateString()}
+                                          </span>
+                                        )}
+                                      </div>
+                                      {subs.length > 0 && (
+                                        <ul className="ml-6 sm:ml-10 border-l border-slate-200 pl-3 space-y-1 w-full">
+                                          {subs.map((sub) => {
+                                            const su = getTodoUrgencyStyles(sub);
+                                            return (
+                                              <li
+                                                key={sub.id}
+                                                className={`flex items-center gap-2 rounded-md px-2 py-1.5 ${su.rowClass}`}
+                                              >
+                                                <input
+                                                  type="checkbox"
+                                                  checked={!!sub.done}
+                                                  onChange={async () => {
+                                                    if (isCycleLocked(c, cycleStart)) return;
+                                                    setTodoSaving(true);
+                                                    try {
+                                                      const next = items.map((i) =>
+                                                        i.id === item.id
+                                                          ? mapItemSubtasks(i, (s) =>
+                                                              s.id === sub.id
+                                                                ? {
+                                                                    ...s,
+                                                                    done: !s.done,
+                                                                    doneAt: !s.done
+                                                                      ? Date.now()
+                                                                      : null,
+                                                                  }
+                                                                : s,
+                                                            )
+                                                          : i,
+                                                      );
+                                                      await updateClientTodo(
+                                                        c,
+                                                        cycleStart,
+                                                        catKey,
+                                                        { ...catTodo, items: next },
+                                                      );
+                                                    } finally {
+                                                      setTodoSaving(false);
+                                                    }
+                                                  }}
+                                                  disabled={todoSaving}
+                                                  className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4 shrink-0"
+                                                />
+                                                <span
+                                                  className={`flex-1 text-sm ${su.textClass}`}
+                                                >
+                                                  {safeDisplayForReact(sub.text) || '(sub-task)'}
+                                                  {sub.dueDate && (
+                                                    <span
+                                                      className={`ml-2 text-[10px] font-black uppercase tracking-widest ${su.metaClass}`}
+                                                    >
+                                                      Due{' '}
+                                                      {new Date(sub.dueDate).toLocaleDateString()}
+                                                    </span>
+                                                  )}
+                                                </span>
+                                              </li>
+                                            );
+                                          })}
+                                        </ul>
                                       )}
                                     </li>
                                   );
@@ -5728,90 +5801,165 @@ const AdminDashboard = ({
                                                             getTodoUrgencyStyles(
                                                               item,
                                                             );
+                                                          const subs = getSubtasks(item);
+                                                          const stepsLeft = openSubtaskCount(item);
                                                           return (
                                                             <li
                                                               key={item.id}
-                                                              className={`flex items-center gap-2 rounded-lg p-2 ${urgency.rowClass}`}
+                                                              className={`flex flex-col gap-2 rounded-lg p-2 ${urgency.rowClass}`}
                                                             >
-                                                              <input
-                                                                type="checkbox"
-                                                                checked={!!item.done}
-                                                                onChange={async () => {
-                                                                  if (
-                                                                    isCycleLocked(
-                                                                      c,
-                                                                      cycleStart,
+                                                              <div className="flex flex-wrap items-center gap-2 w-full">
+                                                                <input
+                                                                  type="checkbox"
+                                                                  checked={!!item.done}
+                                                                  onChange={async () => {
+                                                                    if (
+                                                                      isCycleLocked(
+                                                                        c,
+                                                                        cycleStart,
+                                                                      )
                                                                     )
-                                                                  )
-                                                                    return;
-                                                                  if (!item.done && !canMarkParentTodoDone(item)) {
-                                                                    window.alert(
-                                                                      'Complete every sub-task before marking this primary task complete.',
-                                                                    );
-                                                                    return;
-                                                                  }
-                                                                  setTodoSaving(true);
-                                                                  try {
-                                                                    const next =
-                                                                      items.map(
-                                                                        (i) =>
-                                                                          i.id ===
-                                                                          item.id
-                                                                            ? {
-                                                                                ...i,
-                                                                                done: !i.done,
-                                                                                doneAt:
-                                                                                  !i.done
-                                                                                    ? Date.now()
-                                                                                    : null,
-                                                                              }
-                                                                            : i,
+                                                                      return;
+                                                                    if (!item.done && !canMarkParentTodoDone(item)) {
+                                                                      window.alert(
+                                                                        'Complete every sub-task before marking this primary task complete.',
                                                                       );
-                                                                    await updateClientTodo(
-                                                                      c,
-                                                                      cycleStart,
-                                                                      catKey,
-                                                                      {
-                                                                        ...catTodo,
-                                                                        items: next,
-                                                                      },
-                                                                    );
-                                                                  } finally {
-                                                                    setTodoSaving(
-                                                                      false,
-                                                                    );
-                                                                  }
-                                                                }}
-                                                                disabled={todoSaving}
-                                                                className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
-                                                              />
-                                                              <span
-                                                                className={`flex-1 text-sm ${urgency.textClass}`}
-                                                              >
-                                                                {item.text ||
-                                                                  '(no text)'}
-                                                              </span>
-                                                              {item.pinned && (
-                                                                <span className="text-[9px] font-black uppercase tracking-widest text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
-                                                                  Pinned
-                                                                </span>
-                                                              )}
-                                                              {item.recurring && (
+                                                                      return;
+                                                                    }
+                                                                    setTodoSaving(true);
+                                                                    try {
+                                                                      const next =
+                                                                        items.map(
+                                                                          (i) =>
+                                                                            i.id ===
+                                                                            item.id
+                                                                              ? {
+                                                                                  ...i,
+                                                                                  done: !i.done,
+                                                                                  doneAt:
+                                                                                    !i.done
+                                                                                      ? Date.now()
+                                                                                      : null,
+                                                                                }
+                                                                              : i,
+                                                                        );
+                                                                      await updateClientTodo(
+                                                                        c,
+                                                                        cycleStart,
+                                                                        catKey,
+                                                                        {
+                                                                          ...catTodo,
+                                                                          items: next,
+                                                                        },
+                                                                      );
+                                                                    } finally {
+                                                                      setTodoSaving(
+                                                                        false,
+                                                                      );
+                                                                    }
+                                                                  }}
+                                                                  disabled={todoSaving}
+                                                                  className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
+                                                                />
                                                                 <span
-                                                                  className={`text-[9px] font-black uppercase tracking-widest ${urgency.metaClass}`}
+                                                                  className={`flex-1 text-sm ${urgency.textClass}`}
                                                                 >
-                                                                  Recurring
+                                                                  {item.text ||
+                                                                    '(no text)'}
+                                                                  {subs.length > 0 && !item.done && (
+                                                                    <span className="ml-2 text-[9px] font-bold text-slate-500">
+                                                                      ({stepsLeft} step{stepsLeft === 1 ? '' : 's'}{' '}
+                                                                      left)
+                                                                    </span>
+                                                                  )}
                                                                 </span>
-                                                              )}
-                                                              {item.dueDate && (
-                                                                <span
-                                                                  className={`text-[10px] font-black uppercase tracking-widest ${urgency.metaClass}`}
-                                                                >
-                                                                  Due{' '}
-                                                                  {new Date(
-                                                                    item.dueDate,
-                                                                  ).toLocaleDateString()}
-                                                                </span>
+                                                                {item.pinned && (
+                                                                  <span className="text-[9px] font-black uppercase tracking-widest text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
+                                                                    Pinned
+                                                                  </span>
+                                                                )}
+                                                                {item.recurring && (
+                                                                  <span
+                                                                    className={`text-[9px] font-black uppercase tracking-widest ${urgency.metaClass}`}
+                                                                  >
+                                                                    Recurring
+                                                                  </span>
+                                                                )}
+                                                                {item.dueDate && (
+                                                                  <span
+                                                                    className={`text-[10px] font-black uppercase tracking-widest ${urgency.metaClass}`}
+                                                                  >
+                                                                    Due{' '}
+                                                                    {new Date(
+                                                                      item.dueDate,
+                                                                    ).toLocaleDateString()}
+                                                                  </span>
+                                                                )}
+                                                              </div>
+                                                              {subs.length > 0 && (
+                                                                <ul className="ml-6 sm:ml-10 border-l border-slate-200 pl-3 space-y-1 w-full">
+                                                                  {subs.map((sub) => {
+                                                                    const su = getTodoUrgencyStyles(sub);
+                                                                    return (
+                                                                      <li
+                                                                        key={sub.id}
+                                                                        className={`flex items-center gap-2 rounded-md px-2 py-1.5 ${su.rowClass}`}
+                                                                      >
+                                                                        <input
+                                                                          type="checkbox"
+                                                                          checked={!!sub.done}
+                                                                          onChange={async () => {
+                                                                            if (isCycleLocked(c, cycleStart)) return;
+                                                                            setTodoSaving(true);
+                                                                            try {
+                                                                              const next = items.map((i) =>
+                                                                                i.id === item.id
+                                                                                  ? mapItemSubtasks(i, (s) =>
+                                                                                      s.id === sub.id
+                                                                                        ? {
+                                                                                            ...s,
+                                                                                            done: !s.done,
+                                                                                            doneAt: !s.done
+                                                                                              ? Date.now()
+                                                                                              : null,
+                                                                                          }
+                                                                                        : s,
+                                                                                    )
+                                                                                  : i,
+                                                                              );
+                                                                              await updateClientTodo(
+                                                                                c,
+                                                                                cycleStart,
+                                                                                catKey,
+                                                                                {
+                                                                                  ...catTodo,
+                                                                                  items: next,
+                                                                                },
+                                                                              );
+                                                                            } finally {
+                                                                              setTodoSaving(false);
+                                                                            }
+                                                                          }}
+                                                                          disabled={todoSaving}
+                                                                          className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4 shrink-0"
+                                                                        />
+                                                                        <span
+                                                                          className={`flex-1 text-sm ${su.textClass}`}
+                                                                        >
+                                                                          {safeDisplayForReact(sub.text) || '(sub-task)'}
+                                                                          {sub.dueDate && (
+                                                                            <span
+                                                                              className={`ml-2 text-[10px] font-black uppercase tracking-widest ${su.metaClass}`}
+                                                                            >
+                                                                              Due{' '}
+                                                                              {new Date(sub.dueDate).toLocaleDateString()}
+                                                                            </span>
+                                                                          )}
+                                                                        </span>
+                                                                      </li>
+                                                                    );
+                                                                  })}
+                                                                </ul>
                                                               )}
                                                             </li>
                                                           );
