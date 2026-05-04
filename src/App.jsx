@@ -44,6 +44,10 @@ import {
 import {
   auth,
   db,
+  storage,
+  storageRef,
+  uploadBytes,
+  getDownloadURL,
   GoogleAuthProvider,
   signInWithPopup,
   signOut,
@@ -270,7 +274,8 @@ export default function App() {
   const [editValues, setEditValues] = useState({});
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [archiveConfirm, setArchiveConfirm] = useState(null);
-  const [editingClient, setEditingClient] = useState(null); 
+  const [editingClient, setEditingClient] = useState(null);
+  const [clientLogoUploading, setClientLogoUploading] = useState(false);
   const [expenseModal, setExpenseModal] = useState(null);
   const [expenseValues, setExpenseValues] = useState({
     billingTarget: '',
@@ -2855,12 +2860,28 @@ export default function App() {
       {editingClient && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[100] animate-in fade-in duration-200">
           <div className="bg-white rounded-[32px] w-full max-w-lg shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col max-h-[90vh]">
-            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
-              <div className="text-left">
-                <h3 className="font-black text-2xl text-slate-900">{editingClient.name}</h3>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Client Settings & Retainers</p>
+            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0 gap-4">
+              <div className="text-left flex items-center gap-4 min-w-0">
+                {editingClient.logoUrl ? (
+                  <img
+                    src={editingClient.logoUrl}
+                    alt=""
+                    className="h-14 w-14 rounded-2xl object-cover border border-slate-200 shrink-0 bg-white"
+                  />
+                ) : (
+                  <div
+                    className="h-14 w-14 rounded-2xl border border-dashed border-slate-300 bg-white shrink-0 flex items-center justify-center text-[10px] font-bold text-slate-400 text-center leading-tight px-1"
+                    aria-hidden
+                  >
+                    No logo
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <h3 className="font-black text-2xl text-slate-900 truncate">{editingClient.name}</h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Client Settings & Retainers</p>
+                </div>
               </div>
-              <button onClick={() => setEditingClient(null)} className="p-2 bg-white rounded-full hover:bg-slate-100 border border-slate-200"><X className="w-5 h-5" /></button>
+              <button onClick={() => setEditingClient(null)} className="p-2 bg-white rounded-full hover:bg-slate-100 border border-slate-200 shrink-0"><X className="w-5 h-5" /></button>
             </div>
             
             <div className="p-8 space-y-8 overflow-y-auto text-left">
@@ -2911,6 +2932,64 @@ export default function App() {
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Authorized Emails (Comma separated)</label>
                   <p className="text-xs text-slate-400 mb-2">These users can log in to the Client Portal.</p>
                   <textarea value={(editingClient.clientEmails || []).join(', ')} onChange={e => setEditingClient({...editingClient, clientEmails: e.target.value.split(',').map(em => em.trim())})} className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[80px]" placeholder="ceo@client.com, cmo@client.com" />
+                </div>
+                <div className="space-y-2 pt-4 border-t border-slate-200">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Client logo</label>
+                  <p className="text-xs text-slate-400 mb-2">
+                    Shown next to the client name in admin, kiosk, and the client portal. PNG, JPG, WebP, or GIF — max 2.5 MB. If upload fails, enable Storage and publish the project&apos;s{' '}
+                    <code className="text-[11px] bg-slate-100 px-1 rounded">storage.rules</code>.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="px-4 py-2 rounded-xl bg-white border border-slate-200 text-xs font-black uppercase tracking-widest text-slate-700 cursor-pointer hover:bg-slate-50 disabled:opacity-40">
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+                        className="sr-only"
+                        disabled={clientLogoUploading}
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          e.target.value = '';
+                          if (!file || !editingClient?.id) return;
+                          if (!file.type.startsWith('image/')) {
+                            window.alert('Please choose an image file.');
+                            return;
+                          }
+                          if (file.size > 2.5 * 1024 * 1024) {
+                            window.alert('Image must be under 2.5 MB.');
+                            return;
+                          }
+                          setClientLogoUploading(true);
+                          try {
+                            const safe =
+                              file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80) ||
+                              'logo';
+                            const path = `client-logos/${editingClient.id}/${Date.now()}_${safe}`;
+                            const r = storageRef(storage, path);
+                            await uploadBytes(r, file, { contentType: file.type });
+                            const url = await getDownloadURL(r);
+                            setEditingClient((prev) => ({ ...prev, logoUrl: url }));
+                          } catch (err) {
+                            window.alert(
+                              err?.message ||
+                                'Upload failed. Enable Firebase Storage and deploy storage.rules (see project storage.rules).',
+                            );
+                          } finally {
+                            setClientLogoUploading(false);
+                          }
+                        }}
+                      />
+                      {clientLogoUploading ? 'Uploading…' : 'Upload image'}
+                    </label>
+                    {editingClient.logoUrl && (
+                      <button
+                        type="button"
+                        className="text-xs font-bold text-red-600 hover:underline"
+                        onClick={() => setEditingClient((prev) => ({ ...prev, logoUrl: null }))}
+                      >
+                        Remove logo
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -3185,7 +3264,7 @@ export default function App() {
 
             <div className="p-8 border-t border-slate-100 bg-white shrink-0">
               <button 
-                onClick={async () => { await updateDoc(doc(db, 'clients', editingClient.id), { retainers: editingClient.retainers, retainerUnits: editingClient.retainerUnits || {}, hourlyRate: editingClient.hourlyRate || 0, clientEmails: editingClient.clientEmails || [], billingDay: editingClient.billingDay || 1, status: editingClient.status || 'active', teamMemberAccessEmails: editingClient.teamMemberAccessEmails === undefined ? null : editingClient.teamMemberAccessEmails, lastCarryoverResetDate: editingClient.lastCarryoverResetDate || null, carryoverResetByCategory: editingClient.carryoverResetByCategory || {}, clientStartDate: editingClient.clientStartDate || null, retainerHourMovesByCycle: editingClient.retainerHourMovesByCycle || {} }); setEditingClient(null); }} 
+                onClick={async () => { await updateDoc(doc(db, 'clients', editingClient.id), { retainers: editingClient.retainers, retainerUnits: editingClient.retainerUnits || {}, hourlyRate: editingClient.hourlyRate || 0, clientEmails: editingClient.clientEmails || [], billingDay: editingClient.billingDay || 1, status: editingClient.status || 'active', teamMemberAccessEmails: editingClient.teamMemberAccessEmails === undefined ? null : editingClient.teamMemberAccessEmails, lastCarryoverResetDate: editingClient.lastCarryoverResetDate || null, carryoverResetByCategory: editingClient.carryoverResetByCategory || {}, clientStartDate: editingClient.clientStartDate || null, retainerHourMovesByCycle: editingClient.retainerHourMovesByCycle || {}, logoUrl: editingClient.logoUrl || null }); setEditingClient(null); }} 
                 className="w-full bg-black hover:bg-slate-800 text-white p-5 rounded-2xl font-black text-lg shadow-xl flex items-center justify-center gap-3 transition-all active:scale-95"
               >
                 <Save className="w-5 h-5" /> Save Profile

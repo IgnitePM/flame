@@ -931,19 +931,28 @@ const EmployeeKiosk = ({
                       )}
                     </div>
                   ) : (
-                    <div className="bg-orange-50 p-8 rounded-[32px] border border-orange-200 text-left animate-in zoom-in-95 duration-300">
-                      <div className="flex justify-between items-start mb-6">
-                        <div>
-                          <div className="font-black text-2xl text-slate-900">
+                    <div className="bg-orange-50 p-8 rounded-[32px] border border-orange-200 text-left animate-in zoom-in-95 duration-300 min-w-0 max-w-full">
+                      <div className="flex justify-between items-start mb-6 gap-3 min-w-0">
+                        <div className="flex items-start gap-3 min-w-0">
+                          {selectedClientObj?.logoUrl ? (
+                            <img
+                              src={selectedClientObj.logoUrl}
+                              alt=""
+                              className="h-12 w-12 rounded-2xl object-cover border border-orange-200 shrink-0 bg-white mt-0.5"
+                            />
+                          ) : null}
+                          <div className="min-w-0">
+                          <div className="font-black text-2xl text-slate-900 break-words">
                             {activeTask.clientName}
                           </div>
-                          <div className="text-[#fd7414] font-bold uppercase text-[10px] tracking-widest mt-1">
+                          <div className="text-[#fd7414] font-bold uppercase text-[10px] tracking-widest mt-1 break-words">
                             {activeTask.projectId
                               ? `Project: ${activeTask.projectName}`
                               : activeTask.projectName}
                           </div>
+                          </div>
                         </div>
-                        <div className="bg-white px-3 py-1.5 rounded-full border border-orange-200 text-[10px] font-black text-orange-600 shadow-sm">
+                        <div className="bg-white px-3 py-1.5 rounded-full border border-orange-200 text-[10px] font-black text-orange-600 shadow-sm shrink-0">
                           IN PROGRESS
                         </div>
                       </div>

@@ -107,8 +107,15 @@ const ClientPortal = ({
             Ignite Marketing Client Portal
           </span>
         </div>
-        <div className="flex items-center gap-4">
-          <span className="font-bold text-sm text-slate-500 hidden sm:inline">
+        <div className="flex items-center gap-4 min-w-0">
+          {clientProfile.logoUrl ? (
+            <img
+              src={clientProfile.logoUrl}
+              alt=""
+              className="h-9 w-9 rounded-xl object-cover border border-slate-200 shrink-0 hidden sm:block bg-white"
+            />
+          ) : null}
+          <span className="font-bold text-sm text-slate-500 hidden sm:inline truncate max-w-[200px]">
             {clientProfile.name}
           </span>
           <button

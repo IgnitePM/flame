@@ -37,7 +37,7 @@ export default function KioskClientTodoItem({
 
   return (
     <li
-      className={`flex flex-col gap-1 rounded-lg ${getUrgencyClass(item)}`}
+      className={`flex flex-col gap-1 rounded-lg min-w-0 max-w-full ${getUrgencyClass(item)}`}
       onDragOver={
         canDragReorder
           ? (e) => {
@@ -66,7 +66,7 @@ export default function KioskClientTodoItem({
           : undefined
       }
     >
-      <div className="flex items-center gap-2 p-2">
+      <div className="flex items-center gap-2 p-2 min-w-0 max-w-full w-full">
         {canDragReorder && (
           <span
             draggable={!todoSaving}
@@ -128,7 +128,7 @@ export default function KioskClientTodoItem({
           disabled={todoSaving}
           className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
         />
-        <span className={`text-sm flex-1 ${item.done ? 'line-through opacity-70' : ''}`}>
+        <span className={`text-sm flex-1 min-w-0 break-words ${item.done ? 'line-through opacity-70' : ''}`}>
           {safeDisplayForReact(item.text) || '(no text)'}
           {item.recurring && (
             <span className="ml-2 text-[9px] font-black uppercase tracking-widest text-[#fd7414]">
@@ -149,11 +149,11 @@ export default function KioskClientTodoItem({
         </span>
       </div>
       {subs.length > 0 && (
-        <ul className="ml-6 sm:ml-10 border-l border-slate-200 pl-3 space-y-1 pb-2">
+        <ul className="ml-4 sm:ml-6 border-l border-slate-200 pl-3 space-y-1 pb-2 w-full min-w-0 max-w-full overflow-x-hidden">
           {subs.map((sub) => (
             <li
               key={sub.id}
-              className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-sm ${getUrgencyClass(sub)}`}
+              className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-sm min-w-0 max-w-full w-full overflow-hidden ${getUrgencyClass(sub)}`}
             >
               <input
                 type="checkbox"
@@ -184,7 +184,7 @@ export default function KioskClientTodoItem({
                 }}
                 className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4 shrink-0"
               />
-              <span className={`flex-1 ${sub.done ? 'line-through opacity-70' : ''}`}>
+              <span className={`flex-1 min-w-0 break-words ${sub.done ? 'line-through opacity-70' : ''}`}>
                 {safeDisplayForReact(sub.text) || '(step)'}
                 {sub.dueDate && (
                   <span className="ml-2 text-[10px] font-black uppercase tracking-widest">

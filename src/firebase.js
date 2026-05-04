@@ -19,6 +19,12 @@ import {
   doc,
   deleteDoc,
 } from 'firebase/firestore';
+import {
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL,
+} from 'firebase/storage';
 
 // Centralized Firebase configuration and initialization
 const firebaseConfig = {
@@ -33,11 +39,16 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 
 export {
   app,
   auth,
   db,
+  storage,
+  storageRef,
+  uploadBytes,
+  getDownloadURL,
   // Auth exports
   GoogleAuthProvider,
   signInWithPopup,

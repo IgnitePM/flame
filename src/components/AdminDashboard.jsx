@@ -2952,7 +2952,7 @@ const AdminDashboard = ({
                       )}
                     </div>
                     {subs.length > 0 && (
-                      <ul className="ml-2 border-l border-slate-300/60 pl-3 space-y-2 w-full">
+                      <ul className="ml-2 border-l border-slate-300/60 pl-3 space-y-2 w-full min-w-0 max-w-full overflow-x-hidden">
                         {subs.map((sub) => {
                           const subStyles = getTodoUrgencyStyles(sub);
                           const subAssigneeVal = Array.isArray(sub.assigneeEmails)
@@ -2963,7 +2963,7 @@ const AdminDashboard = ({
                           return (
                             <li
                               key={sub.id}
-                              className={`flex flex-wrap items-center gap-2 rounded-xl px-2 py-2 ${subStyles.rowClass}`}
+                              className={`flex flex-wrap items-center gap-2 rounded-xl px-2 py-2 min-w-0 max-w-full w-full overflow-hidden ${subStyles.rowClass}`}
                             >
                               <input
                                 type="checkbox"
@@ -3212,18 +3212,34 @@ const AdminDashboard = ({
       {adminTab === 'clients' && (
         <div className="space-y-6">
           {clientId && (
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => navigateToClientsList?.()}
-                className="px-4 py-2 rounded-2xl font-black text-slate-600 bg-white border border-slate-100 shadow-sm hover:bg-slate-50 transition-colors flex items-center gap-2"
-                title="Back to Clients"
-              >
-                <ChevronLeft className="w-4 h-4" />
-                Back to Clients
-              </button>
-              <div className="text-xs font-black text-slate-400 uppercase tracking-widest">
-                Client details
+            <div className="flex flex-wrap items-center gap-3 justify-between w-full min-w-0">
+              <div className="flex items-center gap-3 min-w-0">
+                <button
+                  onClick={() => navigateToClientsList?.()}
+                  className="px-4 py-2 rounded-2xl font-black text-slate-600 bg-white border border-slate-100 shadow-sm hover:bg-slate-50 transition-colors flex items-center gap-2 shrink-0"
+                  title="Back to Clients"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  Back to Clients
+                </button>
+                <div className="text-xs font-black text-slate-400 uppercase tracking-widest shrink-0">
+                  Client details
+                </div>
               </div>
+              {workspaceRouteClient && (
+                <div className="flex items-center gap-2 min-w-0 max-w-full">
+                  {workspaceRouteClient.logoUrl ? (
+                    <img
+                      src={workspaceRouteClient.logoUrl}
+                      alt=""
+                      className="h-9 w-9 rounded-xl object-cover border border-slate-200 shrink-0 bg-white"
+                    />
+                  ) : null}
+                  <span className="font-black text-slate-800 truncate text-sm sm:text-base max-w-[min(100%,280px)]">
+                    {workspaceRouteClient.name}
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
@@ -3621,10 +3637,17 @@ const AdminDashboard = ({
                       }
                     }}
                   >
-                    <div>
-                      <div className="flex items-center gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-3 min-w-0">
+                        {c.logoUrl ? (
+                          <img
+                            src={c.logoUrl}
+                            alt=""
+                            className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl object-cover border border-slate-200 shrink-0 bg-white"
+                          />
+                        ) : null}
                         <h4
-                          className={`font-black text-xl ${
+                          className={`font-black text-xl truncate min-w-0 ${
                             c.status === 'paused'
                               ? 'text-slate-400'
                               : 'text-slate-800'
@@ -3749,6 +3772,7 @@ const AdminDashboard = ({
                             status: c.status || 'active',
                             carryoverResetByCategory:
                               c.carryoverResetByCategory || {},
+                            logoUrl: c.logoUrl || null,
                           })
                         }
                         className={`p-2 text-slate-400 bg-slate-100 rounded-xl transition-colors ${
@@ -3800,7 +3824,7 @@ const AdminDashboard = ({
                     </div>
                   )}
 
-                  <div className="p-6 flex-1 bg-white space-y-6">
+                  <div className="p-6 flex-1 bg-white space-y-6 min-w-0 max-w-full">
                     {isClientPage && showClientTasks && (
                       <div className="flex flex-wrap gap-3 items-end rounded-2xl border border-slate-100 bg-slate-50 p-4">
                         <div className="min-w-[140px]">
@@ -4629,9 +4653,9 @@ const AdminDashboard = ({
                                   return (
                                     <li
                                       key={item.id}
-                                      className={`flex flex-col gap-2 rounded-lg p-2 ${urgency.rowClass}`}
+                                      className={`flex flex-col gap-2 rounded-lg p-2 min-w-0 max-w-full ${urgency.rowClass}`}
                                     >
-                                      <div className="flex flex-wrap items-center gap-2 w-full">
+                                      <div className="flex flex-wrap items-center gap-2 w-full min-w-0 max-w-full">
                                         <input
                                           type="checkbox"
                                           checked={!!item.done}
@@ -4671,7 +4695,7 @@ const AdminDashboard = ({
                                           className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
                                         />
                                         <span
-                                          className={`flex-1 text-sm ${urgency.textClass}`}
+                                          className={`flex-1 min-w-0 text-sm break-words ${urgency.textClass}`}
                                         >
                                           {item.text || '(no text)'}
                                           {subs.length > 0 && !item.done && (
@@ -4705,13 +4729,13 @@ const AdminDashboard = ({
                                         )}
                                       </div>
                                       {subs.length > 0 && (
-                                        <ul className="ml-6 sm:ml-10 border-l border-slate-200 pl-3 space-y-1 w-full">
+                                        <ul className="ml-4 sm:ml-6 border-l border-slate-200 pl-3 space-y-1 w-full min-w-0 max-w-full overflow-x-hidden">
                                           {subs.map((sub) => {
                                             const su = getTodoUrgencyStyles(sub);
                                             return (
                                               <li
                                                 key={sub.id}
-                                                className={`flex items-center gap-2 rounded-md px-2 py-1.5 ${su.rowClass}`}
+                                                className={`flex items-center gap-2 rounded-md px-2 py-1.5 min-w-0 max-w-full w-full overflow-hidden ${su.rowClass}`}
                                               >
                                                 <input
                                                   type="checkbox"
@@ -4749,7 +4773,7 @@ const AdminDashboard = ({
                                                   className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4 shrink-0"
                                                 />
                                                 <span
-                                                  className={`flex-1 text-sm ${su.textClass}`}
+                                                  className={`flex-1 min-w-0 text-sm break-words ${su.textClass}`}
                                                 >
                                                   {safeDisplayForReact(sub.text) || '(sub-task)'}
                                                   {sub.dueDate && (
@@ -5516,11 +5540,11 @@ const AdminDashboard = ({
                       (showClientSummary ||
                         showClientTasks ||
                         showClientTimesheets) && (
-                        <div className="pt-2 border-t border-slate-100">
+                        <div className="pt-2 border-t border-slate-100 min-w-0 max-w-full">
                           <h5 className="text-sm sm:text-base font-black text-slate-700 uppercase tracking-widest mb-3">
                             Retainer Categories
                           </h5>
-                          <div className="space-y-2">
+                          <div className="space-y-2 min-w-0 max-w-full">
                             {Object.entries(c.retainers)
                               .sort((a, b) => {
                                 const ai = getRetainerCategorySortIndex(a[0]);
@@ -5566,11 +5590,14 @@ const AdminDashboard = ({
                               return (
                                 <div
                                   key={cat}
-                                  className={
+                                  className={[
+                                    'min-w-0 max-w-full w-full',
                                     isClientPage && showClientTasks
                                       ? 'border-b border-slate-200 pb-5 mb-5 last:border-b-0 last:pb-0 last:mb-0'
-                                      : undefined
-                                  }
+                                      : '',
+                                  ]
+                                    .filter(Boolean)
+                                    .join(' ')}
                                 >
                                   {(showClientSummary ||
                                     showClientTasks ||
@@ -5806,9 +5833,9 @@ const AdminDashboard = ({
                                                           return (
                                                             <li
                                                               key={item.id}
-                                                              className={`flex flex-col gap-2 rounded-lg p-2 ${urgency.rowClass}`}
+                                                              className={`flex flex-col gap-2 rounded-lg p-2 min-w-0 max-w-full ${urgency.rowClass}`}
                                                             >
-                                                              <div className="flex flex-wrap items-center gap-2 w-full">
+                                                              <div className="flex flex-wrap items-center gap-2 w-full min-w-0 max-w-full">
                                                                 <input
                                                                   type="checkbox"
                                                                   checked={!!item.done}
@@ -5862,7 +5889,7 @@ const AdminDashboard = ({
                                                                   className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
                                                                 />
                                                                 <span
-                                                                  className={`flex-1 text-sm ${urgency.textClass}`}
+                                                                  className={`flex-1 min-w-0 text-sm break-words ${urgency.textClass}`}
                                                                 >
                                                                   {item.text ||
                                                                     '(no text)'}
@@ -5897,13 +5924,13 @@ const AdminDashboard = ({
                                                                 )}
                                                               </div>
                                                               {subs.length > 0 && (
-                                                                <ul className="ml-6 sm:ml-10 border-l border-slate-200 pl-3 space-y-1 w-full">
+                                                                <ul className="ml-4 sm:ml-6 border-l border-slate-200 pl-3 space-y-1 w-full min-w-0 max-w-full overflow-x-hidden">
                                                                   {subs.map((sub) => {
                                                                     const su = getTodoUrgencyStyles(sub);
                                                                     return (
                                                                       <li
                                                                         key={sub.id}
-                                                                        className={`flex items-center gap-2 rounded-md px-2 py-1.5 ${su.rowClass}`}
+                                                                        className={`flex items-center gap-2 rounded-md px-2 py-1.5 min-w-0 max-w-full w-full overflow-hidden ${su.rowClass}`}
                                                                       >
                                                                         <input
                                                                           type="checkbox"
@@ -5944,7 +5971,7 @@ const AdminDashboard = ({
                                                                           className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4 shrink-0"
                                                                         />
                                                                         <span
-                                                                          className={`flex-1 text-sm ${su.textClass}`}
+                                                                          className={`flex-1 min-w-0 text-sm break-words ${su.textClass}`}
                                                                         >
                                                                           {safeDisplayForReact(sub.text) || '(sub-task)'}
                                                                           {sub.dueDate && (
@@ -6042,10 +6069,10 @@ const AdminDashboard = ({
                                                             return (
                                                             <li
                                                               key={item.id}
-                                                              className={`flex flex-col gap-2 rounded-lg p-2 ${urgency.rowClass}`}
+                                                              className={`flex flex-col gap-2 rounded-lg p-2 min-w-0 max-w-full ${urgency.rowClass}`}
                                                             >
                                                               <div
-                                                                className="flex flex-wrap items-center gap-2 w-full"
+                                                                className="flex flex-wrap items-center gap-2 w-full min-w-0 max-w-full"
                                                                 onDragOver={(e) => {
                                                                   if (todoSaving || isCycleLocked(c, cycleStart) || !clientTodoFiltersAllowReorder) return;
                                                                   e.preventDefault();
@@ -6159,7 +6186,7 @@ const AdminDashboard = ({
                                                                 />
                                                               ) : (
                                                                 <span
-                                                                  className={`flex-1 text-sm ${urgency.textClass}`}
+                                                                  className={`flex-1 min-w-0 text-sm break-words ${urgency.textClass}`}
                                                                   onDoubleClick={() => {
                                                                     if (isCycleLocked(c, cycleStart)) return;
                                                                     setTodoEditId(item.id);
@@ -6261,7 +6288,7 @@ const AdminDashboard = ({
                                                               </button>
                                                               </div>
                                                               {subs.length > 0 && (
-                                                                <ul className="ml-3 border-l border-slate-200 pl-3 space-y-2 w-full">
+                                                                <ul className="ml-3 border-l border-slate-200 pl-3 space-y-2 w-full min-w-0 max-w-full overflow-x-hidden">
                                                                   {subs.map((sub) => {
                                                                     const su = getTodoUrgencyStyles(sub);
                                                                     const subAs = Array.isArray(sub.assigneeEmails)
@@ -6272,7 +6299,7 @@ const AdminDashboard = ({
                                                                     return (
                                                                       <li
                                                                         key={sub.id}
-                                                                        className={`flex flex-wrap items-center gap-2 rounded-lg px-2 py-2 ${su.rowClass}`}
+                                                                        className={`flex flex-wrap items-center gap-2 rounded-lg px-2 py-2 min-w-0 max-w-full w-full overflow-hidden ${su.rowClass}`}
                                                                       >
                                                                         <input
                                                                           type="checkbox"
@@ -6305,7 +6332,7 @@ const AdminDashboard = ({
                                                                           disabled={todoSaving}
                                                                           className="rounded border-slate-300 text-[#fd7414] w-4 h-4 shrink-0"
                                                                         />
-                                                                        <span className={`flex-1 text-sm font-bold ${su.textClass}`}>
+                                                                        <span className={`flex-1 min-w-0 text-sm font-bold break-words ${su.textClass}`}>
                                                                           {safeDisplayForReact(sub.text) || '(sub-task)'}
                                                                         </span>
                                                                         {renderAssigneeMultiSelect({
