@@ -54,6 +54,7 @@ import {
   parentDueCapMs,
   removeSubtaskFromItems,
 } from '../utils/todoSubtasks.js';
+import { recurringAnchorKey } from '../utils/recurringTodoMaterialize.js';
 import { safeDisplayForReact } from '../utils/safeReactText.js';
 
 /** Normalize ?tab= for /admin/clients/:id (supports legacy `projects`). */
@@ -1938,9 +1939,18 @@ const AdminDashboard = ({
     if (!ok) return;
 
     let nextList = list;
+    let nextSkippedAnchors = Array.isArray(catTodo.skippedRecurringAnchors)
+      ? [...catTodo.skippedRecurringAnchors]
+      : [];
     if (subtaskId) {
       nextList = removeSubtaskFromItems(list, itemId, subtaskId);
     } else {
+      if (item?.recurring) {
+        const skipKey = recurringAnchorKey(item.recurringId || item.id, item.dueDate);
+        if (skipKey && !nextSkippedAnchors.includes(skipKey)) {
+          nextSkippedAnchors.push(skipKey);
+        }
+      }
       nextList = list.filter((i) => i.id !== itemId);
     }
 
@@ -1949,6 +1959,7 @@ const AdminDashboard = ({
       await updateClientTodo(client, cycleStart, categoryKey, {
         ...catTodo,
         items: nextList,
+        skippedRecurringAnchors: nextSkippedAnchors,
       });
       setTodoEditOptionsTarget(null);
     } finally {

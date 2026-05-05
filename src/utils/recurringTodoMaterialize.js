@@ -12,6 +12,19 @@ function sameCalendarDay(a, b) {
   return new Date(na).toDateString() === new Date(nb).toDateString();
 }
 
+function recurringAnchorDayStamp(ms) {
+  const n = Number(ms || 0);
+  if (!n) return '';
+  return new Date(n).toDateString();
+}
+
+export function recurringAnchorKey(recurringId, dueDateMs) {
+  const rid = String(recurringId || '').trim();
+  const stamp = recurringAnchorDayStamp(dueDateMs);
+  if (!rid || !stamp) return '';
+  return `${rid}__${stamp}`;
+}
+
 function effectiveRecurrence(item) {
   if (item?.recurrence?.type) return item.recurrence;
   const d = Number(item?.dueDate || 0);
@@ -170,6 +183,14 @@ export function reconcileRecurringTodoInstances(
   for (const catKey of Object.keys(next)) {
     const cat = next[catKey] || { closed: false, items: [] };
     const items = Array.isArray(cat.items) ? [...cat.items] : [];
+    const skipped = Array.isArray(cat.skippedRecurringAnchors)
+      ? cat.skippedRecurringAnchors
+      : [];
+    const skippedSet = new Set(
+      skipped
+        .map((k) => String(k || '').trim())
+        .filter(Boolean),
+    );
 
     const templatesByRid = new Map();
     for (const it of items) {
@@ -189,6 +210,8 @@ export function reconcileRecurringTodoInstances(
       if (!rec?.type) continue;
       const anchors = listRecurringAnchorsInWindow(rec, cycleStartMs, cycleEndMs);
       for (const anchorMs of anchors) {
+        const skipKey = recurringAnchorKey(stableRecurringSeriesId(template), anchorMs);
+        if (skipKey && skippedSet.has(skipKey)) continue;
         const exists = itemsMut.some(
           (it) =>
             it &&
