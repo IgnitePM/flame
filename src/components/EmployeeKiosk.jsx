@@ -100,6 +100,7 @@ const EmployeeKiosk = ({
   const [kioskRetainerBalanceFilter, setKioskRetainerBalanceFilter] =
     React.useState('available');
   const [kioskRetainerSort, setKioskRetainerSort] = React.useState('default');
+  const [kioskSideTab, setKioskSideTab] = React.useState('client');
 
   const safeCategoryKey = (category) =>
     String(category)
@@ -1688,6 +1689,32 @@ const EmployeeKiosk = ({
           </section>
         </div>
         <aside className="order-2 rounded-2xl border border-slate-100 bg-white p-5 shadow-lg min-w-0 w-full flex flex-col gap-3">
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setKioskSideTab('client')}
+              className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                kioskSideTab === 'client'
+                  ? 'bg-[#fd7414] text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              Client to-dos
+            </button>
+            <button
+              type="button"
+              onClick={() => setKioskSideTab('personal')}
+              className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                kioskSideTab === 'personal'
+                  ? 'bg-[#fd7414] text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              Your to-do list
+            </button>
+          </div>
+          {kioskSideTab === 'client' && (
+          <>
           <div className="shrink-0 space-y-3">
           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
             Client to-dos
@@ -1783,8 +1810,11 @@ const EmployeeKiosk = ({
               })
             )}
           </div>
+          </>
+          )}
 
-          <div className="shrink-0 border-t border-slate-100 pt-4 mt-1 space-y-3 min-h-0">
+          {kioskSideTab === 'personal' && (
+          <div className="space-y-3 min-h-0">
             <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
               Your To-Do List
             </div>
@@ -2031,6 +2061,7 @@ const EmployeeKiosk = ({
               )}
             </div>
           </div>
+          )}
 
         </aside>
       </div>
