@@ -1687,7 +1687,7 @@ const EmployeeKiosk = ({
             </div>
           </section>
         </div>
-        <aside className="order-2 rounded-2xl border border-slate-100 bg-white p-5 shadow-lg lg:sticky lg:top-4 lg:self-start min-w-0 w-full flex flex-col gap-3 max-h-[calc(100dvh-5.5rem)] min-h-0">
+        <aside className="order-2 rounded-2xl border border-slate-100 bg-white p-5 shadow-lg min-w-0 w-full flex flex-col gap-3">
           <div className="shrink-0 space-y-3">
           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
             Client to-dos
@@ -1729,7 +1729,7 @@ const EmployeeKiosk = ({
             Only my tasks
           </label>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain space-y-2 pr-1 max-h-[min(320px,44vh)] lg:max-h-[min(440px,calc(100dvh-16rem))] [scrollbar-gutter:stable]">
+          <div className="space-y-2 pr-1">
             {kioskFilteredRows.length === 0 ? (
               <p className="text-xs text-slate-400">No tasks match these filters.</p>
             ) : (
@@ -1863,7 +1863,7 @@ const EmployeeKiosk = ({
                 Add
               </button>
             </div>
-            <div className="max-h-[min(260px,36vh)] lg:max-h-[min(300px,calc(100dvh-22rem))] overflow-y-auto overscroll-contain space-y-2 pr-1 [scrollbar-gutter:stable]">
+            <div className="space-y-2 pr-1">
               {(userTodos || []).length === 0 ? (
                 <p className="text-xs text-slate-400">No personal to-dos yet.</p>
               ) : (
