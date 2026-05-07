@@ -1552,18 +1552,18 @@ const EmployeeKiosk = ({
         )}
       </div>
 
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-md space-y-3">
-            <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+          <section className="rounded-2xl border border-zinc-700 bg-zinc-900 p-5 shadow-md space-y-3">
+            <div className="text-[10px] font-black text-zinc-300 uppercase tracking-widest">
               Retainers ending soon
             </div>
-            <p className="text-xs font-bold text-slate-600 leading-snug">
+            <p className="text-xs font-bold text-zinc-200 leading-snug">
               Retainer lines with remaining budget, ordered by what closes first.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <select
                 value={kioskRetainerBalanceFilter}
                 onChange={(e) => setKioskRetainerBalanceFilter(e.target.value)}
-                className="bg-white border border-slate-300 rounded-xl px-2 py-2 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-[#fd7414]/40"
+                className="bg-zinc-800 border border-zinc-600 rounded-xl px-2 py-2 text-xs font-bold text-zinc-100 outline-none focus:ring-2 focus:ring-[#fd7414]/50"
               >
                 <option value="available">Balance: Has unused hours / $</option>
                 <option value="all">Balance: All lines</option>
@@ -1573,7 +1573,7 @@ const EmployeeKiosk = ({
               <select
                 value={kioskRetainerWindowFilter}
                 onChange={(e) => setKioskRetainerWindowFilter(e.target.value)}
-                className="bg-white border border-slate-300 rounded-xl px-2 py-2 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-[#fd7414]/40"
+                className="bg-zinc-800 border border-zinc-600 rounded-xl px-2 py-2 text-xs font-bold text-zinc-100 outline-none focus:ring-2 focus:ring-[#fd7414]/50"
               >
                 <option value="all">Cycle ends: Any time left</option>
                 <option value="7">Cycle ends: Within 7 days</option>
@@ -1583,7 +1583,7 @@ const EmployeeKiosk = ({
               <select
                 value={kioskRetainerSort}
                 onChange={(e) => setKioskRetainerSort(e.target.value)}
-                className="bg-white border border-slate-300 rounded-xl px-2 py-2 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-[#fd7414]/40"
+                className="bg-zinc-800 border border-zinc-600 rounded-xl px-2 py-2 text-xs font-bold text-zinc-100 outline-none focus:ring-2 focus:ring-[#fd7414]/50"
               >
                 <option value="default">Sort: Soonest reset · most unused</option>
                 <option value="cycle_end">Sort: Soonest cycle end date</option>
@@ -1594,9 +1594,9 @@ const EmployeeKiosk = ({
                 <option value="category">Sort: Category A–Z</option>
               </select>
             </div>
-            <div className="max-h-[360px] overflow-y-auto overscroll-contain space-y-2 pr-1 [scrollbar-gutter:stable]">
+            <div className="space-y-2 pr-1">
               {kioskRetainerUpcomingFiltered.length === 0 ? (
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-zinc-300">
                   No retainer lines match these filters.
                 </p>
               ) : (
@@ -1609,10 +1609,10 @@ const EmployeeKiosk = ({
                         : 0;
                   const urgent =
                     row.daysLeftRaw <= 3
-                      ? 'border-red-300 bg-red-100'
+                      ? 'border-red-800 bg-red-950/70'
                       : row.daysLeftRaw <= 7
-                        ? 'border-amber-300 bg-amber-100'
-                        : 'border-slate-300 bg-slate-50';
+                        ? 'border-amber-800 bg-amber-950/60'
+                        : 'border-zinc-700 bg-zinc-800/80';
                   const label = row.isDollar ? '$' : 'h';
                   const fmt = (n) => Number(n || 0).toFixed(2);
                   return (
@@ -1625,27 +1625,27 @@ const EmployeeKiosk = ({
                           <img
                             src={row.logoUrl}
                             alt=""
-                            className="h-8 w-8 rounded-lg object-cover border border-slate-300 shrink-0 bg-white"
+                            className="h-8 w-8 rounded-lg object-cover border border-zinc-600 shrink-0 bg-zinc-900"
                           />
                         ) : null}
                         <div className="min-w-0 flex-1">
-                          <div className="text-xs font-black text-slate-900 truncate">
+                          <div className="text-xs font-black text-zinc-100 truncate">
                             {row.clientName}
                           </div>
-                          <div className="text-[10px] font-bold text-slate-700 truncate">
+                          <div className="text-[10px] font-bold text-zinc-300 truncate">
                             {row.category}
                           </div>
-                          <div className="text-xs font-bold text-slate-800 mt-1">
+                          <div className="text-xs font-bold text-zinc-100 mt-1">
                             {fmt(row.used)}
                             {label} used / {fmt(row.allotted)}
                             {label} ·{' '}
                             <span
                               className={
                                 row.hasAvailable
-                                  ? 'text-emerald-700'
+                                  ? 'text-emerald-400'
                                   : row.over
-                                    ? 'text-red-700'
-                                    : 'text-slate-700'
+                                    ? 'text-red-300'
+                                    : 'text-zinc-300'
                               }
                             >
                               {row.hasAvailable
@@ -1655,15 +1655,15 @@ const EmployeeKiosk = ({
                                   : 'At cap'}
                             </span>
                           </div>
-                          <div className="text-[10px] font-bold text-slate-700 mt-0.5">
+                          <div className="text-[10px] font-bold text-zinc-300 mt-0.5">
                             {row.daysLeftRaw < 0
                               ? 'Cycle just rolled - totals refresh on next sync'
                               : `~${row.daysLeft} day${row.daysLeft === 1 ? '' : 's'} left in cycle`}
                           </div>
-                          <div className="w-full bg-slate-300 rounded-full h-1.5 overflow-hidden mt-1.5">
+                          <div className="w-full bg-zinc-700 rounded-full h-1.5 overflow-hidden mt-1.5">
                             <div
                               className={`h-1.5 rounded-full ${
-                                row.over ? 'bg-red-600' : 'bg-emerald-600'
+                                row.over ? 'bg-red-400' : 'bg-emerald-400'
                               }`}
                               style={{ width: `${Math.min(100, pct)}%` }}
                             />
@@ -1675,7 +1675,7 @@ const EmployeeKiosk = ({
                         onClick={() =>
                           queueKioskTaskStart(row.clientName, row.billingTarget)
                         }
-                        className="mt-2 w-full inline-flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest hover:bg-black"
+                        className="mt-2 w-full inline-flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl bg-black text-white text-[10px] font-black uppercase tracking-widest hover:bg-zinc-950 border border-zinc-700"
                       >
                         <Play className="w-3.5 h-3.5" aria-hidden />
                         Queue this retainer
