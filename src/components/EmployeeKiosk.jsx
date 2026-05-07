@@ -19,6 +19,7 @@ import {
   sortTodoRowsByClientThenDue,
 } from '../utils/todoFilters.js';
 import { safeDisplayForReact } from '../utils/safeReactText.js';
+import { teamMemberCanViewClient } from '../utils/teamClientAccess.js';
 
 const EmployeeKiosk = ({
   user,
@@ -93,6 +94,12 @@ const EmployeeKiosk = ({
   const [personalOptionsDue, setPersonalOptionsDue] = React.useState('');
   const [personalOptionsRecurrence, setPersonalOptionsRecurrence] =
     React.useState('none');
+
+  /** Sidebar: retainer lines ending soon with unused budget. */
+  const [kioskRetainerWindowFilter, setKioskRetainerWindowFilter] = React.useState('all');
+  const [kioskRetainerBalanceFilter, setKioskRetainerBalanceFilter] =
+    React.useState('available');
+  const [kioskRetainerSort, setKioskRetainerSort] = React.useState('default');
 
   const safeCategoryKey = (category) =>
     String(category)
@@ -448,6 +455,154 @@ const EmployeeKiosk = ({
     todoMineOnly,
     meLower,
     user,
+  ]);
+
+  const isDollarCat = React.useCallback(
+    (client, categoryName) =>
+      !!categoryName &&
+      (categoryName === 'Social Ad Budget' ||
+        client?.retainerUnits?.[categoryName] === 'dollar'),
+    [],
+  );
+
+  /** Refresh when timers tick so balances match live active tasks. */
+  const retainerInsightTick =
+    typeof liveTaskDuration === 'number'
+      ? Math.floor(liveTaskDuration / 15000)
+      : 0;
+
+  const kioskRetainerUpcomingPrepared = React.useMemo(() => {
+    const now = Date.now();
+    const rows = [];
+
+    const clientList = (clientsFull || []).filter(
+      (c) =>
+        c &&
+        !c.archived &&
+        c.status !== 'paused' &&
+        teamMemberCanViewClient(c, user?.email) &&
+        c.retainers &&
+        Object.keys(c.retainers).length > 0,
+    );
+
+    for (const client of clientList) {
+      const period = getBillingPeriod(client.billingDay || 1, 0);
+      let stats = null;
+      try {
+        stats = getGlobalRetainerStats(client, period.start, period.end);
+      } catch {
+        continue;
+      }
+      const cats = Object.keys(client.retainers || {});
+      for (const cat of cats) {
+        const pc = stats?.perCategory?.[cat];
+        if (!pc) continue;
+        const dollar = isDollarCat(client, cat);
+        const allotted = Number(pc.adjustedAllotted ?? 0);
+        const used = Number(pc.used ?? 0);
+        const eps = dollar ? 0.02 : 0.03;
+        const remaining = allotted - used;
+        const over = allotted > eps ? used > allotted + eps : used > eps;
+        const depleted = !over && Math.abs(remaining) <= eps;
+        const hasAvailable = remaining > eps;
+
+        const cycleEndMs = period.end;
+        const daysLeftRaw = Math.ceil((cycleEndMs - now) / 86400000);
+
+        rows.push({
+          key: `${client.id}__${cat}`,
+          clientId: client.id,
+          clientName: client.name,
+          logoUrl: client.logoUrl || null,
+          category: cat,
+          isDollar: dollar,
+          cycleStartMs: period.start,
+          cycleEndMs,
+          daysLeft: Math.max(0, daysLeftRaw),
+          daysLeftRaw,
+          allotted,
+          used,
+          remaining,
+          over,
+          depleted,
+          hasAvailable,
+          eps,
+          billingTarget: `retainer_${cat}`,
+        });
+      }
+    }
+
+    return rows;
+  }, [
+    clientsFull,
+    getBillingPeriod,
+    getGlobalRetainerStats,
+    user?.email,
+    isDollarCat,
+    retainerInsightTick,
+  ]);
+
+  const kioskRetainerUpcomingFiltered = React.useMemo(() => {
+    let list = [...kioskRetainerUpcomingPrepared];
+
+    if (kioskRetainerWindowFilter !== 'all') {
+      const cap = Number(kioskRetainerWindowFilter) || 30;
+      list = list.filter((r) => r.daysLeftRaw >= 0 && r.daysLeftRaw <= cap);
+    }
+
+    if (kioskRetainerBalanceFilter === 'available') {
+      list = list.filter((r) => r.hasAvailable);
+    } else if (kioskRetainerBalanceFilter === 'over') {
+      list = list.filter((r) => r.over);
+    } else if (kioskRetainerBalanceFilter === 'none') {
+      list = list.filter((r) => r.depleted && !r.over);
+    }
+
+    const byClient = (a, b) =>
+      String(a.clientName || '').localeCompare(String(b.clientName || ''), undefined, {
+        sensitivity: 'base',
+      });
+    const byCat = (a, b) =>
+      String(a.category || '').localeCompare(String(b.category || ''), undefined, {
+        sensitivity: 'base',
+      });
+
+    if (kioskRetainerSort === 'default') {
+      list.sort((a, b) => {
+        if (a.daysLeftRaw !== b.daysLeftRaw) return a.daysLeftRaw - b.daysLeftRaw;
+        if (b.remaining !== a.remaining) return b.remaining - a.remaining;
+        return byClient(a, b);
+      });
+    } else if (kioskRetainerSort === 'cycle_end') {
+      list.sort((a, b) => {
+        if (a.cycleEndMs !== b.cycleEndMs) return a.cycleEndMs - b.cycleEndMs;
+        return byClient(a, b);
+      });
+    } else if (kioskRetainerSort === 'remaining_desc') {
+      list.sort((a, b) => b.remaining - a.remaining || byClient(a, b));
+    } else if (kioskRetainerSort === 'remaining_asc') {
+      list.sort((a, b) => a.remaining - b.remaining || byClient(a, b));
+    } else if (kioskRetainerSort === 'client') {
+      list.sort((a, b) => byClient(a, b) || byCat(a, b));
+    } else if (kioskRetainerSort === 'category') {
+      list.sort((a, b) => byCat(a, b) || byClient(a, b));
+    } else if (kioskRetainerSort === 'pct_used') {
+      list.sort((a, b) => {
+        const pa =
+          a.allotted > a.eps ? Math.min(a.used / a.allotted, 2) : a.used > a.eps ? 1 : 0;
+        const pb =
+          b.allotted > b.eps ? Math.min(b.used / b.allotted, 2) : b.used > b.eps ? 1 : 0;
+        if (pb !== pa) return pb - pa;
+        return a.daysLeftRaw - b.daysLeftRaw;
+      });
+    }
+
+    return list;
+  }, [
+    kioskRetainerUpcomingPrepared,
+    kioskRetainerBalanceFilter,
+    kioskRetainerWindowFilter,
+    kioskRetainerSort,
   ]);
 
   return (
@@ -1738,6 +1893,141 @@ const EmployeeKiosk = ({
                       </div>
                     );
                   })
+              )}
+            </div>
+          </div>
+
+          <div className="shrink-0 border-t border-slate-100 pt-4 mt-2 space-y-3 min-h-0">
+            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+              Retainers ending soon
+            </div>
+            <p className="text-[10px] font-bold text-slate-400 leading-snug">
+              Current-cycle lines with time or budget left, sorted for what&apos;s closing first. Use filters to include overages or depleted lines.
+            </p>
+            <div className="grid grid-cols-1 gap-2">
+              <select
+                value={kioskRetainerBalanceFilter}
+                onChange={(e) => setKioskRetainerBalanceFilter(e.target.value)}
+                className="bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-[#fd7414]/40"
+              >
+                <option value="available">Balance: Has unused hours / $</option>
+                <option value="all">Balance: All lines</option>
+                <option value="over">Balance: Over budget</option>
+                <option value="none">Balance: Used up (not over)</option>
+              </select>
+              <select
+                value={kioskRetainerWindowFilter}
+                onChange={(e) => setKioskRetainerWindowFilter(e.target.value)}
+                className="bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-[#fd7414]/40"
+              >
+                <option value="all">Cycle ends: Any time left</option>
+                <option value="7">Cycle ends: Within 7 days</option>
+                <option value="14">Cycle ends: Within 14 days</option>
+                <option value="30">Cycle ends: Within 30 days</option>
+              </select>
+              <select
+                value={kioskRetainerSort}
+                onChange={(e) => setKioskRetainerSort(e.target.value)}
+                className="bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-[#fd7414]/40"
+              >
+                <option value="default">Sort: Soonest reset · most unused</option>
+                <option value="cycle_end">Sort: Soonest cycle end date</option>
+                <option value="remaining_desc">Sort: Most unused first</option>
+                <option value="remaining_asc">Sort: Least unused first</option>
+                <option value="pct_used">Sort: Highest % used</option>
+                <option value="client">Sort: Client A–Z</option>
+                <option value="category">Sort: Category A–Z</option>
+              </select>
+            </div>
+            <div className="max-h-[min(280px,40vh)] lg:max-h-[min(320px,calc(100dvh-28rem))] overflow-y-auto overscroll-contain space-y-2 pr-1 [scrollbar-gutter:stable]">
+              {kioskRetainerUpcomingFiltered.length === 0 ? (
+                <p className="text-xs text-slate-400">
+                  No retainer lines match these filters.
+                </p>
+              ) : (
+                kioskRetainerUpcomingFiltered.map((row) => {
+                  const pct =
+                    row.allotted > row.eps
+                      ? Math.min(100, (row.used / row.allotted) * 100)
+                      : row.used > row.eps
+                        ? 100
+                        : 0;
+                  const urgent =
+                    row.daysLeftRaw <= 3
+                      ? 'border-red-200 bg-red-50/80'
+                      : row.daysLeftRaw <= 7
+                        ? 'border-amber-200 bg-amber-50/80'
+                        : 'border-slate-100 bg-slate-50/60';
+                  const label = row.isDollar ? '$' : 'h';
+                  const fmt = (n) => Number(n || 0).toFixed(2);
+                  return (
+                    <div
+                      key={row.key}
+                      className={`rounded-xl p-2 border min-w-0 ${urgent}`}
+                    >
+                      <div className="flex items-start gap-2 min-w-0">
+                        {row.logoUrl ? (
+                          <img
+                            src={row.logoUrl}
+                            alt=""
+                            className="h-8 w-8 rounded-lg object-cover border border-slate-200 shrink-0 bg-white"
+                          />
+                        ) : null}
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[10px] font-black text-slate-700 truncate">
+                            {row.clientName}
+                          </div>
+                          <div className="text-[9px] font-bold text-slate-500 truncate">
+                            {row.category}
+                          </div>
+                          <div className="text-[10px] font-bold text-slate-600 mt-1">
+                            {fmt(row.used)}
+                            {label} used / {fmt(row.allotted)}
+                            {label} ·{' '}
+                            <span
+                              className={
+                                row.hasAvailable
+                                  ? 'text-emerald-700'
+                                  : row.over
+                                    ? 'text-red-600'
+                                    : 'text-slate-500'
+                              }
+                            >
+                              {row.hasAvailable
+                                ? `${fmt(row.remaining)}${label} left`
+                                : row.over
+                                  ? `${fmt(-row.remaining)}${label} over`
+                                  : 'At cap'}
+                            </span>
+                          </div>
+                          <div className="text-[9px] font-bold text-slate-500 mt-0.5">
+                            {row.daysLeftRaw < 0
+                              ? 'Cycle just rolled — totals refresh on next sync'
+                              : `~${row.daysLeft} day${row.daysLeft === 1 ? '' : 's'} left in cycle`}
+                          </div>
+                          <div className="w-full bg-slate-200/80 rounded-full h-1.5 overflow-hidden mt-1.5">
+                            <div
+                              className={`h-1.5 rounded-full ${
+                                row.over ? 'bg-red-500' : 'bg-emerald-500'
+                              }`}
+                              style={{ width: `${Math.min(100, pct)}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          queueKioskTaskStart(row.clientName, row.billingTarget)
+                        }
+                        className="mt-2 w-full inline-flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl bg-black text-white text-[10px] font-black uppercase tracking-widest hover:bg-slate-800"
+                      >
+                        <Play className="w-3.5 h-3.5" aria-hidden />
+                        Queue this retainer
+                      </button>
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>
