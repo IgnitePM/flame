@@ -76,6 +76,18 @@ export function collectEffectiveAssigneesForTodoTree(item, fallbackUserEmail) {
   return [...set];
 }
 
+/** Kiosk staff may add sub-tasks when they manage todos, are on the task tree, or the primary is unassigned. */
+export function canKioskStaffAddSubtasksToItem(item, staffEmail, { allowManageAll = false } = {}) {
+  if (!item || item.done) return false;
+  const me = normalizeEmail(staffEmail);
+  if (!me) return false;
+  if (allowManageAll) return true;
+  if (todoTreeExplicitlyAssignsUser(item, me)) return true;
+  if (collectEffectiveAssigneesForTodoTree(item, me).includes(me)) return true;
+  if (extractItemAssigneeEmails(item).length === 0) return true;
+  return false;
+}
+
 /** True when the user is explicitly listed on the task or a sub-task (not unassigned fallback). */
 export function todoTreeExplicitlyAssignsUser(item, userEmail) {
   const me = normalizeEmail(userEmail);

@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { orderTodosForDisplay } from '../utils/todoListOrder.js';
 import {
+  canKioskStaffAddSubtasksToItem,
   canMarkParentTodoDone,
   clampAllSubtaskDueDatesToParent,
   clampSubtaskDueToParent,
@@ -1307,7 +1308,15 @@ const EmployeeKiosk = ({
                                           canDragReorder={canDragReorder}
                                           getUrgencyClass={getUrgencyClass}
                                           user={user}
+                                          staffEmail={meLower}
                                           canManageTodos={canManageClientTodos}
+                                          canAddSubtasks={
+                                            !isCycleLocked(selectedClientObj, cycleStart) &&
+                                            canKioskStaffAddSubtasksToItem(item, meLower, {
+                                              allowManageAll: canManageClientTodos,
+                                            })
+                                          }
+                                          defaultAssigneeEmail={meLower}
                                           isCycleLocked={isCycleLocked(
                                             selectedClientObj,
                                             cycleStart,
@@ -1676,7 +1685,15 @@ const EmployeeKiosk = ({
                                           canDragReorder={canDragReorder}
                                           getUrgencyClass={getUrgencyClass}
                                           user={user}
+                                          staffEmail={meLower}
                                           canManageTodos={canManageClientTodos}
+                                          canAddSubtasks={
+                                            !isCycleLocked(selectedClientObj, cycleStart) &&
+                                            canKioskStaffAddSubtasksToItem(item, meLower, {
+                                              allowManageAll: canManageClientTodos,
+                                            })
+                                          }
+                                          defaultAssigneeEmail={meLower}
                                           isCycleLocked={isCycleLocked(
                                             selectedClientObj,
                                             cycleStart,
