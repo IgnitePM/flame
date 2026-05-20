@@ -25,12 +25,16 @@ import { buildGlobalTodoRows } from '../utils/todoGlobalRows.js';
 import { isClientActiveForWork } from '../utils/clientActiveForWork.js';
 import {
   buildKioskBillingTargetFromTodoRow,
+  globalAdminTaskRowMatchesFilters,
   todoRowMatchesFilters,
   sortTodoRowsByDueThenClient,
   sortTodoRowsByClientThenDue,
 } from '../utils/todoFilters.js';
 import { safeDisplayForReact } from '../utils/safeReactText.js';
-import { teamMemberCanViewClient } from '../utils/teamClientAccess.js';
+import {
+  filterClientsForTeamMember,
+  teamMemberCanViewClient,
+} from '../utils/teamClientAccess.js';
 
 const EmployeeKiosk = ({
   user,
@@ -83,10 +87,10 @@ const EmployeeKiosk = ({
   const [todoNewText, setTodoNewText] = React.useState('');
   const [todoSaving, setTodoSaving] = React.useState(false);
   const [todoDueDate, setTodoDueDate] = React.useState('');
-  const [todoMineOnly, setTodoMineOnly] = React.useState(true);
+  const [kioskTaskAssigneeFilter, setKioskTaskAssigneeFilter] = React.useState('me');
   const [categoryTodoMineOnly, setCategoryTodoMineOnly] = React.useState(true);
   const [kioskTaskStatusFilter, setKioskTaskStatusFilter] = React.useState('open');
-  const [kioskTaskDueFilter, setKioskTaskDueFilter] = React.useState('next7');
+  const [kioskTaskDueFilter, setKioskTaskDueFilter] = React.useState('next30');
   const [kioskTaskSortMode, setKioskTaskSortMode] = React.useState('due');
   const [todoRecurrenceMode, setTodoRecurrenceMode] = React.useState('none');
   const [todoOptionsOpen, setTodoOptionsOpen] = React.useState(false);
@@ -527,7 +531,7 @@ const EmployeeKiosk = ({
           onClick={() =>
             setClientTodoAssigneeOpenKey((prev) => (prev === openKey ? null : openKey))
           }
-          className={`inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white font-black uppercase tracking-widest text-slate-600 disabled:opacity-40 ${
+          className={`kiosk-light-control inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white font-black uppercase tracking-widest text-black disabled:opacity-40 ${
             compact
               ? 'px-2 py-1 text-[9px]'
               : 'px-2.5 py-1.5 text-[10px]'
@@ -815,27 +819,47 @@ const EmployeeKiosk = ({
     return (userTodos || []).find((t) => t.id === personalOptionsItemId) || null;
   }, [personalOptionsItemId, userTodos]);
 
+  const kioskAccessibleClients = React.useMemo(
+    () =>
+      filterClientsForTeamMember(clientsFull || [], user?.email).filter(
+        isClientActiveForWork,
+      ),
+    [clientsFull, user?.email],
+  );
+
   const globalTodoRows = React.useMemo(
     () =>
       buildGlobalTodoRows(
-        clientsFull || [],
+        kioskAccessibleClients,
         projects,
         getBillingPeriod,
         getTodoStateForCycle,
         todoCategoryKey,
       ),
-    [clientsFull, projects, getBillingPeriod, getTodoStateForCycle, todoCategoryKey],
+    [
+      kioskAccessibleClients,
+      projects,
+      getBillingPeriod,
+      getTodoStateForCycle,
+      todoCategoryKey,
+    ],
   );
 
   const kioskFilteredRows = React.useMemo(() => {
-    let rows = globalTodoRows.filter((row) =>
-      todoRowMatchesFilters(row, kioskTaskStatusFilter, kioskTaskDueFilter),
+    const assigneeSpecific =
+      kioskTaskAssigneeFilter !== 'all' && kioskTaskAssigneeFilter !== 'me'
+        ? kioskTaskAssigneeFilter
+        : '';
+    const rows = globalTodoRows.filter((row) =>
+      globalAdminTaskRowMatchesFilters(
+        row,
+        kioskTaskStatusFilter,
+        kioskTaskDueFilter,
+        kioskTaskAssigneeFilter,
+        assigneeSpecific,
+        user?.email,
+      ),
     );
-    if (todoMineOnly) {
-      rows = rows.filter((row) =>
-        collectEffectiveAssigneesForTodoTree(row.item, user?.email).includes(meLower),
-      );
-    }
     return kioskTaskSortMode === 'client'
       ? sortTodoRowsByClientThenDue(rows)
       : sortTodoRowsByDueThenClient(rows);
@@ -844,9 +868,8 @@ const EmployeeKiosk = ({
     kioskTaskStatusFilter,
     kioskTaskDueFilter,
     kioskTaskSortMode,
-    todoMineOnly,
-    meLower,
-    user,
+    kioskTaskAssigneeFilter,
+    user?.email,
   ]);
 
   const isDollarCat = React.useCallback(
@@ -867,13 +890,8 @@ const EmployeeKiosk = ({
     const now = Date.now();
     const rows = [];
 
-    const clientList = (clientsFull || []).filter(
-      (c) =>
-        c &&
-        isClientActiveForWork(c) &&
-        teamMemberCanViewClient(c, user?.email) &&
-        c.retainers &&
-        Object.keys(c.retainers).length > 0,
+    const clientList = kioskAccessibleClients.filter(
+      (c) => c.retainers && Object.keys(c.retainers).length > 0,
     );
 
     for (const client of clientList) {
@@ -925,10 +943,9 @@ const EmployeeKiosk = ({
 
     return rows;
   }, [
-    clientsFull,
+    kioskAccessibleClients,
     getBillingPeriod,
     getGlobalRetainerStats,
-    user?.email,
     isDollarCat,
     retainerInsightTick,
   ]);
@@ -2217,6 +2234,19 @@ const EmployeeKiosk = ({
               <option value="all_future">All future</option>
             </select>
             <select
+              value={kioskTaskAssigneeFilter}
+              onChange={(e) => setKioskTaskAssigneeFilter(e.target.value)}
+              className="col-span-2 bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-[#fd7414]/40"
+            >
+              <option value="me">Assigned to me</option>
+              <option value="all">All assignees</option>
+              {assignableEmails.map((email) => (
+                <option key={email} value={email}>
+                  {email}
+                </option>
+              ))}
+            </select>
+            <select
               value={kioskTaskSortMode}
               onChange={(e) => setKioskTaskSortMode(e.target.value)}
               className="col-span-2 bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-[#fd7414]/40"
@@ -2225,14 +2255,6 @@ const EmployeeKiosk = ({
               <option value="client">Sort: Client</option>
             </select>
           </div>
-          <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600">
-            <input
-              type="checkbox"
-              checked={todoMineOnly}
-              onChange={(e) => setTodoMineOnly(e.target.checked)}
-            />
-            Only my tasks
-          </label>
           </div>
           <div className="space-y-2 pr-1">
             {kioskFilteredRows.length === 0 ? (
@@ -2306,7 +2328,7 @@ const EmployeeKiosk = ({
                               row.item,
                             )
                           }
-                          className="px-2 py-1 rounded-lg bg-white/90 border border-slate-200 text-[9px] font-black uppercase tracking-widest text-slate-600"
+                          className="kiosk-light-control px-2 py-1 rounded-lg bg-white border border-slate-200 text-[9px] font-black uppercase tracking-widest text-black"
                         >
                           Options
                         </button>

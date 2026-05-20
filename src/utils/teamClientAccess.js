@@ -25,7 +25,16 @@ export function teamMemberCanViewClient(client, userEmail) {
   if (raw == null) return true;
   if (!Array.isArray(raw)) return true;
   if (raw.length === 0) return false;
-  return raw.map(normalizeEmail).includes(me);
+  const allowed = raw.map(normalizeEmail);
+  if (allowed.includes(me)) return true;
+  // Assigned on any client to-do still grants workspace/kiosk visibility.
+  const todoAssignees = collectAssigneeEmailsFromTodoCycles(client?.todoCycles);
+  return todoAssignees.includes(me);
+}
+
+/** Clients this team member may see in kiosk / workspace lists. */
+export function filterClientsForTeamMember(clients, userEmail) {
+  return (clients || []).filter((c) => c && teamMemberCanViewClient(c, userEmail));
 }
 
 /**

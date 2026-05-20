@@ -61,7 +61,7 @@ export default function KioskClientTodoItem({
         onClick={() =>
           onAssigneeOpenChange?.(assignOpen ? null : item.id)
         }
-        className={`inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white font-black uppercase tracking-widest text-slate-600 disabled:opacity-40 ${
+        className={`kiosk-light-control inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white font-black uppercase tracking-widest text-black disabled:opacity-40 ${
           compact ? 'px-2 py-1 text-[9px]' : 'px-2.5 py-1.5 text-[10px]'
         }`}
       >
@@ -236,7 +236,7 @@ export default function KioskClientTodoItem({
               type="button"
               disabled={todoSaving || isCycleLocked}
               onClick={() => onOpenOptions?.(item)}
-              className="px-2 py-1 rounded-lg bg-white border border-slate-200 text-[9px] font-black uppercase tracking-widest text-slate-600"
+              className="kiosk-light-control px-2 py-1 rounded-lg bg-white border border-slate-200 text-[9px] font-black uppercase tracking-widest text-black"
             >
               Options
             </button>
@@ -292,7 +292,7 @@ export default function KioskClientTodoItem({
                   type="button"
                   disabled={todoSaving || isCycleLocked}
                   onClick={() => onOpenOptions?.(item, sub)}
-                  className="shrink-0 px-2 py-1 rounded-lg bg-white border border-slate-200 text-[9px] font-black uppercase tracking-widest text-slate-600"
+                  className="kiosk-light-control shrink-0 px-2 py-1 rounded-lg bg-white border border-slate-200 text-[9px] font-black uppercase tracking-widest text-black"
                 >
                   Options
                 </button>

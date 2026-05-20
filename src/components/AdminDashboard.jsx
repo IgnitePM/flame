@@ -36,6 +36,10 @@ import {
 import { buildGlobalTodoRows } from '../utils/todoGlobalRows.js';
 import { isClientActiveForWork } from '../utils/clientActiveForWork.js';
 import {
+  filterClientsForTeamMember,
+  teamMemberCanViewClient,
+} from '../utils/teamClientAccess.js';
+import {
   buildKioskBillingTargetFromTodoRow,
   globalAdminTaskRowMatchesFilters,
   itemMatchesDueWindowWithSubtasks,
@@ -995,10 +999,14 @@ const AdminDashboard = ({
   const canBilling = currentUserRole === 'admin' || currentUserRole === 'billing';
   const isAdmin = currentUserRole === 'admin';
   const isRestrictedStaff = currentUserRole === 'kiosk';
-  const visibleClients = useMemo(() => clients || [], [clients]);
+  const teamAccessibleClients = useMemo(
+    () => filterClientsForTeamMember(clients, user?.email),
+    [clients, user?.email],
+  );
+  const visibleClients = teamAccessibleClients;
   const clientsActiveForWork = useMemo(
-    () => (clients || []).filter(isClientActiveForWork),
-    [clients],
+    () => teamAccessibleClients.filter(isClientActiveForWork),
+    [teamAccessibleClients],
   );
 
   /** Move hour budget between retainer lines for a billing cycle (admin / billing). */
@@ -1109,10 +1117,6 @@ const AdminDashboard = ({
   const [clientTaskDueFilter, setClientTaskDueFilter] = useState('next30');
   const [userTodoDraft, setUserTodoDraft] = useState('');
   const [userTodoSaving, setUserTodoSaving] = useState(false);
-
-  useEffect(() => {
-    if (isRestrictedStaff) setTaskAssigneeFilter('all');
-  }, [isRestrictedStaff]);
 
   useEffect(() => {
     if (!isRestrictedStaff) return;
@@ -2125,7 +2129,10 @@ const AdminDashboard = ({
   const workspaceRouteClient = clientId
     ? (clients || []).find((cl) => String(cl.id) === String(clientId))
     : null;
-  if (clientId && isRestrictedStaff && !workspaceRouteClient) {
+  const workspaceClientAllowed =
+    workspaceRouteClient &&
+    teamMemberCanViewClient(workspaceRouteClient, user?.email);
+  if (clientId && isRestrictedStaff && !workspaceClientAllowed) {
     return (
       <div className="space-y-8 animate-in fade-in duration-500">
         <div className="bg-white p-10 rounded-[32px] border border-slate-100 shadow-sm text-center">

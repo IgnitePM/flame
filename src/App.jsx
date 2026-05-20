@@ -68,6 +68,10 @@ import EmployeeKiosk from './components/EmployeeKiosk.jsx';
 import AdminDashboard from './components/AdminDashboard.jsx';
 import { buildTeamAccessMergeForTodoAssignees } from './utils/teamClientAccess.js';
 import { isClientActiveForWork } from './utils/clientActiveForWork.js';
+import {
+  filterClientsForTeamMember,
+  teamMemberCanViewClient,
+} from './utils/teamClientAccess.js';
 import { reconcileRecurringTodoInstances } from './utils/recurringTodoMaterialize.js';
 import { getSubtasks, newSubtaskId, projectSubtaskDueDateForNewCycle } from './utils/todoSubtasks.js';
 import {
@@ -2284,7 +2288,9 @@ export default function App() {
     activeTask,
     liveDuration,
     liveTaskDuration,
-    clients: clients.filter(isClientActiveForWork),
+    clients: clients
+      .filter(isClientActiveForWork)
+      .filter((c) => teamMemberCanViewClient(c, user?.email)),
     selectableRetainers,
     GENERAL_LABEL,
     clientActiveProjects,

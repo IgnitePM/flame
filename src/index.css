@@ -190,3 +190,14 @@ body {
 :is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-blue-900 {
   color: rgb(219 234 254) !important;
 }
+
+/* Keep light control chips readable on urgency-colored task cards */
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .kiosk-light-control {
+  background-color: rgb(255 255 255 / 0.95) !important;
+  color: rgb(0 0 0) !important;
+  border-color: rgb(212 212 216) !important;
+}
+
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .kiosk-light-control:hover {
+  background-color: rgb(244 244 245) !important;
+}
