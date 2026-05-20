@@ -9,9 +9,20 @@ import {
   Play,
 } from 'lucide-react';
 import { orderTodosForDisplay } from '../utils/todoListOrder.js';
-import { collectEffectiveAssigneesForTodoTree } from '../utils/todoSubtasks.js';
+import {
+  canMarkParentTodoDone,
+  clampAllSubtaskDueDatesToParent,
+  clampSubtaskDueToParent,
+  collectEffectiveAssigneesForTodoTree,
+  getSubtasks,
+  mapItemSubtasks,
+  parentDueCapMs,
+  removeSubtaskFromItems,
+} from '../utils/todoSubtasks.js';
+import { recurringAnchorKey } from '../utils/recurringTodoMaterialize.js';
 import KioskClientTodoItem from './KioskClientTodoItem.jsx';
 import { buildGlobalTodoRows } from '../utils/todoGlobalRows.js';
+import { isClientActiveForWork } from '../utils/clientActiveForWork.js';
 import {
   buildKioskBillingTargetFromTodoRow,
   todoRowMatchesFilters,
@@ -60,8 +71,11 @@ const EmployeeKiosk = ({
   userTodos = [],
   updateUserTodos,
   adminUsers = [],
+  currentUserRole = null,
   handleIdleAutoClockOut,
 }) => {
+  const canManageClientTodos =
+    currentUserRole === 'admin' || currentUserRole === 'billing';
   const [clientSearch, setClientSearch] = React.useState('');
   const [socialAdAmount, setSocialAdAmount] = React.useState('');
   const [socialAdDescription, setSocialAdDescription] = React.useState('');
@@ -94,6 +108,14 @@ const EmployeeKiosk = ({
   const [personalOptionsDue, setPersonalOptionsDue] = React.useState('');
   const [personalOptionsRecurrence, setPersonalOptionsRecurrence] =
     React.useState('none');
+  const [clientTodoEditTarget, setClientTodoEditTarget] = React.useState(null);
+  const [clientTodoEditTitle, setClientTodoEditTitle] = React.useState('');
+  const [clientTodoEditDue, setClientTodoEditDue] = React.useState('');
+  const [clientTodoEditRecurrence, setClientTodoEditRecurrence] =
+    React.useState('none');
+  const [clientTodoAssigneeOpenKey, setClientTodoAssigneeOpenKey] =
+    React.useState(null);
+  const [todoAddAssignees, setTodoAddAssignees] = React.useState([]);
 
   /** Sidebar: retainer lines ending soon with unused budget. */
   const [kioskRetainerWindowFilter, setKioskRetainerWindowFilter] = React.useState('all');
@@ -175,6 +197,11 @@ const EmployeeKiosk = ({
     const dueDate = parseDateInputToMs(todoDueDate);
     const recurrence = getDraftRecurrence(dueDate);
     const id = `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const me = String(user?.email || '').trim().toLowerCase();
+    const assignees =
+      canManageClientTodos && todoAddAssignees.length
+        ? todoAddAssignees
+        : [me].filter(Boolean);
     return {
       id,
       text: String(text || '').trim(),
@@ -184,7 +211,7 @@ const EmployeeKiosk = ({
       recurring: !!recurrence,
       recurringId: recurrence ? id : null,
       dueDate,
-      assigneeEmails: [String(user?.email || '').toLowerCase()].filter(Boolean),
+      assigneeEmails: assignees,
       recurrence,
     };
   };
@@ -193,6 +220,370 @@ const EmployeeKiosk = ({
     setTodoDueDate('');
     setTodoRecurrenceMode('none');
     setTodoOptionsOpen(false);
+    setTodoAddAssignees([]);
+  };
+
+  const asDateInput = (ms) => {
+    if (!ms) return '';
+    const d = new Date(ms);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const isCycleLocked = (client, cycleStart) =>
+    !!client?.cycleLocks?.[String(cycleStart)]?.locked;
+
+  const buildRecurrenceFromMode = (mode, dueDateMs) => {
+    const m = String(mode || 'none');
+    if (m === 'none') return null;
+    const hasMs = dueDateMs != null && !Number.isNaN(Number(dueDateMs));
+    const src = hasMs ? new Date(dueDateMs) : new Date();
+    if (Number.isNaN(src.getTime())) return null;
+    src.setHours(12, 0, 0, 0);
+    if (m === 'weekly') {
+      return { type: 'weekly_weekday', weekday: src.getDay() };
+    }
+    if (m === 'biweekly') {
+      return {
+        type: 'biweekly_weekday',
+        weekday: src.getDay(),
+        anchorMs: src.getTime(),
+      };
+    }
+    if (m === 'daily') {
+      return { type: 'daily_fixed' };
+    }
+    if (m === 'monthly') {
+      return { type: 'monthly_fixed_day', dayOfMonth: src.getDate() };
+    }
+    if (m === 'annual') {
+      return {
+        type: 'annual_fixed',
+        month: src.getMonth(),
+        day: src.getDate(),
+      };
+    }
+    return null;
+  };
+
+  const openClientTodoEditModal = (
+    client,
+    cycleStart,
+    categoryKey,
+    item,
+    subtask = null,
+  ) => {
+    setClientTodoEditTarget({
+      clientId: client.id,
+      cycleStart,
+      categoryKey,
+      itemId: item.id,
+      subtaskId: subtask?.id || null,
+    });
+    setClientTodoEditTitle(String(subtask ? subtask.text : item.text || ''));
+    setClientTodoEditDue(asDateInput(subtask ? subtask.dueDate : item.dueDate));
+    if (subtask) {
+      setClientTodoEditRecurrence('none');
+    } else {
+      const t = item?.recurrence?.type;
+      let editMode = 'none';
+      if (t === 'weekly_weekday') editMode = 'weekly';
+      else if (t === 'biweekly_weekday') editMode = 'biweekly';
+      else if (t === 'daily_fixed') editMode = 'daily';
+      else if (t === 'annual_fixed') editMode = 'annual';
+      else if (t === 'monthly_fixed_day') editMode = 'monthly';
+      else if (item?.recurring) editMode = 'monthly';
+      setClientTodoEditRecurrence(editMode);
+    }
+  };
+
+  const applyClientTodoEditModal = async () => {
+    if (!clientTodoEditTarget || !updateClientTodo || !getTodoStateForCycle) {
+      setClientTodoEditTarget(null);
+      return;
+    }
+    const { clientId, cycleStart, categoryKey, itemId } = clientTodoEditTarget;
+    const client = (clientsFull || []).find((cl) => cl.id === clientId);
+    if (!client) {
+      setClientTodoEditTarget(null);
+      return;
+    }
+    if (isCycleLocked(client, cycleStart)) {
+      window.alert('This billing cycle is locked.');
+      setClientTodoEditTarget(null);
+      return;
+    }
+    const todoState = getTodoStateForCycle(client, cycleStart);
+    const catTodo = todoState[categoryKey] || { closed: false, items: [] };
+    const list = catTodo.items || [];
+    const item = list.find((i) => i.id === itemId);
+    if (!item) {
+      setClientTodoEditTarget(null);
+      return;
+    }
+    const { subtaskId } = clientTodoEditTarget;
+    const dueDate = parseDateInputToMs(clientTodoEditDue);
+    const title = String(clientTodoEditTitle || '').trim();
+    let nextList;
+    if (subtaskId) {
+      const sub = getSubtasks(item).find((s) => s.id === subtaskId);
+      if (!sub) {
+        setClientTodoEditTarget(null);
+        return;
+      }
+      if (!title) {
+        window.alert('Title cannot be empty.');
+        return;
+      }
+      const cap = parentDueCapMs(item);
+      if (cap && dueDate && dueDate > cap) {
+        window.alert('Sub-task due date cannot be after the primary task due date.');
+        return;
+      }
+      const clamped = clampSubtaskDueToParent(item, dueDate);
+      const nextItem = mapItemSubtasks(item, (s) =>
+        s.id === subtaskId ? { ...s, text: title, dueDate: clamped } : s,
+      );
+      nextList = list.map((i) => (i.id === itemId ? nextItem : i));
+    } else {
+      if (!title) {
+        window.alert('Title cannot be empty.');
+        return;
+      }
+      const recurrence = buildRecurrenceFromMode(clientTodoEditRecurrence, dueDate);
+      let nextItem = {
+        ...item,
+        text: title,
+        dueDate,
+        recurring: !!recurrence,
+        recurringId: recurrence ? item.recurringId || item.id : null,
+        recurrence,
+      };
+      nextItem = clampAllSubtaskDueDatesToParent(nextItem);
+      nextList = list.map((i) => (i.id === itemId ? nextItem : i));
+    }
+    setTodoSaving(true);
+    try {
+      await updateClientTodo(client, cycleStart, categoryKey, {
+        ...catTodo,
+        items: nextList,
+      });
+    } finally {
+      setTodoSaving(false);
+      setClientTodoEditTarget(null);
+    }
+  };
+
+  const deleteClientTodoEditTarget = async () => {
+    if (!clientTodoEditTarget || !updateClientTodo || !getTodoStateForCycle) {
+      setClientTodoEditTarget(null);
+      return;
+    }
+    const { clientId, cycleStart, categoryKey, itemId, subtaskId } =
+      clientTodoEditTarget;
+    const client = (clientsFull || []).find((cl) => cl.id === clientId);
+    if (!client) {
+      setClientTodoEditTarget(null);
+      return;
+    }
+    if (isCycleLocked(client, cycleStart)) {
+      window.alert('This billing cycle is locked.');
+      setClientTodoEditTarget(null);
+      return;
+    }
+    const todoState = getTodoStateForCycle(client, cycleStart);
+    const catTodo = todoState[categoryKey] || { closed: false, items: [] };
+    const list = catTodo.items || [];
+    const item = list.find((i) => i.id === itemId);
+    if (!item) {
+      setClientTodoEditTarget(null);
+      return;
+    }
+    const ok = window.confirm(
+      subtaskId
+        ? 'Delete this sub-task permanently?'
+        : 'Delete this task permanently?',
+    );
+    if (!ok) return;
+
+    let nextList = list;
+    let nextSkippedAnchors = Array.isArray(catTodo.skippedRecurringAnchors)
+      ? [...catTodo.skippedRecurringAnchors]
+      : [];
+    if (subtaskId) {
+      nextList = removeSubtaskFromItems(list, itemId, subtaskId);
+    } else {
+      if (item?.recurring) {
+        const skipKey = recurringAnchorKey(item.recurringId || item.id, item.dueDate);
+        if (skipKey && !nextSkippedAnchors.includes(skipKey)) {
+          nextSkippedAnchors.push(skipKey);
+        }
+      }
+      nextList = list.filter((i) => i.id !== itemId);
+    }
+
+    setTodoSaving(true);
+    try {
+      await updateClientTodo(client, cycleStart, categoryKey, {
+        ...catTodo,
+        items: nextList,
+        skippedRecurringAnchors: nextSkippedAnchors,
+      });
+      setClientTodoEditTarget(null);
+    } finally {
+      setTodoSaving(false);
+    }
+  };
+
+  const updateClientTodoAssignees = async (
+    client,
+    cycleStart,
+    categoryKey,
+    itemId,
+    nextAssignees,
+  ) => {
+    if (!updateClientTodo || !getTodoStateForCycle || !client) return;
+    if (isCycleLocked(client, cycleStart)) {
+      window.alert('This billing cycle is locked.');
+      return;
+    }
+    const todoState = getTodoStateForCycle(client, cycleStart);
+    const catTodo = todoState[categoryKey] || { closed: false, items: [] };
+    const items = catTodo.items || [];
+    setTodoSaving(true);
+    try {
+      const next = items.map((i) =>
+        i.id === itemId ? { ...i, assigneeEmails: nextAssignees } : i,
+      );
+      await updateClientTodo(client, cycleStart, categoryKey, {
+        ...catTodo,
+        items: next,
+      });
+    } finally {
+      setTodoSaving(false);
+    }
+  };
+
+  const toggleClientTodoDone = async (
+    client,
+    cycleStart,
+    categoryKey,
+    item,
+  ) => {
+    if (!updateClientTodo || !getTodoStateForCycle || !client) return;
+    if (isCycleLocked(client, cycleStart)) {
+      window.alert('This billing cycle is locked.');
+      return;
+    }
+    if (!item.done && !canMarkParentTodoDone(item)) {
+      window.alert(
+        'Complete every sub-task before marking this primary task complete.',
+      );
+      return;
+    }
+    const todoState = getTodoStateForCycle(client, cycleStart);
+    const catTodo = todoState[categoryKey] || { closed: false, items: [] };
+    const items = catTodo.items || [];
+    setTodoSaving(true);
+    try {
+      const next = items.map((i) =>
+        i.id === item.id
+          ? { ...i, done: !i.done, doneAt: !i.done ? Date.now() : null }
+          : i,
+      );
+      await updateClientTodo(client, cycleStart, categoryKey, {
+        ...catTodo,
+        items: next,
+      });
+    } finally {
+      setTodoSaving(false);
+    }
+  };
+
+  const renderClientTodoAssigneePicker = ({
+    openKey,
+    value,
+    onChange,
+    disabled,
+    compact = false,
+  }) => {
+    const cleaned = Array.isArray(value)
+      ? value.map((e) => String(e || '').trim().toLowerCase()).filter(Boolean)
+      : [];
+    const summary =
+      cleaned.length === 0
+        ? 'Assign'
+        : cleaned.length === 1
+          ? cleaned[0].split('@')[0]
+          : `${cleaned.length} people`;
+    const isOpen = clientTodoAssigneeOpenKey === openKey;
+    return (
+      <div className="relative">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() =>
+            setClientTodoAssigneeOpenKey((prev) => (prev === openKey ? null : openKey))
+          }
+          className={`inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white font-black uppercase tracking-widest text-slate-600 disabled:opacity-40 ${
+            compact
+              ? 'px-2 py-1 text-[9px]'
+              : 'px-2.5 py-1.5 text-[10px]'
+          }`}
+        >
+          {summary}
+          <ChevronDown className="w-3 h-3" />
+        </button>
+        {isOpen && (
+          <div className="absolute left-0 z-[130] mt-1 w-[260px] max-w-[85vw] rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+            <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-slate-400">
+              Assign to
+            </div>
+            <div className="max-h-[180px] space-y-1 overflow-y-auto">
+              {assignableEmails.map((email) => {
+                const checked = cleaned.includes(email);
+                return (
+                  <label
+                    key={email}
+                    className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-bold hover:bg-slate-50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => {
+                        const next = checked
+                          ? cleaned.filter((e) => e !== email)
+                          : [...cleaned, email].sort();
+                        onChange(next);
+                      }}
+                    />
+                    <span className="truncate">{email}</span>
+                  </label>
+                );
+              })}
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="rounded-lg bg-slate-100 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-slate-600"
+                onClick={() => onChange([])}
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-[#fd7414] px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white"
+                onClick={() => setClientTodoAssigneeOpenKey(null)}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
   };
 
   // When a task is actively running, use the active task's client/category
@@ -479,8 +870,7 @@ const EmployeeKiosk = ({
     const clientList = (clientsFull || []).filter(
       (c) =>
         c &&
-        !c.archived &&
-        c.status !== 'paused' &&
+        isClientActiveForWork(c) &&
         teamMemberCanViewClient(c, user?.email) &&
         c.retainers &&
         Object.keys(c.retainers).length > 0,
@@ -900,17 +1290,52 @@ const EmployeeKiosk = ({
                                           canDragReorder={canDragReorder}
                                           getUrgencyClass={getUrgencyClass}
                                           user={user}
+                                          canManageTodos={canManageClientTodos}
+                                          isCycleLocked={isCycleLocked(
+                                            selectedClientObj,
+                                            cycleStart,
+                                          )}
+                                          assigneeOpenKey={
+                                            clientTodoAssigneeOpenKey ===
+                                            `category__${item.id}`
+                                              ? item.id
+                                              : null
+                                          }
+                                          onAssigneeOpenChange={(key) =>
+                                            setClientTodoAssigneeOpenKey(
+                                              key ? `category__${key}` : null,
+                                            )
+                                          }
+                                          assignableEmails={assignableEmails}
+                                          onAssigneesChange={(next) =>
+                                            updateClientTodoAssignees(
+                                              selectedClientObj,
+                                              cycleStart,
+                                              catKey,
+                                              item.id,
+                                              next,
+                                            )
+                                          }
+                                          onOpenOptions={(todoItem, subtask) =>
+                                            openClientTodoEditModal(
+                                              selectedClientObj,
+                                              cycleStart,
+                                              catKey,
+                                              todoItem,
+                                              subtask,
+                                            )
+                                          }
                                         />
                                       ))}
                                     </ul>
                                   )}
-                                  <div className="flex gap-2 items-center">
+                                  <div className="flex flex-wrap gap-2 items-center">
                                     <input
                                       type="text"
                                       value={todoNewText}
                                       onChange={(e) => setTodoNewText(e.target.value)}
                                       placeholder="New to-do..."
-                                      className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                      className="flex-1 min-w-[160px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
                                       onKeyDown={(e) => {
                                         if (e.key === 'Enter') {
                                           e.preventDefault();
@@ -930,6 +1355,15 @@ const EmployeeKiosk = ({
                                         }
                                       }}
                                     />
+                                    {canManageClientTodos &&
+                                      renderClientTodoAssigneePicker({
+                                        openKey: 'todo_add_assignees',
+                                        value: todoAddAssignees,
+                                        disabled:
+                                          todoSaving ||
+                                          isCycleLocked(selectedClientObj, cycleStart),
+                                        onChange: setTodoAddAssignees,
+                                      })}
                                     <button
                                       type="button"
                                       onClick={() => setTodoOptionsOpen(true)}
@@ -1225,17 +1659,52 @@ const EmployeeKiosk = ({
                                           canDragReorder={canDragReorder}
                                           getUrgencyClass={getUrgencyClass}
                                           user={user}
+                                          canManageTodos={canManageClientTodos}
+                                          isCycleLocked={isCycleLocked(
+                                            selectedClientObj,
+                                            cycleStart,
+                                          )}
+                                          assigneeOpenKey={
+                                            clientTodoAssigneeOpenKey ===
+                                            `category__${item.id}`
+                                              ? item.id
+                                              : null
+                                          }
+                                          onAssigneeOpenChange={(key) =>
+                                            setClientTodoAssigneeOpenKey(
+                                              key ? `category__${key}` : null,
+                                            )
+                                          }
+                                          assignableEmails={assignableEmails}
+                                          onAssigneesChange={(next) =>
+                                            updateClientTodoAssignees(
+                                              selectedClientObj,
+                                              cycleStart,
+                                              catKey,
+                                              item.id,
+                                              next,
+                                            )
+                                          }
+                                          onOpenOptions={(todoItem, subtask) =>
+                                            openClientTodoEditModal(
+                                              selectedClientObj,
+                                              cycleStart,
+                                              catKey,
+                                              todoItem,
+                                              subtask,
+                                            )
+                                          }
                                         />
                                       ))}
                                     </ul>
                                   )}
-                                  <div className="flex gap-2 items-center">
+                                  <div className="flex flex-wrap gap-2 items-center">
                                     <input
                                       type="text"
                                       value={todoNewText}
                                       onChange={(e) => setTodoNewText(e.target.value)}
                                       placeholder="New to-do..."
-                                      className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                      className="flex-1 min-w-[160px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
                                       onKeyDown={(e) => {
                                         if (e.key === 'Enter') {
                                           e.preventDefault();
@@ -1255,6 +1724,15 @@ const EmployeeKiosk = ({
                                         }
                                       }}
                                     />
+                                    {canManageClientTodos &&
+                                      renderClientTodoAssigneePicker({
+                                        openKey: 'todo_add_assignees',
+                                        value: todoAddAssignees,
+                                        disabled:
+                                          todoSaving ||
+                                          isCycleLocked(selectedClientObj, cycleStart),
+                                        onChange: setTodoAddAssignees,
+                                      })}
                                     <button
                                       type="button"
                                       onClick={() => setTodoOptionsOpen(true)}
@@ -1786,6 +2264,54 @@ const EmployeeKiosk = ({
                     ) : (
                       <div className={`text-[9px] font-bold mt-0.5 ${metaClass}`}>No due date</div>
                     )}
+                    {canManageClientTodos && client && (
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        <input
+                          type="checkbox"
+                          checked={!!row.item.done}
+                          disabled={todoSaving || isCycleLocked(client, row.cycleStart)}
+                          onChange={() =>
+                            toggleClientTodoDone(
+                              client,
+                              row.cycleStart,
+                              row.categoryKey,
+                              row.item,
+                            )
+                          }
+                          className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
+                          title="Mark complete"
+                        />
+                        {renderClientTodoAssigneePicker({
+                          openKey: `sidebar__${row.clientId}__${row.cycleStart}__${row.categoryKey}__${row.item.id}`,
+                          value: row.item.assigneeEmails,
+                          disabled: todoSaving || isCycleLocked(client, row.cycleStart),
+                          compact: true,
+                          onChange: (next) =>
+                            updateClientTodoAssignees(
+                              client,
+                              row.cycleStart,
+                              row.categoryKey,
+                              row.item.id,
+                              next,
+                            ),
+                        })}
+                        <button
+                          type="button"
+                          disabled={todoSaving || isCycleLocked(client, row.cycleStart)}
+                          onClick={() =>
+                            openClientTodoEditModal(
+                              client,
+                              row.cycleStart,
+                              row.categoryKey,
+                              row.item,
+                            )
+                          }
+                          className="px-2 py-1 rounded-lg bg-white/90 border border-slate-200 text-[9px] font-black uppercase tracking-widest text-slate-600"
+                        >
+                          Options
+                        </button>
+                      </div>
+                    )}
                     {!row.item.done && client && (
                       <button
                         type="button"
@@ -2044,7 +2570,8 @@ const EmployeeKiosk = ({
                             disabled={personalListSaving || !updateClientTodo}
                             onClick={() => {
                               setPersonalLinkItem(t);
-                              const first = (clients || [])[0];
+                              const pickable = (clients || []).filter(isClientActiveForWork);
+                              const first = pickable[0];
                               setLinkPickClientId(first?.id || '');
                               setLinkPickKind('retainer');
                               setLinkPickRetainerName('');
@@ -2098,7 +2625,7 @@ const EmployeeKiosk = ({
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold"
               >
                 <option value="">Select client…</option>
-                {(clients || []).map((c) => (
+                {(clients || []).filter(isClientActiveForWork).map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
                   </option>
@@ -2134,7 +2661,7 @@ const EmployeeKiosk = ({
                 >
                   <option value="">Select category…</option>
                   {Object.keys(
-                    (clients || []).find((c) => c.id === linkPickClientId)?.retainers ||
+                    (clients || []).filter(isClientActiveForWork).find((c) => c.id === linkPickClientId)?.retainers ||
                       {},
                   ).map((name) => (
                     <option key={name} value={name}>
@@ -2189,7 +2716,7 @@ const EmployeeKiosk = ({
                   !getTodoStateForCycle
                 }
                 onClick={async () => {
-                  const client = (clients || []).find((c) => c.id === linkPickClientId);
+                  const client = (clients || []).filter(isClientActiveForWork).find((c) => c.id === linkPickClientId);
                   if (!client || !personalLinkItem) return;
                   const cycleStart = getBillingPeriod(client.billingDay || 1, 0).start;
                   if (client?.cycleLocks?.[String(cycleStart)]?.locked) {
@@ -2369,6 +2896,115 @@ const EmployeeKiosk = ({
                   }
                 }}
                 className="px-4 py-2 rounded-xl text-xs font-black bg-[#fd7414] text-white"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {clientTodoEditTarget && (
+        <div className="fixed inset-0 z-[151] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">
+                {clientTodoEditTarget.subtaskId
+                  ? 'Edit sub-task'
+                  : 'Edit to-do options'}
+              </h4>
+              <button
+                type="button"
+                onClick={() => setClientTodoEditTarget(null)}
+                className="px-2 py-1 rounded-lg text-xs font-bold text-slate-500 hover:bg-slate-100"
+              >
+                Close
+              </button>
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                Title
+              </label>
+              <input
+                type="text"
+                value={clientTodoEditTitle}
+                onChange={(e) => setClientTodoEditTitle(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                placeholder={
+                  clientTodoEditTarget.subtaskId ? 'Sub-task title' : 'Task title'
+                }
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                Due date
+              </label>
+              <input
+                type="date"
+                value={clientTodoEditDue}
+                max={(() => {
+                  if (!clientTodoEditTarget.subtaskId || !getTodoStateForCycle) {
+                    return undefined;
+                  }
+                  const cl = (clientsFull || []).find(
+                    (x) => x.id === clientTodoEditTarget.clientId,
+                  );
+                  if (!cl) return undefined;
+                  const st = getTodoStateForCycle(cl, clientTodoEditTarget.cycleStart);
+                  const cat = st[clientTodoEditTarget.categoryKey] || { items: [] };
+                  const parent = (cat.items || []).find(
+                    (i) => i.id === clientTodoEditTarget.itemId,
+                  );
+                  return parent?.dueDate ? asDateInput(parent.dueDate) : undefined;
+                })()}
+                onChange={(e) => setClientTodoEditDue(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+              />
+            </div>
+            {!clientTodoEditTarget.subtaskId && (
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                  Recurrence
+                </label>
+                <select
+                  value={clientTodoEditRecurrence}
+                  onChange={(e) => setClientTodoEditRecurrence(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                >
+                  <option value="none">No repeat</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly (same weekday)</option>
+                  <option value="biweekly">Bi-weekly (same weekday)</option>
+                  <option value="monthly">Monthly (same day of month)</option>
+                  <option value="annual">Annually (same calendar date)</option>
+                </select>
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                disabled={todoSaving}
+                onClick={() => deleteClientTodoEditTarget()}
+                className="px-3 py-2 rounded-xl text-xs font-black text-red-600 bg-red-50 hover:bg-red-100 uppercase tracking-widest disabled:opacity-50 mr-auto"
+              >
+                Delete
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setClientTodoEditTitle('');
+                  setClientTodoEditDue('');
+                  setClientTodoEditRecurrence('none');
+                }}
+                className="px-3 py-2 rounded-xl text-xs font-black text-slate-500 bg-slate-100 hover:bg-slate-200 uppercase tracking-widest"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                disabled={todoSaving}
+                onClick={() => applyClientTodoEditModal()}
+                className="px-3 py-2 rounded-xl text-xs font-black text-white bg-[#fd7414] hover:brightness-95 uppercase tracking-widest disabled:opacity-50"
               >
                 Save
               </button>

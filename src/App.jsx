@@ -67,6 +67,7 @@ import ClientPortal from './components/ClientPortal.jsx';
 import EmployeeKiosk from './components/EmployeeKiosk.jsx';
 import AdminDashboard from './components/AdminDashboard.jsx';
 import { buildTeamAccessMergeForTodoAssignees } from './utils/teamClientAccess.js';
+import { isClientActiveForWork } from './utils/clientActiveForWork.js';
 import { reconcileRecurringTodoInstances } from './utils/recurringTodoMaterialize.js';
 import { getSubtasks, newSubtaskId, projectSubtaskDueDateForNewCycle } from './utils/todoSubtasks.js';
 import {
@@ -651,6 +652,14 @@ export default function App() {
   const clientActiveProjectsExp = expenseModal ? projects.filter(p => !p.archived && p.clientName === expenseModal.name && (p.status === 'active' || p.status === 'approved')) : [];
 
   const selectedClientObj = clients.find(c => c.name === selectedClient);
+  useEffect(() => {
+    if (!selectedClient || !clients?.length) return;
+    const c = clients.find((x) => x.name === selectedClient);
+    if (c && isClientActiveForWork(c)) return;
+    if (activeTask?.clientName === selectedClient) return;
+    setSelectedClient('');
+    setSelectedBillingTarget('');
+  }, [clients, selectedClient, activeTask?.clientName]);
   const selectableRetainers = selectedClientObj
     ? Object.entries(selectedClientObj.retainers || {}).map(([name, hours]) => ({
         name,
@@ -731,11 +740,13 @@ export default function App() {
   };
 
   const queueKioskTaskStart = useCallback((clientName, billingTarget) => {
+    const c = clients.find((x) => x.name === clientName);
+    if (!isClientActiveForWork(c)) return;
     setSelectedClient(clientName);
     setSelectedBillingTarget(billingTarget);
     kioskAutostartClockInAttemptedRef.current = false;
     setKioskAutostartPending(true);
-  }, []);
+  }, [clients]);
 
   useEffect(() => {
     if (!user) return;
@@ -748,13 +759,21 @@ export default function App() {
     const c = params.get('client');
     const t = params.get('target');
     if (!c || !t) return;
+    if (!clients?.length) return;
+    const clientName = decodeURIComponent(c);
+    const clientObj = clients.find((x) => x.name === clientName);
+    if (!clientObj || !isClientActiveForWork(clientObj)) {
+      kioskAutostartSearchProcessedRef.current = qs;
+      navigate('/kiosk', { replace: true });
+      return;
+    }
     kioskAutostartSearchProcessedRef.current = qs;
-    setSelectedClient(decodeURIComponent(c));
+    setSelectedClient(clientName);
     setSelectedBillingTarget(decodeURIComponent(t));
     kioskAutostartClockInAttemptedRef.current = false;
     setKioskAutostartPending(true);
     navigate('/kiosk', { replace: true });
-  }, [user, location.pathname, location.search, navigate]);
+  }, [user, location.pathname, location.search, navigate, clients]);
 
   const handleStopTask = async () => {
     if (!activeTask) return;
@@ -802,6 +821,9 @@ export default function App() {
       await handleResumeTask(pausedCandidates[0]);
       return;
     }
+
+    const startClient = clients.find((x) => x.name === selectedClient);
+    if (!isClientActiveForWork(startClient)) return;
 
     await addDoc(collection(db, 'taskLogs'), {
       shiftId: activeShift.id,
@@ -961,6 +983,11 @@ export default function App() {
 
   const saveManualTask = async () => {
     if (!manualTaskValues.clientName || !manualTaskValues.date || !manualTaskValues.employeeName || !manualTaskValues.billingTarget) return alert("Fill required fields");
+
+    const manualClient = clients.find((c) => c.name === manualTaskValues.clientName);
+    if (!isClientActiveForWork(manualClient)) {
+      return alert('That client is inactive or archived. Manual tasks can only be logged for active clients.');
+    }
     
     const isProject = manualTaskValues.billingTarget.startsWith('project_');
     const targetId = isProject ? manualTaskValues.billingTarget.replace('project_', '') : null;
@@ -2257,9 +2284,7 @@ export default function App() {
     activeTask,
     liveDuration,
     liveTaskDuration,
-    clients: clients.filter(
-      (c) => !c.archived && c.status !== 'paused',
-    ),
+    clients: clients.filter(isClientActiveForWork),
     selectableRetainers,
     GENERAL_LABEL,
     clientActiveProjects,
@@ -2293,6 +2318,7 @@ export default function App() {
     userTodos,
     updateUserTodos,
     adminUsers,
+    currentUserRole,
     handleIdleAutoClockOut,
   };
 
@@ -2360,10 +2386,13 @@ export default function App() {
     userTodos,
     updateUserTodos,
     updatePolicy,
-    navigateToKioskWithTask: (clientName, billingTarget) =>
+    navigateToKioskWithTask: (clientName, billingTarget) => {
+      const cl = clients.find((c) => c.name === clientName);
+      if (!isClientActiveForWork(cl)) return;
       navigate(
         `/kiosk?autostart=1&client=${encodeURIComponent(clientName)}&target=${encodeURIComponent(billingTarget)}`,
-      ),
+      );
+    },
   };
 
   const adminDashboardRouteProps = {
@@ -2571,7 +2600,7 @@ export default function App() {
                   <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Client</label>
                   <select value={manualTaskValues.clientName} onChange={e => setManualTaskValues({...manualTaskValues, clientName: e.target.value, billingTarget: ''})} className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]">
                     <option value="">Select Client...</option>
-                    {clients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                    {clients.filter(isClientActiveForWork).map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                   </select>
                 </div>
                 <div className="col-span-2 sm:col-span-1 space-y-1">
@@ -2803,7 +2832,11 @@ export default function App() {
                       className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
                     >
                       <option value="">Select client...</option>
-                      {clients.filter(c => !c.archived).map(c => (
+                      {clients.filter(
+                        (c) =>
+                          isClientActiveForWork(c) ||
+                          (editValues.clientName && c.name === editValues.clientName),
+                      ).map(c => (
                         <option key={c.id} value={c.name}>{c.name}</option>
                       ))}
                     </select>

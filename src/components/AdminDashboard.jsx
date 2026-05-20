@@ -34,6 +34,7 @@ import {
   toggleTodoPinnedById,
 } from '../utils/todoListOrder.js';
 import { buildGlobalTodoRows } from '../utils/todoGlobalRows.js';
+import { isClientActiveForWork } from '../utils/clientActiveForWork.js';
 import {
   buildKioskBillingTargetFromTodoRow,
   globalAdminTaskRowMatchesFilters,
@@ -995,6 +996,10 @@ const AdminDashboard = ({
   const isAdmin = currentUserRole === 'admin';
   const isRestrictedStaff = currentUserRole === 'kiosk';
   const visibleClients = useMemo(() => clients || [], [clients]);
+  const clientsActiveForWork = useMemo(
+    () => (clients || []).filter(isClientActiveForWork),
+    [clients],
+  );
 
   /** Move hour budget between retainer lines for a billing cycle (admin / billing). */
   const [retainerMoveModal, setRetainerMoveModal] = useState(null);
@@ -1099,9 +1104,9 @@ const AdminDashboard = ({
   const [taskCategoryFilter, setTaskCategoryFilter] = useState('all');
   const [taskAssigneeFilter, setTaskAssigneeFilter] = useState('me');
   const [taskStatusFilter, setTaskStatusFilter] = useState('open');
-  const [taskDueFilter, setTaskDueFilter] = useState('next7');
+  const [taskDueFilter, setTaskDueFilter] = useState('next30');
   const [clientTaskStatusFilter, setClientTaskStatusFilter] = useState('open');
-  const [clientTaskDueFilter, setClientTaskDueFilter] = useState('next7');
+  const [clientTaskDueFilter, setClientTaskDueFilter] = useState('next30');
   const [userTodoDraft, setUserTodoDraft] = useState('');
   const [userTodoSaving, setUserTodoSaving] = useState(false);
 
@@ -1723,13 +1728,13 @@ const AdminDashboard = ({
   const globalTodoRows = useMemo(
     () =>
       buildGlobalTodoRows(
-        visibleClients,
+        clientsActiveForWork,
         projects,
         getBillingPeriod,
         getTodoStateForCycle,
         todoCategoryKey,
       ),
-    [visibleClients, projects, getBillingPeriod, getTodoStateForCycle, todoCategoryKey],
+    [clientsActiveForWork, projects, getBillingPeriod, getTodoStateForCycle, todoCategoryKey],
   );
 
   const clientTodoFiltersAllowReorder =
@@ -2685,7 +2690,7 @@ const AdminDashboard = ({
                 className="w-full bg-slate-50 border border-slate-200 p-3.5 rounded-2xl outline-none focus:ring-2 focus:ring-[#fd7414]/50 transition-all font-bold text-sm"
               >
                 <option value="all">All Clients</option>
-                {visibleClients.map((c) => (
+                {clientsActiveForWork.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
                   </option>

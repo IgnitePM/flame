@@ -1,4 +1,5 @@
-﻿import { orderTodosForDisplay } from "./todoListOrder.js";
+import { orderTodosForDisplay } from "./todoListOrder.js";
+import { isClientActiveForWork } from "./clientActiveForWork.js";
 
 /**
  * Build flat rows for all clients' current-cycle to-dos (same shape as AdminDashboard globalTodoRows).
@@ -10,7 +11,7 @@ export function buildGlobalTodoRows(
   getTodoStateForCycle,
   todoCategoryKey,
 ) {
-  const list = clients || [];
+  const list = (clients || []).filter(isClientActiveForWork);
   return list.flatMap((c) => {
     const cycleStart = getBillingPeriod(c.billingDay || 1, 0).start;
     const todoState = getTodoStateForCycle ? getTodoStateForCycle(c, cycleStart) : {};

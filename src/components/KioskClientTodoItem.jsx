@@ -1,4 +1,4 @@
-import { GripVertical, Pin } from 'lucide-react';
+import { ChevronDown, GripVertical, Pin } from 'lucide-react';
 import {
   orderTodosForDisplay,
   toggleTodoPinnedById,
@@ -25,15 +25,97 @@ export default function KioskClientTodoItem({
   canDragReorder,
   getUrgencyClass,
   user,
+  canManageTodos = false,
+  isCycleLocked = false,
+  assigneeOpenKey,
+  onAssigneeOpenChange,
+  assignableEmails = [],
+  onAssigneesChange,
+  onOpenOptions,
 }) {
   const meLower = String(user?.email || '').trim().toLowerCase();
 
   const canToggleSubtask = (sub) => {
     if (!meLower) return false;
+    if (canManageTodos) return true;
     return effectiveSubtaskAssignees(sub, item, user?.email).includes(meLower);
   };
 
   const subs = getSubtasks(item);
+  const assignees = Array.isArray(item.assigneeEmails)
+    ? item.assigneeEmails.map((e) => String(e || '').trim().toLowerCase()).filter(Boolean)
+    : [];
+  const assignSummary =
+    assignees.length === 0
+      ? 'Assign'
+      : assignees.length === 1
+        ? assignees[0].split('@')[0]
+        : `${assignees.length} people`;
+  const assignOpen = assigneeOpenKey === item.id;
+
+  const renderAssigneePicker = (compact = false) => (
+    <div className="relative">
+      <button
+        type="button"
+        disabled={todoSaving || isCycleLocked}
+        onClick={() =>
+          onAssigneeOpenChange?.(assignOpen ? null : item.id)
+        }
+        className={`inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white font-black uppercase tracking-widest text-slate-600 disabled:opacity-40 ${
+          compact ? 'px-2 py-1 text-[9px]' : 'px-2.5 py-1.5 text-[10px]'
+        }`}
+      >
+        {assignSummary}
+        <ChevronDown className="w-3 h-3" />
+      </button>
+      {assignOpen && (
+        <div className="absolute left-0 z-[130] mt-1 w-[260px] max-w-[85vw] rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+          <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-slate-400">
+            Assign to
+          </div>
+          <div className="max-h-[180px] space-y-1 overflow-y-auto">
+            {assignableEmails.map((email) => {
+              const checked = assignees.includes(email);
+              return (
+                <label
+                  key={email}
+                  className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-bold hover:bg-slate-50"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => {
+                      const next = checked
+                        ? assignees.filter((e) => e !== email)
+                        : [...assignees, email].sort();
+                      onAssigneesChange?.(next);
+                    }}
+                  />
+                  <span className="truncate">{email}</span>
+                </label>
+              );
+            })}
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              className="rounded-lg bg-slate-100 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-slate-600"
+              onClick={() => onAssigneesChange?.([])}
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              className="rounded-lg bg-[#fd7414] px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white"
+              onClick={() => onAssigneeOpenChange?.(null)}
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <li
@@ -125,7 +207,7 @@ export default function KioskClientTodoItem({
               setTodoSaving(false);
             }
           }}
-          disabled={todoSaving}
+          disabled={todoSaving || isCycleLocked}
           className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
         />
         <span className={`text-sm flex-1 min-w-0 break-words ${item.done ? 'line-through opacity-70' : ''}`}>
@@ -147,6 +229,19 @@ export default function KioskClientTodoItem({
             </span>
           )}
         </span>
+        {canManageTodos && (
+          <div className="flex shrink-0 flex-wrap items-center gap-1">
+            {renderAssigneePicker(true)}
+            <button
+              type="button"
+              disabled={todoSaving || isCycleLocked}
+              onClick={() => onOpenOptions?.(item)}
+              className="px-2 py-1 rounded-lg bg-white border border-slate-200 text-[9px] font-black uppercase tracking-widest text-slate-600"
+            >
+              Options
+            </button>
+          </div>
+        )}
       </div>
       {subs.length > 0 && (
         <ul className="ml-4 sm:ml-6 border-l border-slate-200 pl-3 space-y-1 pb-2 w-full min-w-0 max-w-full overflow-x-hidden">
@@ -158,7 +253,7 @@ export default function KioskClientTodoItem({
               <input
                 type="checkbox"
                 checked={!!sub.done}
-                disabled={todoSaving || !canToggleSubtask(sub)}
+                disabled={todoSaving || !canToggleSubtask(sub) || isCycleLocked}
                 title={
                   canToggleSubtask(sub)
                     ? 'Sub-task'
@@ -192,6 +287,16 @@ export default function KioskClientTodoItem({
                   </span>
                 )}
               </span>
+              {canManageTodos && (
+                <button
+                  type="button"
+                  disabled={todoSaving || isCycleLocked}
+                  onClick={() => onOpenOptions?.(item, sub)}
+                  className="shrink-0 px-2 py-1 rounded-lg bg-white border border-slate-200 text-[9px] font-black uppercase tracking-widest text-slate-600"
+                >
+                  Options
+                </button>
+              )}
             </li>
           ))}
         </ul>
