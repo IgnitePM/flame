@@ -2008,6 +2008,7 @@ const AdminDashboard = ({
           ? cleaned[0]
           : `${cleaned.length} assignees`;
     const isOpen = assigneePickerOpenKey === openKey;
+    const preferDropUp = String(openKey).includes('todo_add__');
     return (
       <div className={`relative ${className}`}>
         <button
@@ -2023,7 +2024,11 @@ const AdminDashboard = ({
           <ChevronDown className="w-4 h-4 shrink-0 text-zinc-400" />
         </button>
         {isOpen && (
-          <div className="absolute right-0 z-[120] mt-2 w-[320px] max-w-[min(92vw,320px)] rounded-2xl border border-white/20 bg-zinc-950 p-3 shadow-xl">
+          <div
+            className={`absolute right-0 z-[120] w-[320px] max-w-[min(92vw,320px)] rounded-2xl border border-white/20 bg-zinc-950 p-3 shadow-xl ${
+              preferDropUp ? 'bottom-full mb-2' : 'top-full mt-2'
+            }`}
+          >
             <div className="mb-2 text-[10px] font-black uppercase tracking-widest text-zinc-400">
               Assign to
             </div>
@@ -3638,7 +3643,9 @@ const AdminDashboard = ({
               return (
                 <div
                   key={c.id}
-                  className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden flex flex-col"
+                  className={`bg-white rounded-3xl border border-slate-100 shadow-sm flex flex-col ${
+                    isClientPage ? 'overflow-visible' : 'overflow-hidden'
+                  }`}
                 >
                   <div
                     className="p-6 border-b border-slate-50 flex justify-between items-start bg-slate-50/50 hover:bg-slate-50 transition-colors cursor-pointer"
@@ -3840,7 +3847,13 @@ const AdminDashboard = ({
                     </div>
                   )}
 
-                  <div className="p-6 flex-1 bg-white space-y-6 min-w-0 max-w-full">
+                  <div
+                    className={`p-6 flex-1 bg-white space-y-6 min-w-0 max-w-full ${
+                      isClientPage && showClientTasks && assigneePickerOpenKey
+                        ? 'pb-80'
+                        : ''
+                    }`}
+                  >
                     {isClientPage && showClientTasks && (
                       <div className="flex flex-wrap gap-3 items-end rounded-2xl border border-slate-100 bg-slate-50 p-4">
                         <div className="min-w-[140px]">
