@@ -18,18 +18,29 @@ export function normalizeEmailList(arr) {
  * @param {{ teamMemberAccessEmails?: string[] } | null | undefined} client
  * @param {string | null | undefined} userEmail
  */
+/** @param {Record<string, unknown> | null | undefined} item */
+export function extractItemAssigneeEmails(item) {
+  if (!item || typeof item !== 'object') return [];
+  const fromArr = Array.isArray(item.assigneeEmails) ? item.assigneeEmails : [];
+  const legacy = item.assigneeEmail ?? item.assignee ?? '';
+  return normalizeEmailList([
+    ...fromArr,
+    ...(typeof legacy === 'string' ? [legacy] : []),
+  ]);
+}
+
 export function teamMemberCanViewClient(client, userEmail) {
   const me = normalizeEmail(userEmail);
   if (!me) return false;
+  // Assigned on any client to-do always grants workspace/kiosk visibility.
+  const todoAssignees = collectAssigneeEmailsFromTodoCycles(client?.todoCycles);
+  if (todoAssignees.includes(me)) return true;
+
   const raw = client?.teamMemberAccessEmails;
   if (raw == null) return true;
   if (!Array.isArray(raw)) return true;
   if (raw.length === 0) return false;
-  const allowed = raw.map(normalizeEmail);
-  if (allowed.includes(me)) return true;
-  // Assigned on any client to-do still grants workspace/kiosk visibility.
-  const todoAssignees = collectAssigneeEmailsFromTodoCycles(client?.todoCycles);
-  return todoAssignees.includes(me);
+  return raw.map(normalizeEmail).includes(me);
 }
 
 /** Clients this team member may see in kiosk / workspace lists. */
@@ -50,21 +61,14 @@ export function collectAssigneeEmailsFromTodoCycles(todoCycles) {
       const items = cat?.items;
       if (!Array.isArray(items)) continue;
       for (const item of items) {
-        const arr = item?.assigneeEmails;
-        if (Array.isArray(arr)) {
-          for (const e of arr) {
-            const n = normalizeEmail(e);
-            if (n) set.add(n);
-          }
+        for (const e of extractItemAssigneeEmails(item)) {
+          set.add(e);
         }
         const subs = item?.subtasks;
         if (!Array.isArray(subs)) continue;
         for (const sub of subs) {
-          const sa = sub?.assigneeEmails;
-          if (!Array.isArray(sa)) continue;
-          for (const e of sa) {
-            const n = normalizeEmail(e);
-            if (n) set.add(n);
+          for (const e of extractItemAssigneeEmails(sub)) {
+            set.add(e);
           }
         }
       }

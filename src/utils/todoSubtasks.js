@@ -1,4 +1,8 @@
-import { normalizeEmail, normalizeEmailList } from './teamClientAccess.js';
+import {
+  extractItemAssigneeEmails,
+  normalizeEmail,
+  normalizeEmailList,
+} from './teamClientAccess.js';
 
 export function getSubtasks(item) {
   return Array.isArray(item?.subtasks) ? item.subtasks : [];
@@ -49,14 +53,14 @@ export function projectSubtaskDueDateForNewCycle(oldParentDue, newParentDue, old
 }
 
 export function effectiveParentAssigneesForItem(parentItem, fallbackUserEmail) {
-  const p = normalizeEmailList(parentItem?.assigneeEmails);
+  const p = extractItemAssigneeEmails(parentItem);
   if (p.length) return p;
   const fb = normalizeEmail(fallbackUserEmail);
   return fb ? [fb] : [];
 }
 
 export function effectiveSubtaskAssignees(sub, parentItem, fallbackUserEmail) {
-  const subList = normalizeEmailList(sub?.assigneeEmails);
+  const subList = extractItemAssigneeEmails(sub);
   if (subList.length) return subList;
   return effectiveParentAssigneesForItem(parentItem, fallbackUserEmail);
 }
@@ -70,6 +74,20 @@ export function collectEffectiveAssigneesForTodoTree(item, fallbackUserEmail) {
     }
   }
   return [...set];
+}
+
+/** True when the user is explicitly listed on the task or a sub-task (not unassigned fallback). */
+export function todoTreeExplicitlyAssignsUser(item, userEmail) {
+  const me = normalizeEmail(userEmail);
+  if (!me || !item) return false;
+  const parent = extractItemAssigneeEmails(item);
+  if (parent.length > 0) {
+    if (parent.includes(me)) return true;
+  }
+  for (const s of getSubtasks(item)) {
+    if (extractItemAssigneeEmails(s).includes(me)) return true;
+  }
+  return false;
 }
 
 export function newSubtaskId() {

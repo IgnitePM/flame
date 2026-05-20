@@ -18,6 +18,7 @@ import {
   mapItemSubtasks,
   parentDueCapMs,
   removeSubtaskFromItems,
+  todoTreeExplicitlyAssignsUser,
 } from '../utils/todoSubtasks.js';
 import { recurringAnchorKey } from '../utils/recurringTodoMaterialize.js';
 import KioskClientTodoItem from './KioskClientTodoItem.jsx';
@@ -76,6 +77,7 @@ const EmployeeKiosk = ({
   updateUserTodos,
   adminUsers = [],
   currentUserRole = null,
+  staffEmail = '',
   handleIdleAutoClockOut,
 }) => {
   const canManageClientTodos =
@@ -757,7 +759,7 @@ const EmployeeKiosk = ({
     return () => window.clearTimeout(t);
   }, [idleFailsafeOpen, handleIdleAutoClockOut]);
 
-  const meLower = String(user?.email || '').trim().toLowerCase();
+  const meLower = String(staffEmail || user?.email || '').trim().toLowerCase();
 
   const assignableEmails = React.useMemo(
     () =>
@@ -821,10 +823,10 @@ const EmployeeKiosk = ({
 
   const kioskAccessibleClients = React.useMemo(
     () =>
-      filterClientsForTeamMember(clientsFull || [], user?.email).filter(
+      filterClientsForTeamMember(clientsFull || [], meLower).filter(
         isClientActiveForWork,
       ),
-    [clientsFull, user?.email],
+    [clientsFull, meLower],
   );
 
   const globalTodoRows = React.useMemo(
@@ -835,6 +837,7 @@ const EmployeeKiosk = ({
         getBillingPeriod,
         getTodoStateForCycle,
         todoCategoryKey,
+        { allCycles: true },
       ),
     [
       kioskAccessibleClients,
@@ -846,20 +849,17 @@ const EmployeeKiosk = ({
   );
 
   const kioskFilteredRows = React.useMemo(() => {
-    const assigneeSpecific =
-      kioskTaskAssigneeFilter !== 'all' && kioskTaskAssigneeFilter !== 'me'
-        ? kioskTaskAssigneeFilter
-        : '';
-    const rows = globalTodoRows.filter((row) =>
-      globalAdminTaskRowMatchesFilters(
-        row,
-        kioskTaskStatusFilter,
-        kioskTaskDueFilter,
-        kioskTaskAssigneeFilter,
-        assigneeSpecific,
-        user?.email,
-      ),
+    let rows = globalTodoRows.filter((row) =>
+      todoRowMatchesFilters(row, kioskTaskStatusFilter, kioskTaskDueFilter),
     );
+    if (kioskTaskAssigneeFilter === 'me') {
+      rows = rows.filter((row) => todoTreeExplicitlyAssignsUser(row.item, meLower));
+    } else if (kioskTaskAssigneeFilter !== 'all') {
+      const want = String(kioskTaskAssigneeFilter || '').trim().toLowerCase();
+      rows = rows.filter((row) =>
+        collectEffectiveAssigneesForTodoTree(row.item, meLower).includes(want),
+      );
+    }
     return kioskTaskSortMode === 'client'
       ? sortTodoRowsByClientThenDue(rows)
       : sortTodoRowsByDueThenClient(rows);
@@ -869,7 +869,7 @@ const EmployeeKiosk = ({
     kioskTaskDueFilter,
     kioskTaskSortMode,
     kioskTaskAssigneeFilter,
-    user?.email,
+    meLower,
   ]);
 
   const isDollarCat = React.useCallback(
@@ -2258,7 +2258,14 @@ const EmployeeKiosk = ({
           </div>
           <div className="space-y-2 pr-1">
             {kioskFilteredRows.length === 0 ? (
-              <p className="text-xs text-slate-400">No tasks match these filters.</p>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                No tasks match these filters.
+                {kioskAccessibleClients.length === 0
+                  ? ' Ask an admin to add you under Workspace access on the client, or assign you on a client to-do.'
+                  : kioskTaskAssigneeFilter === 'me'
+                    ? ' Try “All assignees” or extend the due range.'
+                    : ' Try extending the due range or switching to Open tasks.'}
+              </p>
             ) : (
               kioskFilteredRows
                 .filter((row) => row?.item?.id != null && row.item.id !== '')

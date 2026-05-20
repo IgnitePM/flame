@@ -2290,7 +2290,12 @@ export default function App() {
     liveTaskDuration,
     clients: clients
       .filter(isClientActiveForWork)
-      .filter((c) => teamMemberCanViewClient(c, user?.email)),
+      .filter((c) =>
+        teamMemberCanViewClient(
+          c,
+          String(user?.email || myAdminDoc?.email || '').trim().toLowerCase(),
+        ),
+      ),
     selectableRetainers,
     GENERAL_LABEL,
     clientActiveProjects,
@@ -2325,6 +2330,7 @@ export default function App() {
     updateUserTodos,
     adminUsers,
     currentUserRole,
+    staffEmail: String(user?.email || myAdminDoc?.email || '').trim().toLowerCase(),
     handleIdleAutoClockOut,
   };
 
