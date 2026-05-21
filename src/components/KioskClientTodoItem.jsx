@@ -16,6 +16,7 @@ import {
   parentDueCapMs,
   setSubtaskDoneInItems,
 } from '../utils/todoSubtasks.js';
+import TodoItemAttachments from './TodoItemAttachments.jsx';
 
 function parseDateInputToMs(value) {
   if (!value) return null;
@@ -55,6 +56,9 @@ export default function KioskClientTodoItem({
   assignableEmails = [],
   onAssigneesChange,
   onOpenOptions,
+  uploadClientDocument,
+  removeClientDocument,
+  canAttachFiles = false,
 }) {
   const meLower = String(staffEmail || user?.email || '').trim().toLowerCase();
   const [subtaskComposerOpen, setSubtaskComposerOpen] = React.useState(false);
@@ -421,6 +425,17 @@ export default function KioskClientTodoItem({
             </div>
           )}
         </div>
+      )}
+      {canAttachFiles && uploadClientDocument && !item.done && (
+        <TodoItemAttachments
+          item={item}
+          client={client}
+          cycleStart={cycleStart}
+          categoryKey={catKey}
+          disabled={todoSaving || isCycleLocked}
+          onAttach={uploadClientDocument}
+          onRemove={removeClientDocument}
+        />
       )}
     </li>
   );

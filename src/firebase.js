@@ -24,6 +24,7 @@ import {
   ref as storageRef,
   uploadBytes,
   getDownloadURL,
+  deleteObject,
 } from 'firebase/storage';
 
 // Centralized Firebase configuration and initialization
@@ -49,6 +50,7 @@ export {
   storageRef,
   uploadBytes,
   getDownloadURL,
+  deleteObject,
   // Auth exports
   GoogleAuthProvider,
   signInWithPopup,

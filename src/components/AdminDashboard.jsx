@@ -61,6 +61,9 @@ import {
 } from '../utils/todoSubtasks.js';
 import { recurringAnchorKey } from '../utils/recurringTodoMaterialize.js';
 import { safeDisplayForReact } from '../utils/safeReactText.js';
+import ClientProfileSummary from './ClientProfileSummary.jsx';
+import ClientFilesPanel from './ClientFilesPanel.jsx';
+import TodoItemAttachments from './TodoItemAttachments.jsx';
 
 /** Normalize ?tab= for /admin/clients/:id (supports legacy `projects`). */
 function parseClientSubTabFromSearch(search) {
@@ -991,6 +994,8 @@ const AdminDashboard = ({
   getTodoStateForCycle,
   updateClientTodo,
   updateClientTodosBatch,
+  uploadClientDocument,
+  removeClientDocument,
   todoCategoryKey,
   userTodos = [],
   updateUserTodos,
@@ -2909,6 +2914,21 @@ const AdminDashboard = ({
                         <div className={`text-[10px] font-bold ${styles.metaClass}`}>
                           Assigned: {assignees.join(', ') || 'Unassigned'}
                         </div>
+                        {rowClient && uploadClientDocument && (
+                          <TodoItemAttachments
+                            item={row.item}
+                            client={rowClient}
+                            cycleStart={row.cycleStart}
+                            categoryKey={row.categoryKey}
+                            disabled={
+                              todoSaving ||
+                              isCycleLocked(rowClient, row.cycleStart)
+                            }
+                            onAttach={uploadClientDocument}
+                            onRemove={removeClientDocument}
+                            compact
+                          />
+                        )}
                       </div>
                       {isAdmin && rowClient && (
                         <div className="shrink-0 flex flex-col sm:flex-row sm:items-center gap-2">
@@ -3894,7 +3914,24 @@ const AdminDashboard = ({
                       </div>
                     )}
                     {isClientPage && showClientSummary && (
-                      <div>
+                      <div className="space-y-4">
+                        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
+                          <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                            Company profile
+                          </h5>
+                          <ClientProfileSummary client={c} />
+                        </div>
+                        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                          <ClientFilesPanel
+                            client={c}
+                            documents={c.documents || []}
+                            onUpload={uploadClientDocument}
+                            onRemove={removeClientDocument}
+                            disabled={isCycleLocked(c, cycleStart) || !uploadClientDocument}
+                            canDelete={!isRestrictedStaff}
+                          />
+                        </div>
+                        <div>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -3978,6 +4015,7 @@ const AdminDashboard = ({
                             )}
                           </div>
                         )}
+                        </div>
                       </div>
                     )}
                     {(showClientSummary || showClientTimesheets) && (
@@ -4928,7 +4966,7 @@ const AdminDashboard = ({
                                       return (
                                       <li
                                         key={item.id}
-                                        className={`flex items-center gap-2 rounded-lg p-2 ${urgency.rowClass}`}
+                                        className={`flex flex-col gap-1 rounded-lg p-2 ${urgency.rowClass}`}
                                         onDragOver={(e) => {
                                           if (todoSaving || isCycleLocked(c, cycleStart) || !clientTodoFiltersAllowReorder)
                                             return;
@@ -4964,6 +5002,7 @@ const AdminDashboard = ({
                                           ).finally(() => setTodoSaving(false));
                                         }}
                                       >
+                                        <div className="flex items-center gap-2 w-full min-w-0">
                                         <span
                                           draggable={
                                             !(todoSaving || isCycleLocked(c, cycleStart)) &&
@@ -5123,6 +5162,20 @@ const AdminDashboard = ({
                                             <Play className="w-3.5 h-3.5" aria-hidden />
                                             Start
                                           </button>
+                                        )}
+                                        </div>
+                                        {uploadClientDocument && (
+                                          <TodoItemAttachments
+                                            item={item}
+                                            client={c}
+                                            cycleStart={cycleStart}
+                                            categoryKey={catKey}
+                                            disabled={
+                                              todoSaving || isCycleLocked(c, cycleStart)
+                                            }
+                                            onAttach={uploadClientDocument}
+                                            onRemove={removeClientDocument}
+                                          />
                                         )}
                                       </li>
                                     )})}

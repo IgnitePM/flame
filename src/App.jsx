@@ -48,6 +48,7 @@ import {
   storageRef,
   uploadBytes,
   getDownloadURL,
+  deleteObject,
   GoogleAuthProvider,
   signInWithPopup,
   signOut,
@@ -73,6 +74,19 @@ import {
   teamMemberCanViewClient,
 } from './utils/teamClientAccess.js';
 import { reconcileRecurringTodoInstances } from './utils/recurringTodoMaterialize.js';
+import {
+  addAttachmentToItem,
+  buildClientDocumentRecord,
+  buildClientFileStoragePath,
+  getTodoAttachments,
+  MAX_TODO_ATTACHMENTS,
+  newContactId,
+  newDocumentId,
+  normalizeClientContacts,
+  normalizePrimaryContact,
+  removeDocumentFromTodoCycles,
+  validateClientUploadFile,
+} from './utils/clientDocuments.js';
 import { getSubtasks, newSubtaskId, projectSubtaskDueDateForNewCycle } from './utils/todoSubtasks.js';
 import {
   Routes,
@@ -1593,6 +1607,104 @@ export default function App() {
     await updateDoc(doc(db, 'clients', client.id), { todoCycles: cycles, ...teamAccessPatch });
   };
 
+  const uploadClientDocument = useCallback(
+    async (client, file, options = {}) => {
+      if (!client?.id || !file) throw new Error('Missing client or file.');
+      const validationError = validateClientUploadFile(file);
+      if (validationError) throw new Error(validationError);
+
+      const {
+        linkedTodoId = null,
+        linkedTodoText = null,
+        linkedCategoryKey = null,
+        linkedCycleStart = null,
+      } = options;
+
+      if (linkedTodoId) {
+        const freshClient = clients.find((c) => c.id === client.id) || client;
+        const cycleKey = String(linkedCycleStart);
+        const cat = freshClient.todoCycles?.[cycleKey]?.[linkedCategoryKey];
+        const item = (cat?.items || []).find((i) => i.id === linkedTodoId);
+        if (item && getTodoAttachments(item).length >= MAX_TODO_ATTACHMENTS) {
+          throw new Error(`Maximum ${MAX_TODO_ATTACHMENTS} attachments per task.`);
+        }
+      }
+
+      const documentId = newDocumentId();
+      const path = buildClientFileStoragePath(client.id, documentId, file.name);
+      const ref = storageRef(storage, path);
+      await uploadBytes(ref, file, {
+        contentType: file.type || 'application/octet-stream',
+      });
+      const url = await getDownloadURL(ref);
+      const record = buildClientDocumentRecord({
+        id: documentId,
+        name: file.name,
+        storagePath: path,
+        contentType: file.type,
+        sizeBytes: file.size,
+        uploadedBy: user?.email || myAdminDoc?.email || '',
+        url,
+        linkedTodoId,
+        linkedTodoText,
+        linkedCategoryKey,
+        linkedCycleStart,
+      });
+
+      const freshClient = clients.find((c) => c.id === client.id) || client;
+      const documents = [...(freshClient.documents || []), record];
+      const patch = { documents };
+
+      if (linkedTodoId && linkedCategoryKey != null && linkedCycleStart != null) {
+        const cycles = ensureCurrentCycleTodoData(freshClient, linkedCycleStart);
+        const cycleKey = String(linkedCycleStart);
+        const catTodo = cycles[cycleKey]?.[linkedCategoryKey];
+        if (catTodo?.items) {
+          const nextItems = catTodo.items.map((item) =>
+            item.id === linkedTodoId ? addAttachmentToItem(item, record) : item,
+          );
+          cycles[cycleKey] = {
+            ...cycles[cycleKey],
+            [linkedCategoryKey]: { ...catTodo, items: nextItems },
+          };
+          patch.todoCycles = cycles;
+          Object.assign(
+            patch,
+            buildTeamAccessMergeForTodoAssignees(freshClient, cycles),
+          );
+        }
+      }
+
+      await updateDoc(doc(db, 'clients', client.id), patch);
+      return record;
+    },
+    [clients, user?.email, myAdminDoc?.email],
+  );
+
+  const removeClientDocument = useCallback(
+    async (client, documentId) => {
+      if (!client?.id || !documentId) return;
+      const freshClient = clients.find((c) => c.id === client.id) || client;
+      const docRecord = (freshClient.documents || []).find((d) => d.id === documentId);
+      const documents = (freshClient.documents || []).filter((d) => d.id !== documentId);
+      const todoCycles = removeDocumentFromTodoCycles(
+        freshClient.todoCycles || {},
+        documentId,
+      );
+
+      if (docRecord?.storagePath) {
+        try {
+          await deleteObject(storageRef(storage, docRecord.storagePath));
+        } catch {
+          // File may already be gone.
+        }
+      }
+
+      await updateDoc(doc(db, 'clients', client.id), { documents, todoCycles });
+    },
+    [clients],
+  );
+
   // Dynamic Billing Period & Global Carryover Logic
   const getBillingPeriod = (billingDay = 1, offsetMonths = 0) => {
     const now = new Date();
@@ -2331,6 +2443,8 @@ export default function App() {
     adminUsers,
     currentUserRole,
     staffEmail: String(user?.email || myAdminDoc?.email || '').trim().toLowerCase(),
+    uploadClientDocument,
+    removeClientDocument,
     handleIdleAutoClockOut,
   };
 
@@ -2394,6 +2508,8 @@ export default function App() {
     getTodoStateForCycle,
     updateClientTodo,
     updateClientTodosBatch,
+    uploadClientDocument,
+    removeClientDocument,
     todoCategoryKey,
     userTodos,
     updateUserTodos,
@@ -2978,6 +3094,150 @@ export default function App() {
                   <p className="text-xs text-slate-400 mb-2">These users can log in to the Client Portal.</p>
                   <textarea value={(editingClient.clientEmails || []).join(', ')} onChange={e => setEditingClient({...editingClient, clientEmails: e.target.value.split(',').map(em => em.trim())})} className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[80px]" placeholder="ceo@client.com, cmo@client.com" />
                 </div>
+                <div className="space-y-4 pt-4 border-t border-slate-200">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Company profile</p>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Website</label>
+                    <input
+                      type="url"
+                      value={editingClient.website || ''}
+                      onChange={(e) => setEditingClient({ ...editingClient, website: e.target.value })}
+                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      placeholder="https://example.com"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Phone</label>
+                    <input
+                      type="tel"
+                      value={editingClient.phone || ''}
+                      onChange={(e) => setEditingClient({ ...editingClient, phone: e.target.value })}
+                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      placeholder="+1 (555) 555-5555"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Google Drive folder URL</label>
+                    <input
+                      type="url"
+                      value={editingClient.googleDriveFolderUrl || ''}
+                      onChange={(e) =>
+                        setEditingClient({
+                          ...editingClient,
+                          googleDriveFolderUrl: e.target.value,
+                        })
+                      }
+                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      placeholder="https://drive.google.com/drive/folders/..."
+                    />
+                  </div>
+                  <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Primary contact</p>
+                    {['name', 'title', 'email', 'phone'].map((field) => (
+                      <input
+                        key={field}
+                        type={field === 'email' ? 'email' : field === 'phone' ? 'tel' : 'text'}
+                        value={editingClient.primaryContact?.[field] || ''}
+                        onChange={(e) =>
+                          setEditingClient({
+                            ...editingClient,
+                            primaryContact: {
+                              ...normalizePrimaryContact(editingClient.primaryContact),
+                              [field]: e.target.value,
+                            },
+                          })
+                        }
+                        className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                        placeholder={
+                          field === 'name'
+                            ? 'Full name'
+                            : field === 'title'
+                              ? 'Title / role'
+                              : field === 'email'
+                                ? 'Email address'
+                                : 'Phone number'
+                        }
+                      />
+                    ))}
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Additional contacts</p>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditingClient({
+                            ...editingClient,
+                            contacts: [
+                              ...(editingClient.contacts || []),
+                              { id: newContactId(), name: '', email: '', phone: '', title: '', notes: '' },
+                            ],
+                          })
+                        }
+                        className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-200"
+                      >
+                        <Plus className="w-3 h-3" /> Add contact
+                      </button>
+                    </div>
+                    {(editingClient.contacts || []).length === 0 ? (
+                      <p className="text-xs italic text-slate-400">No additional contacts yet.</p>
+                    ) : (
+                      (editingClient.contacts || []).map((contact, idx) => (
+                        <div key={contact.id || idx} className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                              Contact {idx + 1}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEditingClient({
+                                  ...editingClient,
+                                  contacts: (editingClient.contacts || []).filter((_, i) => i !== idx),
+                                })
+                              }
+                              className="text-[10px] font-black uppercase tracking-widest text-red-500 hover:text-red-600"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                          {['name', 'title', 'email', 'phone'].map((field) => (
+                            <input
+                              key={field}
+                              type={field === 'email' ? 'email' : field === 'phone' ? 'tel' : 'text'}
+                              value={contact[field] || ''}
+                              onChange={(e) => {
+                                const next = [...(editingClient.contacts || [])];
+                                next[idx] = { ...next[idx], [field]: e.target.value };
+                                setEditingClient({ ...editingClient, contacts: next });
+                              }}
+                              className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                              placeholder={
+                                field === 'name'
+                                  ? 'Full name'
+                                  : field === 'title'
+                                    ? 'Title / role'
+                                    : field === 'email'
+                                      ? 'Email address'
+                                      : 'Phone number'
+                              }
+                            />
+                          ))}
+                          <textarea
+                            value={contact.notes || ''}
+                            onChange={(e) => {
+                              const next = [...(editingClient.contacts || [])];
+                              next[idx] = { ...next[idx], notes: e.target.value };
+                              setEditingClient({ ...editingClient, contacts: next });
+                            }}
+                            className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[70px]"
+                            placeholder="Notes (optional)"
+                          />
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
                 <div className="space-y-2 pt-4 border-t border-slate-200">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Client logo</label>
                   <p className="text-xs text-slate-400 mb-2">
@@ -3309,7 +3569,31 @@ export default function App() {
 
             <div className="p-8 border-t border-slate-100 bg-white shrink-0">
               <button 
-                onClick={async () => { await updateDoc(doc(db, 'clients', editingClient.id), { retainers: editingClient.retainers, retainerUnits: editingClient.retainerUnits || {}, hourlyRate: editingClient.hourlyRate || 0, clientEmails: editingClient.clientEmails || [], billingDay: editingClient.billingDay || 1, status: editingClient.status || 'active', teamMemberAccessEmails: editingClient.teamMemberAccessEmails === undefined ? null : editingClient.teamMemberAccessEmails, lastCarryoverResetDate: editingClient.lastCarryoverResetDate || null, carryoverResetByCategory: editingClient.carryoverResetByCategory || {}, clientStartDate: editingClient.clientStartDate || null, retainerHourMovesByCycle: editingClient.retainerHourMovesByCycle || {}, logoUrl: editingClient.logoUrl || null }); setEditingClient(null); }} 
+                onClick={async () => {
+                  await updateDoc(doc(db, 'clients', editingClient.id), {
+                    retainers: editingClient.retainers,
+                    retainerUnits: editingClient.retainerUnits || {},
+                    hourlyRate: editingClient.hourlyRate || 0,
+                    clientEmails: editingClient.clientEmails || [],
+                    billingDay: editingClient.billingDay || 1,
+                    status: editingClient.status || 'active',
+                    teamMemberAccessEmails:
+                      editingClient.teamMemberAccessEmails === undefined
+                        ? null
+                        : editingClient.teamMemberAccessEmails,
+                    lastCarryoverResetDate: editingClient.lastCarryoverResetDate || null,
+                    carryoverResetByCategory: editingClient.carryoverResetByCategory || {},
+                    clientStartDate: editingClient.clientStartDate || null,
+                    retainerHourMovesByCycle: editingClient.retainerHourMovesByCycle || {},
+                    logoUrl: editingClient.logoUrl || null,
+                    website: String(editingClient.website || '').trim(),
+                    phone: String(editingClient.phone || '').trim(),
+                    googleDriveFolderUrl: String(editingClient.googleDriveFolderUrl || '').trim(),
+                    primaryContact: normalizePrimaryContact(editingClient.primaryContact),
+                    contacts: normalizeClientContacts(editingClient.contacts),
+                  });
+                  setEditingClient(null);
+                }} 
                 className="w-full bg-black hover:bg-slate-800 text-white p-5 rounded-2xl font-black text-lg shadow-xl flex items-center justify-center gap-3 transition-all active:scale-95"
               >
                 <Save className="w-5 h-5" /> Save Profile

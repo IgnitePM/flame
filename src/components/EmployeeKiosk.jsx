@@ -23,6 +23,7 @@ import {
 } from '../utils/todoSubtasks.js';
 import { recurringAnchorKey } from '../utils/recurringTodoMaterialize.js';
 import KioskClientTodoItem from './KioskClientTodoItem.jsx';
+import ClientProfileSummary from './ClientProfileSummary.jsx';
 import { buildGlobalTodoRows } from '../utils/todoGlobalRows.js';
 import { isClientActiveForWork } from '../utils/clientActiveForWork.js';
 import {
@@ -79,6 +80,8 @@ const EmployeeKiosk = ({
   adminUsers = [],
   currentUserRole = null,
   staffEmail = '',
+  uploadClientDocument,
+  removeClientDocument,
   handleIdleAutoClockOut,
 }) => {
   const canManageClientTodos =
@@ -1221,9 +1224,13 @@ const EmployeeKiosk = ({
                       </button>
 
                       {selectedClientObj && selectedRetainerCategory && (
-                        <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
-                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
-                            Notes for {selectedClientObj.name} • {selectedRetainerCategory}
+                        <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4 space-y-3">
+                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                            Company profile — {selectedClientObj.name}
+                          </div>
+                          <ClientProfileSummary client={selectedClientObj} />
+                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 pt-2 border-t border-slate-100">
+                            Notes for {selectedRetainerCategory}
                           </div>
                           <div className="space-y-3">
                             <div>
@@ -1317,6 +1324,14 @@ const EmployeeKiosk = ({
                                             })
                                           }
                                           defaultAssigneeEmail={meLower}
+                                          uploadClientDocument={uploadClientDocument}
+                                          removeClientDocument={removeClientDocument}
+                                          canAttachFiles={
+                                            !isCycleLocked(selectedClientObj, cycleStart) &&
+                                            canKioskStaffAddSubtasksToItem(item, meLower, {
+                                              allowManageAll: canManageClientTodos,
+                                            })
+                                          }
                                           isCycleLocked={isCycleLocked(
                                             selectedClientObj,
                                             cycleStart,
@@ -1694,6 +1709,14 @@ const EmployeeKiosk = ({
                                             })
                                           }
                                           defaultAssigneeEmail={meLower}
+                                          uploadClientDocument={uploadClientDocument}
+                                          removeClientDocument={removeClientDocument}
+                                          canAttachFiles={
+                                            !isCycleLocked(selectedClientObj, cycleStart) &&
+                                            canKioskStaffAddSubtasksToItem(item, meLower, {
+                                              allowManageAll: canManageClientTodos,
+                                            })
+                                          }
                                           isCycleLocked={isCycleLocked(
                                             selectedClientObj,
                                             cycleStart,
