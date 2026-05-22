@@ -1,6 +1,21 @@
 import React from 'react';
-import { FileText, Paperclip, Trash2, Upload } from 'lucide-react';
-import { formatFileSize } from '../utils/clientDocuments.js';
+import { ExternalLink, FileText, Paperclip, Trash2, Upload } from 'lucide-react';
+import { formatFileSize, normalizeExternalUrl } from '../utils/clientDocuments.js';
+
+function ExternalOpenButton({ href, label }) {
+  if (!href) return null;
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-[#fd7414] hover:bg-orange-50"
+    >
+      <ExternalLink className="w-3.5 h-3.5" />
+      {label}
+    </a>
+  );
+}
 
 export default function ClientFilesPanel({
   client,
@@ -14,6 +29,8 @@ export default function ClientFilesPanel({
   const sorted = [...documents].sort(
     (a, b) => Number(b.uploadedAt || 0) - Number(a.uploadedAt || 0),
   );
+  const driveUrl = normalizeExternalUrl(client?.googleDriveFolderUrl);
+  const hubspotUrl = normalizeExternalUrl(client?.hubspotProfileUrl);
 
   const handleFile = async (file) => {
     if (!file || !onUpload) return;
@@ -33,7 +50,10 @@ export default function ClientFilesPanel({
         <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">
           Client files ({sorted.length})
         </div>
-        <label
+        <div className="flex flex-wrap items-center gap-2">
+          <ExternalOpenButton href={driveUrl} label="Open Drive" />
+          <ExternalOpenButton href={hubspotUrl} label="Open HubSpot" />
+          <label
           className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 ${
             disabled || uploading ? 'pointer-events-none opacity-40' : ''
           }`}
@@ -51,6 +71,7 @@ export default function ClientFilesPanel({
             }}
           />
         </label>
+        </div>
       </div>
 
       {sorted.length === 0 ? (

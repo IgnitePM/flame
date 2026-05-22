@@ -57,11 +57,12 @@ function ContactBlock({ title, contact }) {
 export default function ClientProfileSummary({ client }) {
   const website = normalizeExternalUrl(client?.website);
   const driveUrl = normalizeExternalUrl(client?.googleDriveFolderUrl);
+  const hubspotUrl = normalizeExternalUrl(client?.hubspotProfileUrl);
   const phone = String(client?.phone || '').trim();
   const primary = normalizePrimaryContact(client?.primaryContact);
   const contacts = normalizeClientContacts(client?.contacts);
 
-  const hasLinks = website || driveUrl || phone;
+  const hasLinks = website || driveUrl || hubspotUrl || phone;
   const hasContacts =
     primary.name ||
     primary.email ||
@@ -82,6 +83,7 @@ export default function ClientProfileSummary({ client }) {
         <div className="flex flex-wrap gap-2 items-center">
           <LinkChip href={website} label="Website" />
           <LinkChip href={driveUrl} label="Google Drive" />
+          <LinkChip href={hubspotUrl} label="HubSpot" />
           {phone && (
             <a
               href={`tel:${phone.replace(/\s/g, '')}`}

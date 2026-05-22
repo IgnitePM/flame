@@ -3131,6 +3131,21 @@ export default function App() {
                       placeholder="https://drive.google.com/drive/folders/..."
                     />
                   </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">HubSpot profile URL</label>
+                    <input
+                      type="url"
+                      value={editingClient.hubspotProfileUrl || ''}
+                      onChange={(e) =>
+                        setEditingClient({
+                          ...editingClient,
+                          hubspotProfileUrl: e.target.value,
+                        })
+                      }
+                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      placeholder="https://app.hubspot.com/contacts/..."
+                    />
+                  </div>
                   <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Primary contact</p>
                     {['name', 'title', 'email', 'phone'].map((field) => (
@@ -3589,6 +3604,7 @@ export default function App() {
                     website: String(editingClient.website || '').trim(),
                     phone: String(editingClient.phone || '').trim(),
                     googleDriveFolderUrl: String(editingClient.googleDriveFolderUrl || '').trim(),
+                    hubspotProfileUrl: String(editingClient.hubspotProfileUrl || '').trim(),
                     primaryContact: normalizePrimaryContact(editingClient.primaryContact),
                     contacts: normalizeClientContacts(editingClient.contacts),
                   });
