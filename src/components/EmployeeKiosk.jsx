@@ -1018,11 +1018,11 @@ const EmployeeKiosk = ({
   ]);
 
   return (
-    <div className="w-full">
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(400px,min(38vw,520px))] lg:items-start lg:gap-10">
+    <div className="w-full ignite-kiosk-shell">
+      <div className="grid grid-cols-1 gap-4 sm:gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(400px,min(38vw,520px))] lg:items-start lg:gap-10">
         <div className="space-y-6 min-w-0 order-1">
       <div className="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden lg:min-h-0">
-        <div className="p-8 text-center border-b border-slate-50 bg-slate-50/30">
+        <div className="p-4 sm:p-8 text-center border-b border-slate-50 bg-slate-50/30">
           <div className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mb-3">
             Currently Active
           </div>

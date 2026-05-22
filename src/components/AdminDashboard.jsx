@@ -63,6 +63,7 @@ import { recurringAnchorKey } from '../utils/recurringTodoMaterialize.js';
 import { safeDisplayForReact } from '../utils/safeReactText.js';
 import ClientProfileSummary from './ClientProfileSummary.jsx';
 import ClientFilesPanel from './ClientFilesPanel.jsx';
+import ClientCycleActivityPanel from './ClientCycleActivityPanel.jsx';
 import TodoItemAttachments from './TodoItemAttachments.jsx';
 
 /** Normalize ?tab= for /admin/clients/:id (supports legacy `projects`). */
@@ -76,6 +77,7 @@ function parseClientSubTabFromSearch(search) {
   if (t === 'projects' || t === 'custom_projects') return 'custom_projects';
   if (t === 'tasks') return 'tasks';
   if (t === 'timesheets') return 'timesheets';
+  if (t === 'cycle_activity' || t === 'activity') return 'cycle_activity';
   return 'summary';
 }
 
@@ -2162,7 +2164,7 @@ const AdminDashboard = ({
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 flex flex-col lg:flex-row justify-between items-center gap-6">
+      <div className="bg-white p-4 sm:p-6 rounded-[32px] shadow-sm border border-slate-100 flex flex-col lg:flex-row justify-between items-center gap-6">
         <div className="flex flex-col gap-2 w-full lg:w-auto">
           <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">
             {dashboardTitle}
@@ -3599,6 +3601,8 @@ const AdminDashboard = ({
                 !isClientPage || clientDetailSubTab === 'custom_projects';
               const showClientTimesheets =
                 !isClientPage || clientDetailSubTab === 'timesheets';
+              const showClientCycleActivity =
+                !isClientPage || clientDetailSubTab === 'cycle_activity';
               const offset = clientCycleOffsets[c.id] ?? 0;
               const minCycleOffset = (() => {
                 if (!c.clientStartDate) return -1e9;
@@ -3671,21 +3675,27 @@ const AdminDashboard = ({
                 <div
                   key={c.id}
                   className={`bg-white rounded-3xl border border-slate-100 shadow-sm flex flex-col ${
-                    isClientPage ? 'overflow-visible' : 'overflow-hidden'
+                    isClientPage ? 'admin-client-shell overflow-visible' : 'overflow-hidden'
                   }`}
                 >
                   <div
-                    className="p-6 border-b border-slate-50 flex justify-between items-start bg-slate-50/50 hover:bg-slate-50 transition-colors cursor-pointer"
-                    role="button"
-                    tabIndex={0}
-                    title="Open client page"
-                    onClick={() => navigateToClient?.(c.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        navigateToClient?.(c.id);
-                      }
-                    }}
+                    className={`p-4 sm:p-6 border-b border-slate-50 flex flex-col sm:flex-row justify-between items-start gap-4 bg-slate-50/50 transition-colors ${
+                      isClientPage ? 'cursor-default' : 'hover:bg-slate-50 cursor-pointer'
+                    }`}
+                    role={isClientPage ? undefined : 'button'}
+                    tabIndex={isClientPage ? undefined : 0}
+                    title={isClientPage ? undefined : 'Open client page'}
+                    onClick={isClientPage ? undefined : () => navigateToClient?.(c.id)}
+                    onKeyDown={
+                      isClientPage
+                        ? undefined
+                        : (e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              navigateToClient?.(c.id);
+                            }
+                          }
+                    }
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-3 min-w-0">
@@ -3735,7 +3745,7 @@ const AdminDashboard = ({
                       </div>
                     </div>
                     <div
-                      className="flex gap-1"
+                      className="flex flex-wrap gap-1 w-full sm:w-auto justify-end shrink-0"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <button
@@ -3845,11 +3855,12 @@ const AdminDashboard = ({
                       role="presentation"
                     >
                       <nav
-                        className="flex flex-wrap gap-2 pb-1"
+                        className="client-detail-tabs flex gap-2 pb-1 overflow-x-auto"
                         aria-label="Client sections"
                       >
                         {[
                           { id: 'summary', label: 'Summary' },
+                          { id: 'cycle_activity', label: 'Cycle activity' },
                           { id: 'tasks', label: 'Tasks' },
                           { id: 'custom_projects', label: 'Custom projects' },
                           { id: 'timesheets', label: 'Timesheets' },
@@ -3861,7 +3872,7 @@ const AdminDashboard = ({
                               setClientDetailSubTab(tab.id);
                               setClientPageTab(tab.id);
                             }}
-                            className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                            className={`shrink-0 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
                               clientDetailSubTab === tab.id
                                 ? 'bg-[#fd7414] text-white shadow-sm'
                                 : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'
@@ -3875,7 +3886,7 @@ const AdminDashboard = ({
                   )}
 
                   <div
-                    className={`p-6 flex-1 bg-white space-y-6 min-w-0 max-w-full ${
+                    className={`p-4 sm:p-6 flex-1 bg-white space-y-6 min-w-0 max-w-full ${
                       isClientPage && showClientTasks && assigneePickerOpenKey
                         ? 'pb-80'
                         : ''
@@ -3931,98 +3942,77 @@ const AdminDashboard = ({
                             canDelete={!isRestrictedStaff}
                           />
                         </div>
-                        <div>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setClientNotesOpen((prev) => ({
-                              ...prev,
-                              [c.id]: !prev[c.id],
-                            }));
-                            setClientNotesDraft((prev) => ({
-                              ...prev,
-                              [c.id]:
-                                prev[c.id] !== undefined
-                                  ? prev[c.id]
-                                  : c.generalNotes || '',
-                            }));
-                          }}
-                          className="text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-700 inline-flex items-center gap-2"
-                        >
-                          <FileText className="w-3 h-3" />
-                          {clientNotesOpen[c.id] ? 'Hide' : 'Show'} Client Notes
-                        </button>
-
-                        {clientNotesOpen[c.id] && (
-                          <div className="mt-3 bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
-                            {isRestrictedStaff ? (
-                              <div className="w-full bg-white border border-slate-200 p-4 rounded-2xl font-medium text-sm text-slate-600 min-h-[110px] whitespace-pre-wrap">
-                                {c.generalNotes?.trim()
-                                  ? c.generalNotes
-                                  : 'No client notes.'}
-                              </div>
-                            ) : (
-                              <>
-                            <textarea
-                              value={clientNotesDraft[c.id] ?? ''}
-                              onChange={(e) =>
-                                setClientNotesDraft((prev) => ({
-                                  ...prev,
-                                  [c.id]: e.target.value,
-                                }))
-                              }
-                              className="w-full bg-white border border-slate-200 p-4 rounded-2xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[110px]"
-                              placeholder="Brand voice, important links, access details, preferences, etc."
-                            />
-                            <div className="flex justify-end">
-                              <button
-                                onClick={async () => {
-                                  setClientNotesSaving((prev) => ({
+                        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
+                          <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                            Client notes
+                          </h5>
+                          {isRestrictedStaff ? (
+                            <div className="w-full bg-white border border-slate-200 p-4 rounded-2xl font-medium text-sm text-slate-600 min-h-[110px] whitespace-pre-wrap break-words">
+                              {c.generalNotes?.trim()
+                                ? c.generalNotes
+                                : 'No client notes.'}
+                            </div>
+                          ) : (
+                            <>
+                              <textarea
+                                value={
+                                  clientNotesDraft[c.id] !== undefined
+                                    ? clientNotesDraft[c.id]
+                                    : c.generalNotes || ''
+                                }
+                                onChange={(e) =>
+                                  setClientNotesDraft((prev) => ({
                                     ...prev,
-                                    [c.id]: true,
-                                  }));
-                                  try {
-                                    await updateDoc(doc('clients', c.id), {
-                                      generalNotes:
-                                        clientNotesDraft[c.id] ?? '',
-                                    });
-                                    logAudit?.({
-                                      type: 'client_notes_saved',
-                                      entityType: 'client',
-                                      entityId: c.id,
-                                      clientId: c.id,
-                                    });
-                                  } catch (err) {
-                                    window.alert(
-                                      `Could not save client notes: ${
-                                        err?.message || String(err)
-                                      }`,
-                                    );
-                                  } finally {
+                                    [c.id]: e.target.value,
+                                  }))
+                                }
+                                className="w-full bg-white border border-slate-200 p-4 rounded-2xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[110px] break-words"
+                                placeholder="Brand voice, important links, access details, preferences, etc."
+                              />
+                              <div className="flex justify-end">
+                                <button
+                                  onClick={async () => {
                                     setClientNotesSaving((prev) => ({
                                       ...prev,
-                                      [c.id]: false,
+                                      [c.id]: true,
                                     }));
-                                  }
-                                }}
-                                disabled={!!clientNotesSaving[c.id]}
-                                className="bg-black hover:bg-slate-800 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-30"
-                              >
-                                Save Notes
-                              </button>
-                            </div>
-                              </>
-                            )}
-                          </div>
-                        )}
+                                    try {
+                                      await updateDoc(doc('clients', c.id), {
+                                        generalNotes:
+                                          clientNotesDraft[c.id] ?? '',
+                                      });
+                                      logAudit?.({
+                                        type: 'client_notes_saved',
+                                        entityType: 'client',
+                                        entityId: c.id,
+                                        clientId: c.id,
+                                      });
+                                    } catch (err) {
+                                      window.alert(
+                                        `Could not save client notes: ${
+                                          err?.message || String(err)
+                                        }`,
+                                      );
+                                    } finally {
+                                      setClientNotesSaving((prev) => ({
+                                        ...prev,
+                                        [c.id]: false,
+                                      }));
+                                    }
+                                  }}
+                                  disabled={!!clientNotesSaving[c.id]}
+                                  className="bg-black hover:bg-slate-800 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-30"
+                                >
+                                  Save Notes
+                                </button>
+                              </div>
+                            </>
+                          )}
                         </div>
-                      </div>
-                    )}
-                    {(showClientSummary || showClientTimesheets) && (
                     <div>
-                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center justify-between">
+                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <span>Global Retainer Progress</span>
-                        <div className="flex items-center gap-2">
+                        <div className="client-action-toolbar flex flex-wrap items-center gap-2">
                           <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md">
                             {new Date(mStart).toLocaleDateString()} -{' '}
                             {new Date(mEnd).toLocaleDateString()}
@@ -4080,7 +4070,7 @@ const AdminDashboard = ({
                             <ChevronRight className="w-4 h-4" />
                           </button>
                           {isCycleLocked(c, mStart) && (
-                            <span className="hidden sm:inline-flex items-center px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-red-50 text-red-600 border border-red-100">
+                            <span className="inline-flex items-center px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-red-50 text-red-600 border border-red-100">
                               Cycle Locked
                             </span>
                           )}
@@ -4105,7 +4095,7 @@ const AdminDashboard = ({
                                     expenses,
                                   });
                                 }}
-                                className={`hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white border border-slate-200 text-slate-600 transition-colors ${
+                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white border border-slate-200 text-slate-600 transition-colors ${
                                   isRestrictedStaff
                                     ? 'opacity-40 cursor-not-allowed'
                                     : 'hover:bg-slate-50'
@@ -4139,7 +4129,7 @@ const AdminDashboard = ({
                                     addons,
                                   });
                                 }}
-                                className={`hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white border border-slate-200 text-slate-600 transition-colors ${
+                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white border border-slate-200 text-slate-600 transition-colors ${
                                   isRestrictedStaff
                                     ? 'opacity-40 cursor-not-allowed'
                                     : 'hover:bg-slate-50'
@@ -4186,7 +4176,7 @@ const AdminDashboard = ({
                                     addons,
                                   });
                                 }}
-                                className={`hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-black text-white transition-colors ${
+                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-black text-white transition-colors ${
                                   isRestrictedStaff
                                     ? 'opacity-40 cursor-not-allowed'
                                     : 'hover:bg-slate-800'
@@ -4224,7 +4214,7 @@ const AdminDashboard = ({
                                     window.prompt('Copy this link:', text);
                                   }
                                 }}
-                                className={`hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white border border-slate-200 text-slate-600 transition-colors ${
+                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white border border-slate-200 text-slate-600 transition-colors ${
                                   isRestrictedStaff
                                     ? 'opacity-40 cursor-not-allowed'
                                     : 'hover:bg-slate-50'
@@ -4262,7 +4252,7 @@ const AdminDashboard = ({
                                     cycleStart: mStart,
                                   });
                                 }}
-                                className={`hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest transition-colors border ${
+                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest transition-colors border ${
                                   isRestrictedStaff
                                     ? 'opacity-40 cursor-not-allowed border-slate-100 text-slate-300 bg-slate-50'
                                     : isCycleLocked(c, mStart)
@@ -4302,7 +4292,7 @@ const AdminDashboard = ({
                                   }
                                   setAddonModal(c);
                                 }}
-                                className={`hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-600 transition-colors ${
+                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-600 transition-colors ${
                                   isRestrictedStaff
                                     ? 'opacity-40 cursor-not-allowed'
                                     : 'hover:bg-emerald-100'
@@ -4334,7 +4324,7 @@ const AdminDashboard = ({
                                       hours: '',
                                     });
                                   }}
-                                  className={`hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-slate-50 text-slate-700 border border-slate-200 transition-colors ${
+                                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-slate-50 text-slate-700 border border-slate-200 transition-colors ${
                                     isRestrictedStaff
                                       ? 'opacity-40 cursor-not-allowed'
                                       : 'hover:bg-slate-100'
@@ -4375,75 +4365,47 @@ const AdminDashboard = ({
                           shift spare allowance between hour categories this cycle.
                         </div>
                       )}
-                  {isClientPage &&
-                    showClientSummary &&
-                    clientProjects &&
-                    clientProjects.length > 0 && (
-                      <div className="pt-3 border-t border-slate-100">
-                        <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
-                          Custom Projects
-                        </h5>
-                        <div className="space-y-3">
-                          {(() => {
-                            const todoStateForProjects = getTodoStateForCycle
-                              ? getTodoStateForCycle(c, mStart)
-                              : {};
-                            return clientProjects
-                              .filter(
-                                (p) =>
-                                  p &&
-                                  !(
-                                    safeProjectStatus(p) === 'closed' &&
-                                    p.invoiced
-                                  ),
-                              )
-                              .map((p) => {
-                                const catKey = todoCategoryKey
-                                  ? todoCategoryKey(`project_${p.id}`)
-                                  : `project_${p.id}`;
-                                const catTodo =
-                                  todoStateForProjects?.[catKey] || {
-                                    closed: false,
-                                    items: [],
-                                  };
-                                const items = catTodo.items || [];
-                                const total = items.length;
-                                const done = items.filter((i) => !!i.done).length;
-                                const pct =
-                                  total > 0 ? Math.min(100, (done / total) * 100) : 0;
-                                const barClass =
-                                  total === 0
-                                    ? 'bg-slate-200'
-                                    : done === total
-                                      ? 'bg-emerald-500'
-                                      : pct > 85
-                                        ? 'bg-orange-500'
-                                        : 'bg-emerald-500';
-
-                                return (
-                                  <div key={p.id}>
-                                    <div className="flex justify-between items-end mb-1 gap-3">
-                                      <span className="font-black text-[12px] text-slate-800 truncate">
-                                        {p.title}
-                                      </span>
-                                      <span className="text-[10px] font-black text-slate-500">
-                                        {done}/{total} done
-                                      </span>
-                                    </div>
-                                    <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden mb-1">
-                                      <div
-                                        className={`h-2 rounded-full ${barClass}`}
-                                        style={{ width: `${pct}%` }}
-                                      />
-                                    </div>
-                                  </div>
-                                );
-                              });
-                          })()}
-                        </div>
+                    </div>
                       </div>
                     )}
-                    </div>
+                    {isClientPage && showClientCycleActivity && (
+                      <ClientCycleActivityPanel
+                        client={c}
+                        cycleStart={mStart}
+                        cycleEnd={mEnd}
+                        stats={stats}
+                        periodTasks={periodTasks}
+                        periodExps={periodExps}
+                        periodProjectTasks={periodProjectTasks}
+                        periodProjectExps={periodProjectExps}
+                        getTodoStateForCycle={getTodoStateForCycle}
+                        todoCategoryKey={todoCategoryKey}
+                        projects={projects}
+                        formatTime={formatTime}
+                        getTaskDuration={getTaskDuration}
+                        canGoPrev={effectiveOffset > minCycleOffset}
+                        canGoNext={offset < 0}
+                        isCycleLocked={isCycleLocked(c, mStart)}
+                        onPrevCycle={() => {
+                          const newOffset = offset - 1;
+                          const p = getBillingPeriod(c.billingDay || 1, newOffset);
+                          if (c.clientStartDate && p.end < c.clientStartDate) return;
+                          mergeClientSearchParams({ cycle: p.start });
+                          setClientCycleOffsets((prev) => ({
+                            ...prev,
+                            [c.id]: newOffset,
+                          }));
+                        }}
+                        onNextCycle={() => {
+                          const newOffset = Math.min(0, offset + 1);
+                          const p = getBillingPeriod(c.billingDay || 1, newOffset);
+                          mergeClientSearchParams({ cycle: p.start });
+                          setClientCycleOffsets((prev) => ({
+                            ...prev,
+                            [c.id]: newOffset,
+                          }));
+                        }}
+                      />
                     )}
 
                     {isClientPage && showClientTimesheets && (
@@ -4683,196 +4645,6 @@ const AdminDashboard = ({
                       </div>
                     )}
 
-                    {/* General / Unclassified — Summary tab: compact list */}
-                    {isClientPage &&
-                      showClientSummary &&
-                      !showClientTasks &&
-                      getTodoStateForCycle &&
-                      updateClientTodo &&
-                      (() => {
-                        const cycleStart = mStart;
-                        const generalLabel = 'General / Unclassified';
-                        const catKey = todoCategoryKey(generalLabel);
-                        const todoState = getTodoStateForCycle(c, cycleStart);
-                        const catTodo = todoState[catKey] || {
-                          closed: false,
-                          items: [],
-                        };
-                        const items = catTodo.items || [];
-                        const displayItems = orderTodosForDisplay(items).filter(
-                          (item) =>
-                            taskMatchesStatus(item, 'open') &&
-                            itemMatchesDueWindowWithSubtasks(item, 'next7'),
-                        );
-                        if (!items.length && !catTodo.closed) return null;
-                        return (
-                          <div className="pt-2 border-t border-slate-100">
-                            <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
-                              To-do — {generalLabel}
-                            </h5>
-                            {catTodo.closed ? (
-                              <p className="text-xs text-slate-500 mb-2">
-                                Closed for this cycle. Use the{' '}
-                                <span className="font-black text-slate-700">
-                                  Tasks
-                                </span>{' '}
-                                tab to reopen or edit.
-                              </p>
-                            ) : (
-                              <ul className="space-y-2 mb-2">
-                                {displayItems.map((item) => {
-                                  const urgency = getTodoUrgencyStyles(item);
-                                  const subs = getSubtasks(item);
-                                  const stepsLeft = openSubtaskCount(item);
-                                  return (
-                                    <li
-                                      key={item.id}
-                                      className={`flex flex-col gap-2 rounded-lg p-2 min-w-0 max-w-full ${urgency.rowClass}`}
-                                    >
-                                      <div className="flex flex-wrap items-center gap-2 w-full min-w-0 max-w-full">
-                                        <input
-                                          type="checkbox"
-                                          checked={!!item.done}
-                                          onChange={async () => {
-                                            if (isCycleLocked(c, cycleStart))
-                                              return;
-                                            if (!item.done && !canMarkParentTodoDone(item)) {
-                                              window.alert(
-                                                'Complete every sub-task before marking this primary task complete.',
-                                              );
-                                              return;
-                                            }
-                                            setTodoSaving(true);
-                                            try {
-                                              const next = items.map((i) =>
-                                                i.id === item.id
-                                                  ? {
-                                                      ...i,
-                                                      done: !i.done,
-                                                      doneAt: !i.done
-                                                        ? Date.now()
-                                                        : null,
-                                                    }
-                                                  : i,
-                                              );
-                                              await updateClientTodo(
-                                                c,
-                                                cycleStart,
-                                                catKey,
-                                                { ...catTodo, items: next },
-                                              );
-                                            } finally {
-                                              setTodoSaving(false);
-                                            }
-                                          }}
-                                          disabled={todoSaving}
-                                          className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
-                                        />
-                                        <span
-                                          className={`flex-1 min-w-0 text-sm break-words ${urgency.textClass}`}
-                                        >
-                                          {item.text || '(no text)'}
-                                          {subs.length > 0 && !item.done && (
-                                            <span className="ml-2 text-[9px] font-bold text-slate-500">
-                                              ({stepsLeft} step{stepsLeft === 1 ? '' : 's'}{' '}
-                                              left)
-                                            </span>
-                                          )}
-                                        </span>
-                                        {item.pinned && (
-                                          <span className="text-[9px] font-black uppercase tracking-widest text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
-                                            Pinned
-                                          </span>
-                                        )}
-                                        {item.recurring && (
-                                          <span
-                                            className={`text-[9px] font-black uppercase tracking-widest ${urgency.metaClass}`}
-                                          >
-                                            Recurring
-                                          </span>
-                                        )}
-                                        {item.dueDate && (
-                                          <span
-                                            className={`text-[10px] font-black uppercase tracking-widest ${urgency.metaClass}`}
-                                          >
-                                            Due{' '}
-                                            {new Date(
-                                              item.dueDate,
-                                            ).toLocaleDateString()}
-                                          </span>
-                                        )}
-                                      </div>
-                                      {subs.length > 0 && (
-                                        <ul className="ml-4 sm:ml-6 border-l border-slate-200 pl-3 space-y-1 w-full min-w-0 max-w-full overflow-x-hidden">
-                                          {subs.map((sub) => {
-                                            const su = getTodoUrgencyStyles(sub);
-                                            return (
-                                              <li
-                                                key={sub.id}
-                                                className={`flex items-center gap-2 rounded-md px-2 py-1.5 min-w-0 max-w-full w-full overflow-hidden ${su.rowClass}`}
-                                              >
-                                                <input
-                                                  type="checkbox"
-                                                  checked={!!sub.done}
-                                                  onChange={async () => {
-                                                    if (isCycleLocked(c, cycleStart)) return;
-                                                    setTodoSaving(true);
-                                                    try {
-                                                      const next = items.map((i) =>
-                                                        i.id === item.id
-                                                          ? mapItemSubtasks(i, (s) =>
-                                                              s.id === sub.id
-                                                                ? {
-                                                                    ...s,
-                                                                    done: !s.done,
-                                                                    doneAt: !s.done
-                                                                      ? Date.now()
-                                                                      : null,
-                                                                  }
-                                                                : s,
-                                                            )
-                                                          : i,
-                                                      );
-                                                      await updateClientTodo(
-                                                        c,
-                                                        cycleStart,
-                                                        catKey,
-                                                        { ...catTodo, items: next },
-                                                      );
-                                                    } finally {
-                                                      setTodoSaving(false);
-                                                    }
-                                                  }}
-                                                  disabled={todoSaving}
-                                                  className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4 shrink-0"
-                                                />
-                                                <span
-                                                  className={`flex-1 min-w-0 text-sm break-words ${su.textClass}`}
-                                                >
-                                                  {safeDisplayForReact(sub.text) || '(sub-task)'}
-                                                  {sub.dueDate && (
-                                                    <span
-                                                      className={`ml-2 text-[10px] font-black uppercase tracking-widest ${su.metaClass}`}
-                                                    >
-                                                      Due{' '}
-                                                      {new Date(sub.dueDate).toLocaleDateString()}
-                                                    </span>
-                                                  )}
-                                                </span>
-                                              </li>
-                                            );
-                                          })}
-                                        </ul>
-                                      )}
-                                    </li>
-                                  );
-                                })}
-                              </ul>
-                            )}
-                          </div>
-                        );
-                      })()}
-
                     {/* General / Unclassified — Tasks tab: full controls + AI */}
                     {isClientPage && showClientTasks && getTodoStateForCycle && updateClientTodo && (
                       (() => {
@@ -4966,7 +4738,7 @@ const AdminDashboard = ({
                                       return (
                                       <li
                                         key={item.id}
-                                        className={`flex flex-col gap-1 rounded-lg p-2 ${urgency.rowClass}`}
+                                        className={`client-task-row flex flex-col gap-1 rounded-lg p-2 ${urgency.rowClass}`}
                                         onDragOver={(e) => {
                                           if (todoSaving || isCycleLocked(c, cycleStart) || !clientTodoFiltersAllowReorder)
                                             return;
@@ -5307,38 +5079,6 @@ const AdminDashboard = ({
                                     Add
                                   </button>
                                 </div>
-
-                                <button
-                                  type="button"
-                                  onClick={async () => {
-                                    if (todoSaving) return;
-                                    if (isCycleLocked(c, cycleStart))
-                                      return;
-                                    if (!allDone) return;
-                                    setTodoSaving(true);
-                                    try {
-                                      await updateClientTodo(c, cycleStart, catKey, {
-                                        ...catTodo,
-                                        closed: true,
-                                      });
-                                    } finally {
-                                      setTodoSaving(false);
-                                    }
-                                  }}
-                                  disabled={todoSaving || !allDone}
-                                  className={`text-xs font-bold hover:underline ${
-                                    allDone
-                                      ? 'text-emerald-600'
-                                      : 'text-slate-400 cursor-not-allowed'
-                                  }`}
-                                  title={
-                                    allDone
-                                      ? 'Close category when all items are done'
-                                      : 'Check off all sub items to close this category'
-                                  }
-                                >
-                                  Close category for this cycle
-                                </button>
                               </>
                             )}
                           </div>
@@ -5681,6 +5421,9 @@ const AdminDashboard = ({
                                   key={cat}
                                   className={[
                                     'min-w-0 max-w-full w-full',
+                                    isClientPage && showClientSummary
+                                      ? 'rounded-2xl border border-slate-100 bg-slate-50/60 p-3 sm:p-4 space-y-2'
+                                      : '',
                                     isClientPage && showClientTasks
                                       ? 'border-b border-slate-200 pb-5 mb-5 last:border-b-0 last:pb-0 last:mb-0'
                                       : '',
@@ -5719,6 +5462,38 @@ const AdminDashboard = ({
                                       </div>
                                       )}
                                     </div>
+
+                                    {isClientPage && showClientSummary && canBilling && !isDollarCategory && (
+                                      <button
+                                        type="button"
+                                        disabled={isRestrictedStaff}
+                                        onClick={() => {
+                                          if (isRestrictedStaff) return;
+                                          if (isCycleLocked(c, cycleStart)) {
+                                            window.alert(
+                                              'This billing cycle is locked. Unlock it to move hours between categories.',
+                                            );
+                                            return;
+                                          }
+                                          setRetainerMoveModal({
+                                            client: c,
+                                            mStart,
+                                            mEnd: period.end,
+                                            from: cat,
+                                            to: '',
+                                            hours: '',
+                                          });
+                                        }}
+                                        className={`shrink-0 px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-[9px] font-black uppercase tracking-widest text-slate-700 transition-colors ${
+                                          isRestrictedStaff
+                                            ? 'opacity-40 cursor-not-allowed'
+                                            : 'hover:bg-slate-50'
+                                        }`}
+                                        title={`Move hours involving ${cat}`}
+                                      >
+                                        Move
+                                      </button>
+                                    )}
 
                                     {isClientPage && showClientTimesheets &&
                                       (hasLogged ? (
@@ -5765,6 +5540,7 @@ const AdminDashboard = ({
                                   </div>
                                   )}
 
+                                  {(showClientTasks || showClientTimesheets) && (
                                   <div className="mt-2 flex flex-col space-y-4">
                                       {(() => {
                                         const catIsDollar = cat === 'Social Ad Budget' || c?.retainerUnits?.[cat] === 'dollar';
@@ -5872,220 +5648,6 @@ const AdminDashboard = ({
                                               )}
                                             </div>)}
                                             {isClientPage &&
-                                              showClientSummary &&
-                                              !showClientTasks &&
-                                              getTodoStateForCycle &&
-                                              updateClientTodo &&
-                                              (() => {
-                                                const todoState =
-                                                  getTodoStateForCycle(
-                                                    c,
-                                                    cycleStart,
-                                                  );
-                                                const catTodo = todoState[
-                                                  catKey
-                                                ] || { closed: false, items: [] };
-                                                const items = catTodo.items || [];
-                                                const displayItems =
-                                                  orderTodosForDisplay(items).filter(
-                                                    (item) =>
-                                                      taskMatchesStatus(item, 'open') &&
-                                                      itemMatchesDueWindowWithSubtasks(
-                                                        item,
-                                                        'next7',
-                                                      ),
-                                                  );
-                                                if (!items.length && !catTodo.closed)
-                                                  return null;
-                                                return (
-                                                  <div style={{ order: 8 }}>
-                                                    <h6 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
-                                                      To-dos
-                                                    </h6>
-                                                    {catTodo.closed ? (
-                                                      <p className="text-xs text-slate-500">
-                                                        Closed for this cycle — use{' '}
-                                                        <span className="font-black text-slate-700">
-                                                          Tasks
-                                                        </span>{' '}
-                                                        tab to manage.
-                                                      </p>
-                                                    ) : (
-                                                      <ul className="space-y-2 mb-1">
-                                                        {displayItems.map((item) => {
-                                                          const urgency =
-                                                            getTodoUrgencyStyles(
-                                                              item,
-                                                            );
-                                                          const subs = getSubtasks(item);
-                                                          const stepsLeft = openSubtaskCount(item);
-                                                          return (
-                                                            <li
-                                                              key={item.id}
-                                                              className={`flex flex-col gap-2 rounded-lg p-2 min-w-0 max-w-full ${urgency.rowClass}`}
-                                                            >
-                                                              <div className="flex flex-wrap items-center gap-2 w-full min-w-0 max-w-full">
-                                                                <input
-                                                                  type="checkbox"
-                                                                  checked={!!item.done}
-                                                                  onChange={async () => {
-                                                                    if (
-                                                                      isCycleLocked(
-                                                                        c,
-                                                                        cycleStart,
-                                                                      )
-                                                                    )
-                                                                      return;
-                                                                    if (!item.done && !canMarkParentTodoDone(item)) {
-                                                                      window.alert(
-                                                                        'Complete every sub-task before marking this primary task complete.',
-                                                                      );
-                                                                      return;
-                                                                    }
-                                                                    setTodoSaving(true);
-                                                                    try {
-                                                                      const next =
-                                                                        items.map(
-                                                                          (i) =>
-                                                                            i.id ===
-                                                                            item.id
-                                                                              ? {
-                                                                                  ...i,
-                                                                                  done: !i.done,
-                                                                                  doneAt:
-                                                                                    !i.done
-                                                                                      ? Date.now()
-                                                                                      : null,
-                                                                                }
-                                                                              : i,
-                                                                        );
-                                                                      await updateClientTodo(
-                                                                        c,
-                                                                        cycleStart,
-                                                                        catKey,
-                                                                        {
-                                                                          ...catTodo,
-                                                                          items: next,
-                                                                        },
-                                                                      );
-                                                                    } finally {
-                                                                      setTodoSaving(
-                                                                        false,
-                                                                      );
-                                                                    }
-                                                                  }}
-                                                                  disabled={todoSaving}
-                                                                  className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
-                                                                />
-                                                                <span
-                                                                  className={`flex-1 min-w-0 text-sm break-words ${urgency.textClass}`}
-                                                                >
-                                                                  {item.text ||
-                                                                    '(no text)'}
-                                                                  {subs.length > 0 && !item.done && (
-                                                                    <span className="ml-2 text-[9px] font-bold text-slate-500">
-                                                                      ({stepsLeft} step{stepsLeft === 1 ? '' : 's'}{' '}
-                                                                      left)
-                                                                    </span>
-                                                                  )}
-                                                                </span>
-                                                                {item.pinned && (
-                                                                  <span className="text-[9px] font-black uppercase tracking-widest text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
-                                                                    Pinned
-                                                                  </span>
-                                                                )}
-                                                                {item.recurring && (
-                                                                  <span
-                                                                    className={`text-[9px] font-black uppercase tracking-widest ${urgency.metaClass}`}
-                                                                  >
-                                                                    Recurring
-                                                                  </span>
-                                                                )}
-                                                                {item.dueDate && (
-                                                                  <span
-                                                                    className={`text-[10px] font-black uppercase tracking-widest ${urgency.metaClass}`}
-                                                                  >
-                                                                    Due{' '}
-                                                                    {new Date(
-                                                                      item.dueDate,
-                                                                    ).toLocaleDateString()}
-                                                                  </span>
-                                                                )}
-                                                              </div>
-                                                              {subs.length > 0 && (
-                                                                <ul className="ml-4 sm:ml-6 border-l border-slate-200 pl-3 space-y-1 w-full min-w-0 max-w-full overflow-x-hidden">
-                                                                  {subs.map((sub) => {
-                                                                    const su = getTodoUrgencyStyles(sub);
-                                                                    return (
-                                                                      <li
-                                                                        key={sub.id}
-                                                                        className={`flex items-center gap-2 rounded-md px-2 py-1.5 min-w-0 max-w-full w-full overflow-hidden ${su.rowClass}`}
-                                                                      >
-                                                                        <input
-                                                                          type="checkbox"
-                                                                          checked={!!sub.done}
-                                                                          onChange={async () => {
-                                                                            if (isCycleLocked(c, cycleStart)) return;
-                                                                            setTodoSaving(true);
-                                                                            try {
-                                                                              const next = items.map((i) =>
-                                                                                i.id === item.id
-                                                                                  ? mapItemSubtasks(i, (s) =>
-                                                                                      s.id === sub.id
-                                                                                        ? {
-                                                                                            ...s,
-                                                                                            done: !s.done,
-                                                                                            doneAt: !s.done
-                                                                                              ? Date.now()
-                                                                                              : null,
-                                                                                          }
-                                                                                        : s,
-                                                                                    )
-                                                                                  : i,
-                                                                              );
-                                                                              await updateClientTodo(
-                                                                                c,
-                                                                                cycleStart,
-                                                                                catKey,
-                                                                                {
-                                                                                  ...catTodo,
-                                                                                  items: next,
-                                                                                },
-                                                                              );
-                                                                            } finally {
-                                                                              setTodoSaving(false);
-                                                                            }
-                                                                          }}
-                                                                          disabled={todoSaving}
-                                                                          className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4 shrink-0"
-                                                                        />
-                                                                        <span
-                                                                          className={`flex-1 min-w-0 text-sm break-words ${su.textClass}`}
-                                                                        >
-                                                                          {safeDisplayForReact(sub.text) || '(sub-task)'}
-                                                                          {sub.dueDate && (
-                                                                            <span
-                                                                              className={`ml-2 text-[10px] font-black uppercase tracking-widest ${su.metaClass}`}
-                                                                            >
-                                                                              Due{' '}
-                                                                              {new Date(sub.dueDate).toLocaleDateString()}
-                                                                            </span>
-                                                                          )}
-                                                                        </span>
-                                                                      </li>
-                                                                    );
-                                                                  })}
-                                                                </ul>
-                                                              )}
-                                                            </li>
-                                                          );
-                                                        })}
-                                                      </ul>
-                                                    )}
-                                                  </div>
-                                                );
-                                              })()}
-                                            {isClientPage &&
                                               showClientTasks &&
                                               getTodoStateForCycle &&
                                               updateClientTodo &&
@@ -6158,7 +5720,7 @@ const AdminDashboard = ({
                                                             return (
                                                             <li
                                                               key={item.id}
-                                                              className={`flex flex-col gap-2 rounded-lg p-2 min-w-0 max-w-full ${urgency.rowClass}`}
+                                                              className={`client-task-row flex flex-col gap-2 rounded-lg p-2 min-w-0 max-w-full ${urgency.rowClass}`}
                                                             >
                                                               <div
                                                                 className="flex flex-wrap items-center gap-2 w-full min-w-0 max-w-full"
@@ -6715,45 +6277,13 @@ const AdminDashboard = ({
                                                             Add
                                                           </button>
                                                         </div>
-
-                                                        <button
-                                                          type="button"
-                                                          onClick={async () => {
-                                                            if (isCycleLocked(c, cycleStart)) return;
-                                                            if (!allDone) return;
-                                                            setTodoSaving(true);
-                                                            try {
-                                                              await updateClientTodo(
-                                                                c,
-                                                                cycleStart,
-                                                                catKey,
-                                                                { ...catTodo, closed: true },
-                                                              );
-                                                            } finally {
-                                                              setTodoSaving(false);
-                                                            }
-                                                          }}
-                                                          disabled={todoSaving || !allDone}
-                                                          className={`text-xs font-bold hover:underline ${
-                                                            allDone
-                                                              ? 'text-emerald-600'
-                                                              : 'text-slate-400 cursor-not-allowed'
-                                                          }`}
-                                                          title={
-                                                            allDone
-                                                              ? 'Close category when all items are done'
-                                                              : 'Check off all sub items to close this category'
-                                                          }
-                                                        >
-                                                          Close category for this cycle
-                                                        </button>
                                                       </div>
                                                     </>
                                                   )}
                                                 </div>
                                               );
                                             })()}
-                                            {isClientPage && showClientSummary && (
+                                            {isClientPage && showClientTasks && (
                                             <div style={{ order: 20 }}>
                                               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
                                                 Cycle note
@@ -6863,6 +6393,7 @@ const AdminDashboard = ({
                                         );
                                       })()}
                                     </div>
+                                  )}
                                 </div>
                               );
                             })}
