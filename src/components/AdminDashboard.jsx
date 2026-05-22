@@ -5938,6 +5938,19 @@ const AdminDashboard = ({
                                                                 <Trash2 className="w-4 h-4" />
                                                               </button>
                                                               </div>
+                                                              {uploadClientDocument && (
+                                                                <TodoItemAttachments
+                                                                  item={item}
+                                                                  client={c}
+                                                                  cycleStart={cycleStart}
+                                                                  categoryKey={catKey}
+                                                                  disabled={
+                                                                    todoSaving || isCycleLocked(c, cycleStart)
+                                                                  }
+                                                                  onAttach={uploadClientDocument}
+                                                                  onRemove={removeClientDocument}
+                                                                />
+                                                              )}
                                                               {subs.length > 0 && (
                                                                 <ul className="ml-3 border-l border-slate-200 pl-3 space-y-2 w-full min-w-0 max-w-full overflow-x-hidden">
                                                                   {subs.map((sub) => {

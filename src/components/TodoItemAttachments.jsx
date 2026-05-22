@@ -41,7 +41,9 @@ export default function TodoItemAttachments({
 
   return (
     <div
-      className={`${compact ? 'ml-8' : 'ml-10'} space-y-1.5 pb-1 ${compact ? '' : 'border-l border-slate-200 pl-3'}`}
+      className={`w-full space-y-1.5 ${
+        compact ? 'ml-8' : 'pt-1'
+      } ${attachments.length > 0 && !compact ? 'border-l border-slate-200 pl-3 ml-1' : ''}`}
     >
       {attachments.map((doc) => (
         <div
@@ -88,11 +90,11 @@ export default function TodoItemAttachments({
       ))}
       {onAttach && !disabled && !atLimit && (
         <label
-          className={`inline-flex cursor-pointer items-center gap-1 text-[10px] font-black uppercase tracking-widest text-[#fd7414] hover:underline ${
+          className={`inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-[9px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 ${
             uploading ? 'pointer-events-none opacity-40' : ''
           }`}
         >
-          <Paperclip className="h-3 w-3" />
+          <Paperclip className="h-3.5 w-3.5 text-[#fd7414]" />
           {uploading ? 'Uploading…' : 'Attach file'}
           <input
             type="file"
