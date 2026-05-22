@@ -3927,7 +3927,7 @@ const AdminDashboard = ({
                             documents={c.documents || []}
                             onUpload={uploadClientDocument}
                             onRemove={removeClientDocument}
-                            disabled={isCycleLocked(c, cycleStart) || !uploadClientDocument}
+                            disabled={isCycleLocked(c, mStart) || !uploadClientDocument}
                             canDelete={!isRestrictedStaff}
                           />
                         </div>
