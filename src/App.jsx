@@ -87,6 +87,11 @@ import {
   removeDocumentFromTodoCycles,
   validateClientUploadFile,
 } from './utils/clientDocuments.js';
+import {
+  getEnabledRetainerCategoryNames,
+  isRetainerCategoryEnabled,
+  normalizeRetainerCategoryEnabled,
+} from './utils/retainerCategories.js';
 import { getSubtasks, newSubtaskId, projectSubtaskDueDateForNewCycle } from './utils/todoSubtasks.js';
 import {
   Routes,
@@ -679,9 +684,9 @@ export default function App() {
     setSelectedBillingTarget('');
   }, [clients, selectedClient, activeTask?.clientName]);
   const selectableRetainers = selectedClientObj
-    ? Object.entries(selectedClientObj.retainers || {}).map(([name, hours]) => ({
+    ? getEnabledRetainerCategoryNames(selectedClientObj).map((name) => ({
         name,
-        enabled: Number(hours) > 0,
+        enabled: true,
       }))
     : [];
   const GENERAL_LABEL = 'General / Unclassified';
@@ -1408,7 +1413,7 @@ export default function App() {
     // Carry over *all* previously-existing category keys (including custom project
     // task categories), not just retainer categories + General.
     const categoryKeys = new Set([
-      ...Object.keys(client.retainers || {}).map((cat) => todoCategoryKey(cat)),
+      ...getEnabledRetainerCategoryNames(client).map((cat) => todoCategoryKey(cat)),
       todoCategoryKey(GENERAL_LABEL),
       ...Object.keys(prevData),
     ]);
@@ -1489,7 +1494,7 @@ export default function App() {
     // Ensure we create the current-cycle objects for any category keys that
     // existed in the previous cycle (again, includes custom project to-dos).
     const categoryKeys = new Set([
-      ...Object.keys(client.retainers || {}).map((cat) => todoCategoryKey(cat)),
+      ...getEnabledRetainerCategoryNames(client).map((cat) => todoCategoryKey(cat)),
       todoCategoryKey(GENERAL_LABEL),
       ...Object.keys(prevData),
     ]);
@@ -1775,7 +1780,7 @@ export default function App() {
   const getGlobalRetainerStats = (client, mStart, mEnd) => {
     /** Split add-on hours across hour retainer lines; matched category gets full amount, else even split. */
     const allocateAddonHoursByCategory = (addonRows) => {
-      const hourCats = Object.keys(client.retainers || {}).filter(
+      const hourCats = getEnabledRetainerCategoryNames(client).filter(
         (cat) => !isDollarCategory(client, cat),
       );
       const alloc = {};
@@ -1824,7 +1829,7 @@ export default function App() {
       .filter((a) => !clientStartMs || a.date >= clientStartMs)
       .filter((a) => !globalResetMs || a.date >= globalResetMs);
 
-    const retainerCategories = Object.keys(client.retainers || {});
+    const retainerCategories = getEnabledRetainerCategoryNames(client);
     const normalizeCategory = (value) =>
       String(value || '').trim().toLowerCase();
     const categoryByNormalized = retainerCategories.reduce((acc, cat) => {
@@ -2015,14 +2020,14 @@ export default function App() {
     currentTasks.forEach((t) => {
       if (t.projectName === GENERAL_LABEL) return;
       const cat = canonicalCategory(t.projectName);
-      if (!client.retainers?.[cat]) return;
+      if (!client.retainers?.[cat] || !isRetainerCategoryEnabled(client, cat)) return;
       categoryBreakdown[cat] = (categoryBreakdown[cat] || 0) + hoursInBillingWindow(t);
     });
 
     // Dollar categories use finalCost; hour categories use equivalentHours.
     currentExps.forEach((e) => {
       const cat = canonicalCategory(e.category);
-      if (!cat || !client.retainers?.[cat]) return;
+      if (!cat || !client.retainers?.[cat] || !isRetainerCategoryEnabled(client, cat)) return;
       if (isDollarCategory(client, cat)) {
         categoryBreakdown[cat] = (categoryBreakdown[cat] || 0) + (Number(e.finalCost) || 0);
       } else {
@@ -2073,7 +2078,7 @@ export default function App() {
       (s, cat) => s + Number(categoryBreakdown?.[cat] || 0),
       0,
     );
-    const retainerLineNames = new Set(Object.keys(client.retainers || {}));
+    const retainerLineNames = new Set(getEnabledRetainerCategoryNames(client));
     const unattributedTaskHours = currentTasks.reduce((acc, t) => {
       const pn = canonicalCategory(t.projectName || '');
       const h = hoursInBillingWindow(t);
@@ -2736,7 +2741,20 @@ export default function App() {
                   <select value={manualTaskValues.billingTarget} onChange={e => setManualTaskValues({...manualTaskValues, billingTarget: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]">
                     <option value="">Select Target...</option>
                     <optgroup label="Monthly Retainers">
-                      {activeTaskTypes.map(t => <option key={t} value={`retainer_${t}`}>{t}</option>)}
+                      <option value={`retainer_${GENERAL_LABEL}`}>{GENERAL_LABEL}</option>
+                      {manualTaskValues.clientName &&
+                        (() => {
+                          const client = clients.find(
+                            (c) => c.name === manualTaskValues.clientName,
+                          );
+                          return getEnabledRetainerCategoryNames(client || {}).map(
+                            (t) => (
+                              <option key={t} value={`retainer_${t}`}>
+                                {t}
+                              </option>
+                            ),
+                          );
+                        })()}
                     </optgroup>
                     {clientActiveProjectsManual.length > 0 && (
                       <optgroup label="Custom Projects">
@@ -2822,7 +2840,11 @@ export default function App() {
                     <select value={expenseValues.billingTarget} onChange={e => setExpenseValues({...expenseValues, billingTarget: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-blue-500">
                       <option value="">Select Target...</option>
                       <optgroup label="Monthly Retainers">
-                        {Object.keys(expenseModal.retainers || {}).map(t => <option key={t} value={`retainer_${t}`}>{t}</option>)}
+                        {getEnabledRetainerCategoryNames(expenseModal).map((t) => (
+                          <option key={t} value={`retainer_${t}`}>
+                            {t}
+                          </option>
+                        ))}
                       </optgroup>
                       {clientActiveProjectsExp.length > 0 && (
                         <optgroup label="Custom Projects">
@@ -2980,7 +3002,9 @@ export default function App() {
                       <option value="">Select target...</option>
                       {editValues.clientName && (() => {
                         const client = clients.find(c => c.name === editValues.clientName);
-                        const retainers = client?.retainers ? Object.keys(client.retainers) : [];
+                        const retainers = client
+                          ? getEnabledRetainerCategoryNames(client)
+                          : [];
                         const clientProjs = projects.filter(p => !p.archived && p.clientName === editValues.clientName && (p.status === 'active' || p.status === 'approved'));
                         return (
                           <>
@@ -3437,7 +3461,10 @@ export default function App() {
                   <span className="mx-1 font-black text-amber-700">
                     Reset Carryover
                   </span>
-                  button.
+                  button. Toggle
+                  <span className="mx-1 font-black text-slate-600">Active</span>
+                  off for services this client does not receive — disabled
+                  categories are hidden everywhere in the app.
                 </p>
                 <div className="space-y-3">
                   {retainerConfigCategories.map((type) => {
@@ -3446,15 +3473,48 @@ export default function App() {
                     const step = units === 'dollar' ? 1 : 0.5;
                     const categoryResetKey = carryoverCategoryKey(type);
                     const lastCategoryReset = editingClient.carryoverResetByCategory?.[categoryResetKey];
+                    const categoryActive = isRetainerCategoryEnabled(editingClient, type);
                     return (
                       <div
                         key={type}
-                        className="flex justify-between items-start bg-slate-50 p-4 rounded-2xl border border-slate-100 gap-3"
+                        className={`flex justify-between items-start p-4 rounded-2xl border gap-3 transition-opacity ${
+                          categoryActive
+                            ? 'bg-slate-50 border-slate-100'
+                            : 'bg-slate-100/80 border-slate-200 opacity-70'
+                        }`}
                       >
-                        <div className="flex flex-col">
-                          <span className="font-bold text-slate-700 text-sm">
-                            {type}
-                          </span>
+                        <div className="flex flex-col gap-2 min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-3">
+                            <span className="font-bold text-slate-700 text-sm">
+                              {type}
+                            </span>
+                            <label className="inline-flex items-center gap-2 cursor-pointer shrink-0">
+                              <input
+                                type="checkbox"
+                                checked={categoryActive}
+                                onChange={(e) => {
+                                  const enabled = e.target.checked;
+                                  setEditingClient({
+                                    ...editingClient,
+                                    retainerCategoryEnabled: {
+                                      ...(editingClient.retainerCategoryEnabled || {}),
+                                      [type]: enabled,
+                                    },
+                                    retainers: {
+                                      ...(editingClient.retainers || {}),
+                                      [type]:
+                                        editingClient.retainers?.[type] ??
+                                        0,
+                                    },
+                                  });
+                                }}
+                                className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414]"
+                              />
+                              <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                                Active for this client
+                              </span>
+                            </label>
+                          </div>
                           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                             {units === 'dollar' ? 'Per-cycle budget (dollars)' : 'Allocation in hours'}
                           </span>
@@ -3499,6 +3559,7 @@ export default function App() {
                         <div className="flex items-center gap-2">
                           <select
                             value={units}
+                            disabled={!categoryActive}
                             onChange={(e) =>
                               setEditingClient({
                                 ...editingClient,
@@ -3514,6 +3575,7 @@ export default function App() {
                             type="number"
                             min="0"
                             step={step}
+                            disabled={!categoryActive}
                             value={editingClient.retainers?.[type] || ''}
                             onChange={(e) =>
                               setEditingClient({
@@ -3605,6 +3667,9 @@ export default function App() {
                     phone: String(editingClient.phone || '').trim(),
                     googleDriveFolderUrl: String(editingClient.googleDriveFolderUrl || '').trim(),
                     hubspotProfileUrl: String(editingClient.hubspotProfileUrl || '').trim(),
+                    retainerCategoryEnabled: normalizeRetainerCategoryEnabled(
+                      editingClient.retainerCategoryEnabled,
+                    ),
                     primaryContact: normalizePrimaryContact(editingClient.primaryContact),
                     contacts: normalizeClientContacts(editingClient.contacts),
                   });

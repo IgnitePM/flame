@@ -1,8 +1,13 @@
 import { getSubtasks } from './todoSubtasks.js';
+import {
+  getRetainerCategoryNameFromKey,
+  isRetainerCategoryEnabled,
+} from './retainerCategories.js';
 
 function buildCategoryLabelMap(client, projects, todoCategoryKey) {
   const map = {};
   Object.keys(client?.retainers || {}).forEach((cat) => {
+    if (!isRetainerCategoryEnabled(client, cat)) return;
     map[cat.replace(/[~*[\]/]/g, '_').replace(/\./g, '_')] = cat;
   });
   map['General___Unclassified'] = 'General / Unclassified';
@@ -28,6 +33,12 @@ export function collectCompletedTodosForCycle(
   const rows = [];
 
   for (const [catKey, catTodo] of Object.entries(todoState)) {
+    const catName = getRetainerCategoryNameFromKey(
+      client,
+      catKey,
+      todoCategoryKey,
+    );
+    if (catName && !isRetainerCategoryEnabled(client, catName)) continue;
     const categoryLabel = labelMap[catKey] || catKey;
     for (const item of catTodo?.items || []) {
       if (item?.done && item?.doneAt) {
@@ -55,10 +66,19 @@ export function collectCompletedTodosForCycle(
   return rows.sort((a, b) => b.doneAt - a.doneAt);
 }
 
-export function collectCycleNotesForCycle(client, cycleStart) {
+export function collectCycleNotesForCycle(client, cycleStart, todoCategoryKey) {
   const raw = client?.cycleNotes?.[String(cycleStart)] || {};
   return Object.entries(raw)
-    .filter(([, text]) => String(text || '').trim())
+    .filter(([catKey, text]) => {
+      if (!String(text || '').trim()) return false;
+      const catName = getRetainerCategoryNameFromKey(
+        client,
+        catKey,
+        todoCategoryKey,
+      );
+      if (catName && !isRetainerCategoryEnabled(client, catName)) return false;
+      return true;
+    })
     .map(([catKey, text]) => ({
       catKey,
       text: String(text).trim(),
@@ -67,7 +87,13 @@ export function collectCycleNotesForCycle(client, cycleStart) {
 
 export function collectHourMovesForCycle(client, cycleStart) {
   const moves = client?.retainerHourMovesByCycle?.[String(cycleStart)] || [];
-  return (Array.isArray(moves) ? moves : []).map((m) => ({
+  return (Array.isArray(moves) ? moves : [])
+    .filter(
+      (m) =>
+        isRetainerCategoryEnabled(client, m.from) &&
+        isRetainerCategoryEnabled(client, m.to),
+    )
+    .map((m) => ({
     from: m.from,
     to: m.to,
     hours: Number(m.hours || 0),

@@ -1,6 +1,11 @@
 import React from 'react';
 import { orderTodosForDisplay } from '../utils/todoListOrder.js';
 import {
+  clientHasEnabledRetainers,
+  getEnabledRetainerCategoryEntries,
+  getEnabledRetainerCategoryNames,
+} from '../utils/retainerCategories.js';
+import {
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -70,7 +75,7 @@ const ClientPortal = ({
       ? getTodoStateForCycle(clientProfile, mStart) || {}
       : {};
   const labelForTodoCategoryKey = (key) => {
-    const hit = Object.keys(clientProfile.retainers || {}).find(
+    const hit = getEnabledRetainerCategoryNames(clientProfile).find(
       (cat) => todoCategoryKey(cat) === key,
     );
     if (hit) return hit;
@@ -247,14 +252,13 @@ const ClientPortal = ({
                 )}
               </div>
 
-              {clientProfile.retainers &&
-                Object.keys(clientProfile.retainers).length > 0 && (
+              {clientHasEnabledRetainers(clientProfile) && (
                   <div className="pt-4 border-t border-slate-100">
                     <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">
                       Retainer Categories
                     </h4>
                     <div className="space-y-3">
-                      {Object.entries(clientProfile.retainers).map(
+                      {getEnabledRetainerCategoryEntries(clientProfile).map(
                         ([cat, base]) => {
                           const used = stats.categoryBreakdown[cat] || 0;
                           const pct =

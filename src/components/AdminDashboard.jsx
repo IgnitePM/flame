@@ -61,6 +61,11 @@ import {
 } from '../utils/todoSubtasks.js';
 import { recurringAnchorKey } from '../utils/recurringTodoMaterialize.js';
 import { safeDisplayForReact } from '../utils/safeReactText.js';
+import {
+  clientHasEnabledRetainers,
+  getEnabledRetainerCategoryEntries,
+  getEnabledRetainerCategoryNames,
+} from '../utils/retainerCategories.js';
 import ClientProfileSummary from './ClientProfileSummary.jsx';
 import ClientFilesPanel from './ClientFilesPanel.jsx';
 import ClientCycleActivityPanel from './ClientCycleActivityPanel.jsx';
@@ -5137,9 +5142,8 @@ const AdminDashboard = ({
 
                                   setAiTodoLoading(true);
                                   try {
-                                    const retainerCategories = Object.keys(
-                                      c.retainers || {},
-                                    );
+                                    const retainerCategories =
+                                      getEnabledRetainerCategoryNames(c);
                                     const res = await fetch(
                                       '/.netlify/functions/gemini-extract-todos',
                                       {
@@ -5362,8 +5366,7 @@ const AdminDashboard = ({
                       </div>
                     )}
 
-                    {c.retainers &&
-                      Object.keys(c.retainers).length > 0 &&
+                    {clientHasEnabledRetainers(c) &&
                       stats &&
                       stats.categoryBreakdown &&
                       (showClientSummary ||
@@ -5374,7 +5377,7 @@ const AdminDashboard = ({
                             Retainer Categories
                           </h5>
                           <div className="space-y-2 min-w-0 max-w-full">
-                            {Object.entries(c.retainers)
+                            {getEnabledRetainerCategoryEntries(c)
                               .sort((a, b) => {
                                 const ai = getRetainerCategorySortIndex(a[0]);
                                 const bi = getRetainerCategorySortIndex(b[0]);
@@ -7614,7 +7617,7 @@ const AdminDashboard = ({
             </div>
             {(() => {
               const c = retainerMoveModal.client;
-              const hourCats = Object.keys(c.retainers || {}).filter(
+              const hourCats = getEnabledRetainerCategoryNames(c).filter(
                 (cat) =>
                   cat !== 'Social Ad Budget' &&
                   c.retainerUnits?.[cat] !== 'dollar',

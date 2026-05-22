@@ -1,5 +1,9 @@
 import { orderTodosForDisplay } from "./todoListOrder.js";
 import { isClientActiveForWork } from "./clientActiveForWork.js";
+import {
+  isRetainerCategoryEnabled,
+  isTodoCategoryKeyVisible,
+} from "./retainerCategories.js";
 
 /**
  * Build flat rows for all clients' current-cycle to-dos (same shape as AdminDashboard globalTodoRows).
@@ -11,6 +15,7 @@ function buildLabelMap(c, projects, todoCategoryKey) {
       .replace(/\./g, "_");
   const labelMap = {};
   Object.keys(c.retainers || {}).forEach((cat) => {
+    if (!isRetainerCategoryEnabled(c, cat)) return;
     labelMap[keyOf(cat)] = cat;
   });
   labelMap[keyOf("General / Unclassified")] = "General / Unclassified";
@@ -28,6 +33,7 @@ function buildLabelMap(c, projects, todoCategoryKey) {
 function rowsForClientCycle(c, cycleStart, todoState, projects, todoCategoryKey) {
   const labelMap = buildLabelMap(c, projects, todoCategoryKey);
   return Object.entries(todoState || {}).flatMap(([catKey, catTodo]) => {
+    if (!isTodoCategoryKeyVisible(c, catKey, todoCategoryKey)) return [];
     const items = catTodo?.items || [];
     return orderTodosForDisplay(items).map((item) => ({
       clientId: c.id,

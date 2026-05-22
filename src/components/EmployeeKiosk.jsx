@@ -27,6 +27,10 @@ import ClientProfileSummary from './ClientProfileSummary.jsx';
 import { buildGlobalTodoRows } from '../utils/todoGlobalRows.js';
 import { isClientActiveForWork } from '../utils/clientActiveForWork.js';
 import {
+  clientHasEnabledRetainers,
+  getEnabledRetainerCategoryNames,
+} from '../utils/retainerCategories.js';
+import {
   buildKioskBillingTargetFromTodoRow,
   globalAdminTaskRowMatchesFilters,
   todoRowMatchesFilters,
@@ -605,7 +609,7 @@ const EmployeeKiosk = ({
   const resolveClientCategoryName = React.useCallback(
     (rawName) => {
       const raw = String(rawName || '');
-      const keys = Object.keys(selectedClientObj?.retainers || {});
+      const keys = getEnabledRetainerCategoryNames(selectedClientObj || {});
       const byNorm = keys.find(
         (k) => normalizeCategoryName(k) === normalizeCategoryName(raw),
       );
@@ -894,8 +898,8 @@ const EmployeeKiosk = ({
     const now = Date.now();
     const rows = [];
 
-    const clientList = kioskAccessibleClients.filter(
-      (c) => c.retainers && Object.keys(c.retainers).length > 0,
+    const clientList = kioskAccessibleClients.filter((c) =>
+      clientHasEnabledRetainers(c),
     );
 
     for (const client of clientList) {
@@ -906,7 +910,7 @@ const EmployeeKiosk = ({
       } catch {
         continue;
       }
-      const cats = Object.keys(client.retainers || {});
+      const cats = getEnabledRetainerCategoryNames(client);
       for (const cat of cats) {
         const pc = stats?.perCategory?.[cat];
         if (!pc) continue;
@@ -2729,9 +2733,10 @@ const EmployeeKiosk = ({
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold"
                 >
                   <option value="">Select category…</option>
-                  {Object.keys(
-                    (clients || []).filter(isClientActiveForWork).find((c) => c.id === linkPickClientId)?.retainers ||
-                      {},
+                  {getEnabledRetainerCategoryNames(
+                    (clients || [])
+                      .filter(isClientActiveForWork)
+                      .find((c) => c.id === linkPickClientId) || {},
                   ).map((name) => (
                     <option key={name} value={name}>
                       {name}

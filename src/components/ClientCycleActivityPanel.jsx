@@ -5,6 +5,7 @@ import {
   collectCycleNotesForCycle,
   collectHourMovesForCycle,
 } from '../utils/cycleActivity.js';
+import { getEnabledRetainerCategoryNames } from '../utils/retainerCategories.js';
 import { safeDisplayForReact } from '../utils/safeReactText.js';
 
 function Section({ title, children, empty }) {
@@ -55,8 +56,8 @@ export default function ClientCycleActivityPanel({
   );
 
   const cycleNotes = React.useMemo(
-    () => collectCycleNotesForCycle(client, cycleStart),
-    [client, cycleStart],
+    () => collectCycleNotesForCycle(client, cycleStart, todoCategoryKey),
+    [client, cycleStart, todoCategoryKey],
   );
 
   const hourMoves = React.useMemo(
@@ -68,8 +69,8 @@ export default function ClientCycleActivityPanel({
     (a, b) => Number(a.clockInTime || 0) - Number(b.clockInTime || 0),
   );
 
-  const categoryUsage = Object.entries(client?.retainers || {})
-    .map(([cat]) => {
+  const categoryUsage = getEnabledRetainerCategoryNames(client)
+    .map((cat) => {
       const catStats = stats?.perCategory?.[cat];
       const used = Number(stats?.categoryBreakdown?.[cat] || 0);
       const allotted = Number(catStats?.adjustedAllotted || client.retainers?.[cat] || 0);
