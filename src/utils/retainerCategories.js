@@ -53,6 +53,19 @@ export function getRetainerCategoryNameFromKey(client, categoryKey, todoCategory
 
 export function isTodoCategoryKeyVisible(client, categoryKey, todoCategoryKeyFn) {
   const catName = getRetainerCategoryNameFromKey(client, categoryKey, todoCategoryKeyFn);
+  // General, custom project, and legacy keys stay visible.
   if (!catName) return true;
+  // Assigned/open work must remain visible even when a category is disabled for new budgets.
+  if (categoryHasOpenTodos(client, categoryKey)) return true;
   return isRetainerCategoryEnabled(client, catName);
+}
+
+export function categoryHasOpenTodos(client, categoryKey) {
+  const cycles = client?.todoCycles;
+  if (!cycles || typeof cycles !== 'object') return false;
+  for (const cycleData of Object.values(cycles)) {
+    const catTodo = cycleData?.[categoryKey];
+    if ((catTodo?.items || []).some((item) => !item?.done)) return true;
+  }
+  return false;
 }

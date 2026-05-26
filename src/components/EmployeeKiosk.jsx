@@ -8,9 +8,9 @@ import {
   Pause,
   Play,
 } from 'lucide-react';
-import { orderTodosForDisplay } from '../utils/todoListOrder.js';
 import {
   canKioskStaffAddSubtasksToItem,
+  canKioskStaffSeeTodoItem,
   canMarkParentTodoDone,
   clampAllSubtaskDueDatesToParent,
   clampSubtaskDueToParent,
@@ -29,6 +29,7 @@ import { isClientActiveForWork } from '../utils/clientActiveForWork.js';
 import {
   clientHasEnabledRetainers,
   getEnabledRetainerCategoryNames,
+  getRetainerCategoryNameFromKey,
 } from '../utils/retainerCategories.js';
 import {
   buildKioskBillingTargetFromTodoRow,
@@ -98,7 +99,9 @@ const EmployeeKiosk = ({
   const [todoSaving, setTodoSaving] = React.useState(false);
   const [todoDueDate, setTodoDueDate] = React.useState('');
   const [kioskTaskAssigneeFilter, setKioskTaskAssigneeFilter] = React.useState('me');
-  const [categoryTodoMineOnly, setCategoryTodoMineOnly] = React.useState(true);
+  const [categoryTodoMineOnly, setCategoryTodoMineOnly] = React.useState(
+    () => currentUserRole !== 'kiosk',
+  );
   const [kioskTaskStatusFilter, setKioskTaskStatusFilter] = React.useState('open');
   const [kioskTaskDueFilter, setKioskTaskDueFilter] = React.useState('next30');
   const [kioskTaskSortMode, setKioskTaskSortMode] = React.useState('due');
@@ -142,6 +145,27 @@ const EmployeeKiosk = ({
     String(category)
       .replace(/[~*[\]/]/g, '_')
       .replace(/\./g, '_');
+
+  const kioskRowMatchesSelectedCategory = React.useCallback(
+    (row, client, categoryName) => {
+      if (!row || !client || !categoryName) return false;
+      const wantKey = todoCategoryKey
+        ? todoCategoryKey(categoryName)
+        : safeCategoryKey(categoryName);
+      if (String(row.categoryKey) === String(wantKey)) return true;
+      const fromKey = getRetainerCategoryNameFromKey(
+        client,
+        row.categoryKey,
+        todoCategoryKey,
+      );
+      return (
+        normalizeCategoryName(fromKey) === normalizeCategoryName(categoryName) ||
+        normalizeCategoryName(row.categoryLabel) ===
+          normalizeCategoryName(categoryName)
+      );
+    },
+    [todoCategoryKey],
+  );
 
   const parseDateInputToMs = (value) => {
     if (!value) return null;
@@ -609,13 +633,27 @@ const EmployeeKiosk = ({
   const resolveClientCategoryName = React.useCallback(
     (rawName) => {
       const raw = String(rawName || '');
-      const keys = getEnabledRetainerCategoryNames(selectedClientObj || {});
-      const byNorm = keys.find(
+      const keys = new Set([
+        ...Object.keys(selectedClientObj?.retainers || {}),
+        ...Object.keys(selectedClientObj?.retainerCategoryEnabled || {}),
+      ]);
+      for (const cycleData of Object.values(selectedClientObj?.todoCycles || {})) {
+        if (!cycleData || typeof cycleData !== 'object') continue;
+        for (const catKey of Object.keys(cycleData)) {
+          const resolved = getRetainerCategoryNameFromKey(
+            selectedClientObj,
+            catKey,
+            todoCategoryKey,
+          );
+          if (resolved) keys.add(resolved);
+        }
+      }
+      const byNorm = [...keys].find(
         (k) => normalizeCategoryName(k) === normalizeCategoryName(raw),
       );
       return byNorm || raw;
     },
-    [selectedClientObj],
+    [selectedClientObj, todoCategoryKey],
   );
   const cycleStart = selectedClientObj
     ? getBillingPeriod(selectedClientObj.billingDay || 1, 0).start
@@ -856,12 +894,104 @@ const EmployeeKiosk = ({
     ],
   );
 
+  const categoryKioskTodoRows = React.useMemo(() => {
+    if (!selectedClientObj || !selectedRetainerCategory) return [];
+    let rows = globalTodoRows.filter(
+      (row) =>
+        row.clientId === selectedClientObj.id &&
+        kioskRowMatchesSelectedCategory(
+          row,
+          selectedClientObj,
+          selectedRetainerCategory,
+        ) &&
+        !row.item?.done,
+    );
+    if (categoryTodoMineOnly) {
+      if (canManageClientTodos) {
+        rows = rows.filter((row) =>
+          collectEffectiveAssigneesForTodoTree(row.item, user?.email).includes(
+            meLower,
+          ),
+        );
+      } else {
+        rows = rows.filter((row) =>
+          canKioskStaffSeeTodoItem(row.item, meLower, {
+            allowManageAll: canManageClientTodos,
+          }),
+        );
+      }
+    }
+    return kioskTaskSortMode === 'client'
+      ? sortTodoRowsByClientThenDue(rows)
+      : sortTodoRowsByDueThenClient(rows);
+  }, [
+    globalTodoRows,
+    selectedClientObj,
+    selectedRetainerCategory,
+    categoryTodoMineOnly,
+    canManageClientTodos,
+    meLower,
+    user?.email,
+    kioskTaskSortMode,
+    kioskRowMatchesSelectedCategory,
+  ]);
+
+  const currentCycleCategoryTodo = React.useMemo(() => {
+    if (
+      !getTodoStateForCycle ||
+      !selectedClientObj ||
+      !selectedRetainerCategory ||
+      !cycleStart
+    ) {
+      return null;
+    }
+    const catKey = todoCategoryKey
+      ? todoCategoryKey(selectedRetainerCategory)
+      : safeCategoryKey(selectedRetainerCategory);
+    const todoState = getTodoStateForCycle(selectedClientObj, cycleStart);
+    const catTodo = todoState[catKey] || { closed: false, items: [] };
+    return {
+      catKey,
+      catTodo,
+      allItems: catTodo.items || [],
+    };
+  }, [
+    getTodoStateForCycle,
+    selectedClientObj,
+    selectedRetainerCategory,
+    cycleStart,
+    todoCategoryKey,
+  ]);
+
+  const categoryTodoShowsPriorCycle = React.useMemo(
+    () =>
+      !!(
+        cycleStart &&
+        categoryKioskTodoRows.some(
+          (row) => Number(row.cycleStart) !== Number(cycleStart),
+        )
+      ),
+    [categoryKioskTodoRows, cycleStart],
+  );
+
+  const categoryTodoCanDragReorder = React.useMemo(() => {
+    if (categoryTodoMineOnly) return false;
+    const cycleStarts = new Set(
+      categoryKioskTodoRows.map((row) => Number(row.cycleStart)),
+    );
+    return cycleStarts.size === 1;
+  }, [categoryKioskTodoRows, categoryTodoMineOnly]);
+
   const kioskFilteredRows = React.useMemo(() => {
     let rows = globalTodoRows.filter((row) =>
       todoRowMatchesFilters(row, kioskTaskStatusFilter, kioskTaskDueFilter),
     );
     if (kioskTaskAssigneeFilter === 'me') {
-      rows = rows.filter((row) => todoTreeExplicitlyAssignsUser(row.item, meLower));
+      rows = rows.filter((row) =>
+        canKioskStaffSeeTodoItem(row.item, meLower, {
+          allowManageAll: canManageClientTodos,
+        }),
+      );
     } else if (kioskTaskAssigneeFilter !== 'all') {
       const want = String(kioskTaskAssigneeFilter || '').trim().toLowerCase();
       rows = rows.filter((row) =>
@@ -1258,194 +1388,209 @@ const EmployeeKiosk = ({
                       )}
 
                       {/* To-do list for this category (current cycle) */}
-                      {getTodoStateForCycle && updateClientTodo && selectedClientObj && selectedRetainerCategory && cycleStart && (
-                        (() => {
-                          const catKey = todoCategoryKey ? todoCategoryKey(selectedRetainerCategory) : safeCategoryKey(selectedRetainerCategory);
-                          const todoState = getTodoStateForCycle(selectedClientObj, cycleStart);
-                          const catTodo = todoState[catKey] || { closed: false, items: [] };
-                          const allItems = catTodo.items || [];
-                          const meLower = String(user?.email || '').trim().toLowerCase();
-                          const displayItems = orderTodosForDisplay(allItems).filter((item) => {
-                            if (!categoryTodoMineOnly) return true;
-                            return collectEffectiveAssigneesForTodoTree(item, user?.email).includes(meLower);
-                          });
-                          const canDragReorder = !categoryTodoMineOnly;
-                          return (
-                            <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
-                              <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
-                                To-do — {selectedRetainerCategory}
-                                {catTodo.closed && (
-                                  <span className="ml-2 px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[9px] font-bold uppercase">
-                                    Closed
-                                  </span>
-                                )}
-                              </div>
-                              <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600 mb-2">
-                                <input
-                                  type="checkbox"
-                                  checked={categoryTodoMineOnly}
-                                  onChange={(e) => setCategoryTodoMineOnly(e.target.checked)}
-                                />
-                                Show only tasks assigned to me
-                              </label>
-                              {!catTodo.closed && canDragReorder && allItems.length > 0 && (
+                      {getTodoStateForCycle &&
+                        updateClientTodo &&
+                        selectedClientObj &&
+                        selectedRetainerCategory &&
+                        currentCycleCategoryTodo && (
+                          <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
+                            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                              To-do — {selectedRetainerCategory}
+                              {currentCycleCategoryTodo.catTodo.closed && (
+                                <span className="ml-2 px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[9px] font-bold uppercase">
+                                  Closed
+                                </span>
+                              )}
+                            </div>
+                            {categoryTodoShowsPriorCycle && (
+                              <p className="text-[10px] text-amber-800/90 mb-2">
+                                Showing open tasks from a prior billing cycle.
+                              </p>
+                            )}
+                            <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600 mb-2">
+                              <input
+                                type="checkbox"
+                                checked={categoryTodoMineOnly}
+                                onChange={(e) => setCategoryTodoMineOnly(e.target.checked)}
+                              />
+                              Show only tasks assigned to me
+                            </label>
+                            {categoryTodoCanDragReorder &&
+                              categoryKioskTodoRows.length > 0 && (
                                 <p className="text-[10px] text-slate-400 mb-2">
                                   Drag the grip to reorder. Pin keeps tasks at the top of the list.
                                 </p>
                               )}
-                              {!catTodo.closed && categoryTodoMineOnly && allItems.length > 0 && (
-                                <p className="text-[10px] text-amber-800/90 mb-2">
-                                  Uncheck &quot;only my tasks&quot; to drag-reorder the full list.
-                                </p>
-                              )}
-                              {!catTodo.closed && (
-                                <>
-                                  {displayItems.length === 0 ? (
-                                    <p className="text-xs italic text-slate-400 mb-2">No items yet.</p>
-                                  ) : (
-                                    <ul className="space-y-2 mb-3">
-                                      {displayItems.map((item) => (
-                                        <KioskClientTodoItem
-                                          key={item.id}
-                                          item={item}
-                                          allItems={allItems}
-                                          catTodo={catTodo}
-                                          catKey={catKey}
-                                          cycleStart={cycleStart}
-                                          client={selectedClientObj}
-                                          todoSaving={todoSaving}
-                                          setTodoSaving={setTodoSaving}
-                                          updateClientTodo={updateClientTodo}
-                                          canDragReorder={canDragReorder}
-                                          getUrgencyClass={getUrgencyClass}
-                                          user={user}
-                                          staffEmail={meLower}
-                                          canManageTodos={canManageClientTodos}
-                                          canAddSubtasks={
-                                            !isCycleLocked(selectedClientObj, cycleStart) &&
-                                            canKioskStaffAddSubtasksToItem(item, meLower, {
-                                              allowManageAll: canManageClientTodos,
-                                            })
-                                          }
-                                          defaultAssigneeEmail={meLower}
-                                          uploadClientDocument={uploadClientDocument}
-                                          removeClientDocument={removeClientDocument}
-                                          canAttachFiles={
-                                            !isCycleLocked(selectedClientObj, cycleStart) &&
-                                            canKioskStaffAddSubtasksToItem(item, meLower, {
-                                              allowManageAll: canManageClientTodos,
-                                            })
-                                          }
-                                          isCycleLocked={isCycleLocked(
-                                            selectedClientObj,
-                                            cycleStart,
-                                          )}
-                                          assigneeOpenKey={
-                                            clientTodoAssigneeOpenKey ===
-                                            `category__${item.id}`
-                                              ? item.id
-                                              : null
-                                          }
-                                          onAssigneeOpenChange={(key) =>
-                                            setClientTodoAssigneeOpenKey(
-                                              key ? `category__${key}` : null,
-                                            )
-                                          }
-                                          assignableEmails={assignableEmails}
-                                          onAssigneesChange={(next) =>
-                                            updateClientTodoAssignees(
-                                              selectedClientObj,
-                                              cycleStart,
-                                              catKey,
-                                              item.id,
-                                              next,
-                                            )
-                                          }
-                                          onOpenOptions={(todoItem, subtask) =>
-                                            openClientTodoEditModal(
-                                              selectedClientObj,
-                                              cycleStart,
-                                              catKey,
-                                              todoItem,
-                                              subtask,
-                                            )
-                                          }
-                                        />
-                                      ))}
-                                    </ul>
-                                  )}
-                                  <div className="flex flex-wrap gap-2 items-center">
-                                    <input
-                                      type="text"
-                                      value={todoNewText}
-                                      onChange={(e) => setTodoNewText(e.target.value)}
-                                      placeholder="New to-do..."
-                                      className="flex-1 min-w-[160px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter') {
-                                          e.preventDefault();
-                                          if (todoNewText.trim()) {
-                                            const newItem = buildNewTodoItem(todoNewText);
-                                            setTodoSaving(true);
-                                            updateClientTodo(selectedClientObj, cycleStart, catKey, {
-                                              ...catTodo,
-                                              closed: false,
-                                              items: [...allItems, newItem],
-                                            }).finally(() => {
-                                              setTodoSaving(false);
-                                              setTodoNewText('');
-                                              resetTodoDraftOptions();
-                                            });
-                                          }
-                                        }
-                                      }}
-                                    />
-                                    {canManageClientTodos &&
-                                      renderClientTodoAssigneePicker({
-                                        openKey: 'todo_add_assignees',
-                                        value: todoAddAssignees,
-                                        disabled:
-                                          todoSaving ||
-                                          isCycleLocked(selectedClientObj, cycleStart),
-                                        onChange: setTodoAddAssignees,
-                                      })}
-                                    <button
-                                      type="button"
-                                      onClick={() => setTodoOptionsOpen(true)}
-                                      className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-black text-slate-600 uppercase tracking-widest hover:bg-slate-100 transition-all"
-                                    >
-                                      Options
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled={!todoNewText.trim() || todoSaving}
-                                      onClick={async () => {
-                                        if (!todoNewText.trim()) return;
-                                        const newItem = buildNewTodoItem(todoNewText);
-                                        setTodoSaving(true);
-                                        try {
-                                          await updateClientTodo(selectedClientObj, cycleStart, catKey, {
-                                            ...catTodo,
-                                            closed: false,
-                                            items: [...allItems, newItem],
-                                          });
-                                          setTodoNewText('');
-                                          resetTodoDraftOptions();
-                                        } finally {
-                                          setTodoSaving(false);
-                                        }
-                                      }}
-                                      className="px-4 py-2 rounded-xl bg-[#fd7414] text-white font-bold text-sm disabled:opacity-40"
-                                    >
-                                      Add
-                                    </button>
-                                  </div>
-                                </>
-                              )}
+                            {categoryTodoMineOnly && categoryKioskTodoRows.length > 0 && (
+                              <p className="text-[10px] text-amber-800/90 mb-2">
+                                Uncheck &quot;only my tasks&quot; to drag-reorder the full list.
+                              </p>
+                            )}
+                            {categoryKioskTodoRows.length === 0 ? (
+                              <p className="text-xs italic text-slate-400 mb-2">
+                                {categoryTodoMineOnly
+                                  ? 'No tasks assigned to you here. Uncheck "Show only tasks assigned to me" to see the full team list.'
+                                  : 'No open tasks for this category.'}
+                              </p>
+                            ) : (
+                              <ul className="space-y-2 mb-3">
+                                {categoryKioskTodoRows.map((row) => (
+                                  <KioskClientTodoItem
+                                    key={`${row.cycleStart}__${row.item.id}`}
+                                    item={row.item}
+                                    allItems={row.catTodo?.items || []}
+                                    catTodo={row.catTodo || { closed: false, items: [] }}
+                                    catKey={row.categoryKey}
+                                    cycleStart={row.cycleStart}
+                                    client={selectedClientObj}
+                                    todoSaving={todoSaving}
+                                    setTodoSaving={setTodoSaving}
+                                    updateClientTodo={updateClientTodo}
+                                    canDragReorder={
+                                      categoryTodoCanDragReorder &&
+                                      Number(row.cycleStart) === Number(cycleStart)
+                                    }
+                                    getUrgencyClass={getUrgencyClass}
+                                    user={user}
+                                    staffEmail={meLower}
+                                    canManageTodos={canManageClientTodos}
+                                    canAddSubtasks={
+                                      !isCycleLocked(selectedClientObj, row.cycleStart) &&
+                                      canKioskStaffAddSubtasksToItem(row.item, meLower, {
+                                        allowManageAll: canManageClientTodos,
+                                      })
+                                    }
+                                    defaultAssigneeEmail={meLower}
+                                    uploadClientDocument={uploadClientDocument}
+                                    removeClientDocument={removeClientDocument}
+                                    canAttachFiles={
+                                      !isCycleLocked(selectedClientObj, row.cycleStart) &&
+                                      canKioskStaffAddSubtasksToItem(row.item, meLower, {
+                                        allowManageAll: canManageClientTodos,
+                                      })
+                                    }
+                                    isCycleLocked={isCycleLocked(
+                                      selectedClientObj,
+                                      row.cycleStart,
+                                    )}
+                                    assigneeOpenKey={
+                                      clientTodoAssigneeOpenKey ===
+                                      `category__${row.item.id}`
+                                        ? row.item.id
+                                        : null
+                                    }
+                                    onAssigneeOpenChange={(key) =>
+                                      setClientTodoAssigneeOpenKey(
+                                        key ? `category__${key}` : null,
+                                      )
+                                    }
+                                    assignableEmails={assignableEmails}
+                                    onAssigneesChange={(next) =>
+                                      updateClientTodoAssignees(
+                                        selectedClientObj,
+                                        row.cycleStart,
+                                        row.categoryKey,
+                                        row.item.id,
+                                        next,
+                                      )
+                                    }
+                                    onOpenOptions={(todoItem, subtask) =>
+                                      openClientTodoEditModal(
+                                        selectedClientObj,
+                                        row.cycleStart,
+                                        row.categoryKey,
+                                        todoItem,
+                                        subtask,
+                                      )
+                                    }
+                                  />
+                                ))}
+                              </ul>
+                            )}
+                            <div className="flex flex-wrap gap-2 items-center">
+                              <input
+                                type="text"
+                                value={todoNewText}
+                                onChange={(e) => setTodoNewText(e.target.value)}
+                                placeholder="New to-do..."
+                                className="flex-1 min-w-[160px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    if (todoNewText.trim()) {
+                                      const newItem = buildNewTodoItem(todoNewText);
+                                      setTodoSaving(true);
+                                      updateClientTodo(
+                                        selectedClientObj,
+                                        cycleStart,
+                                        currentCycleCategoryTodo.catKey,
+                                        {
+                                          ...currentCycleCategoryTodo.catTodo,
+                                          closed: false,
+                                          items: [
+                                            ...currentCycleCategoryTodo.allItems,
+                                            newItem,
+                                          ],
+                                        },
+                                      ).finally(() => {
+                                        setTodoSaving(false);
+                                        setTodoNewText('');
+                                        resetTodoDraftOptions();
+                                      });
+                                    }
+                                  }
+                                }}
+                              />
+                              {canManageClientTodos &&
+                                renderClientTodoAssigneePicker({
+                                  openKey: 'todo_add_assignees',
+                                  value: todoAddAssignees,
+                                  disabled:
+                                    todoSaving ||
+                                    isCycleLocked(selectedClientObj, cycleStart),
+                                  onChange: setTodoAddAssignees,
+                                })}
+                              <button
+                                type="button"
+                                onClick={() => setTodoOptionsOpen(true)}
+                                className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-black text-slate-600 uppercase tracking-widest hover:bg-slate-100 transition-all"
+                              >
+                                Options
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!todoNewText.trim() || todoSaving}
+                                onClick={async () => {
+                                  if (!todoNewText.trim()) return;
+                                  const newItem = buildNewTodoItem(todoNewText);
+                                  setTodoSaving(true);
+                                  try {
+                                    await updateClientTodo(
+                                      selectedClientObj,
+                                      cycleStart,
+                                      currentCycleCategoryTodo.catKey,
+                                      {
+                                        ...currentCycleCategoryTodo.catTodo,
+                                        closed: false,
+                                        items: [
+                                          ...currentCycleCategoryTodo.allItems,
+                                          newItem,
+                                        ],
+                                      },
+                                    );
+                                    setTodoNewText('');
+                                    resetTodoDraftOptions();
+                                  } finally {
+                                    setTodoSaving(false);
+                                  }
+                                }}
+                                className="px-4 py-2 rounded-xl bg-[#fd7414] text-white font-bold text-sm disabled:opacity-40"
+                              >
+                                Add
+                              </button>
                             </div>
-                          );
-                        })()
-                      )}
+                          </div>
+                        )}
 
                       {/* Retainer progress (this category only) for current cycle */}
                       {retainerStats && selectedRetainerCategory && (
@@ -1643,194 +1788,209 @@ const EmployeeKiosk = ({
                       )}
 
                       {/* To-do list for this category (current cycle) */}
-                      {getTodoStateForCycle && updateClientTodo && selectedClientObj && selectedRetainerCategory && cycleStart && (
-                        (() => {
-                          const catKey = todoCategoryKey ? todoCategoryKey(selectedRetainerCategory) : safeCategoryKey(selectedRetainerCategory);
-                          const todoState = getTodoStateForCycle(selectedClientObj, cycleStart);
-                          const catTodo = todoState[catKey] || { closed: false, items: [] };
-                          const allItems = catTodo.items || [];
-                          const meLower = String(user?.email || '').trim().toLowerCase();
-                          const displayItems = orderTodosForDisplay(allItems).filter((item) => {
-                            if (!categoryTodoMineOnly) return true;
-                            return collectEffectiveAssigneesForTodoTree(item, user?.email).includes(meLower);
-                          });
-                          const canDragReorder = !categoryTodoMineOnly;
-                          return (
-                            <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
-                              <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
-                                To-do — {selectedRetainerCategory}
-                                {catTodo.closed && (
-                                  <span className="ml-2 px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[9px] font-bold uppercase">
-                                    Closed
-                                  </span>
-                                )}
-                              </div>
-                              <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600 mb-2">
-                                <input
-                                  type="checkbox"
-                                  checked={categoryTodoMineOnly}
-                                  onChange={(e) => setCategoryTodoMineOnly(e.target.checked)}
-                                />
-                                Show only tasks assigned to me
-                              </label>
-                              {!catTodo.closed && canDragReorder && allItems.length > 0 && (
+                      {getTodoStateForCycle &&
+                        updateClientTodo &&
+                        selectedClientObj &&
+                        selectedRetainerCategory &&
+                        currentCycleCategoryTodo && (
+                          <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
+                            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                              To-do — {selectedRetainerCategory}
+                              {currentCycleCategoryTodo.catTodo.closed && (
+                                <span className="ml-2 px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[9px] font-bold uppercase">
+                                  Closed
+                                </span>
+                              )}
+                            </div>
+                            {categoryTodoShowsPriorCycle && (
+                              <p className="text-[10px] text-amber-800/90 mb-2">
+                                Showing open tasks from a prior billing cycle.
+                              </p>
+                            )}
+                            <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600 mb-2">
+                              <input
+                                type="checkbox"
+                                checked={categoryTodoMineOnly}
+                                onChange={(e) => setCategoryTodoMineOnly(e.target.checked)}
+                              />
+                              Show only tasks assigned to me
+                            </label>
+                            {categoryTodoCanDragReorder &&
+                              categoryKioskTodoRows.length > 0 && (
                                 <p className="text-[10px] text-slate-400 mb-2">
                                   Drag the grip to reorder. Pin keeps tasks at the top of the list.
                                 </p>
                               )}
-                              {!catTodo.closed && categoryTodoMineOnly && allItems.length > 0 && (
-                                <p className="text-[10px] text-amber-800/90 mb-2">
-                                  Uncheck &quot;only my tasks&quot; to drag-reorder the full list.
-                                </p>
-                              )}
-                              {!catTodo.closed && (
-                                <>
-                                  {displayItems.length === 0 ? (
-                                    <p className="text-xs italic text-slate-400 mb-2">No items yet.</p>
-                                  ) : (
-                                    <ul className="space-y-2 mb-3">
-                                      {displayItems.map((item) => (
-                                        <KioskClientTodoItem
-                                          key={item.id}
-                                          item={item}
-                                          allItems={allItems}
-                                          catTodo={catTodo}
-                                          catKey={catKey}
-                                          cycleStart={cycleStart}
-                                          client={selectedClientObj}
-                                          todoSaving={todoSaving}
-                                          setTodoSaving={setTodoSaving}
-                                          updateClientTodo={updateClientTodo}
-                                          canDragReorder={canDragReorder}
-                                          getUrgencyClass={getUrgencyClass}
-                                          user={user}
-                                          staffEmail={meLower}
-                                          canManageTodos={canManageClientTodos}
-                                          canAddSubtasks={
-                                            !isCycleLocked(selectedClientObj, cycleStart) &&
-                                            canKioskStaffAddSubtasksToItem(item, meLower, {
-                                              allowManageAll: canManageClientTodos,
-                                            })
-                                          }
-                                          defaultAssigneeEmail={meLower}
-                                          uploadClientDocument={uploadClientDocument}
-                                          removeClientDocument={removeClientDocument}
-                                          canAttachFiles={
-                                            !isCycleLocked(selectedClientObj, cycleStart) &&
-                                            canKioskStaffAddSubtasksToItem(item, meLower, {
-                                              allowManageAll: canManageClientTodos,
-                                            })
-                                          }
-                                          isCycleLocked={isCycleLocked(
-                                            selectedClientObj,
-                                            cycleStart,
-                                          )}
-                                          assigneeOpenKey={
-                                            clientTodoAssigneeOpenKey ===
-                                            `category__${item.id}`
-                                              ? item.id
-                                              : null
-                                          }
-                                          onAssigneeOpenChange={(key) =>
-                                            setClientTodoAssigneeOpenKey(
-                                              key ? `category__${key}` : null,
-                                            )
-                                          }
-                                          assignableEmails={assignableEmails}
-                                          onAssigneesChange={(next) =>
-                                            updateClientTodoAssignees(
-                                              selectedClientObj,
-                                              cycleStart,
-                                              catKey,
-                                              item.id,
-                                              next,
-                                            )
-                                          }
-                                          onOpenOptions={(todoItem, subtask) =>
-                                            openClientTodoEditModal(
-                                              selectedClientObj,
-                                              cycleStart,
-                                              catKey,
-                                              todoItem,
-                                              subtask,
-                                            )
-                                          }
-                                        />
-                                      ))}
-                                    </ul>
-                                  )}
-                                  <div className="flex flex-wrap gap-2 items-center">
-                                    <input
-                                      type="text"
-                                      value={todoNewText}
-                                      onChange={(e) => setTodoNewText(e.target.value)}
-                                      placeholder="New to-do..."
-                                      className="flex-1 min-w-[160px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter') {
-                                          e.preventDefault();
-                                          if (todoNewText.trim()) {
-                                            const newItem = buildNewTodoItem(todoNewText);
-                                            setTodoSaving(true);
-                                            updateClientTodo(selectedClientObj, cycleStart, catKey, {
-                                              ...catTodo,
-                                              closed: false,
-                                              items: [...allItems, newItem],
-                                            }).finally(() => {
-                                              setTodoSaving(false);
-                                              setTodoNewText('');
-                                              resetTodoDraftOptions();
-                                            });
-                                          }
-                                        }
-                                      }}
-                                    />
-                                    {canManageClientTodos &&
-                                      renderClientTodoAssigneePicker({
-                                        openKey: 'todo_add_assignees',
-                                        value: todoAddAssignees,
-                                        disabled:
-                                          todoSaving ||
-                                          isCycleLocked(selectedClientObj, cycleStart),
-                                        onChange: setTodoAddAssignees,
-                                      })}
-                                    <button
-                                      type="button"
-                                      onClick={() => setTodoOptionsOpen(true)}
-                                      className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-black text-slate-600 uppercase tracking-widest hover:bg-slate-100 transition-all"
-                                    >
-                                      Options
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled={!todoNewText.trim() || todoSaving}
-                                      onClick={async () => {
-                                        if (!todoNewText.trim()) return;
-                                        const newItem = buildNewTodoItem(todoNewText);
-                                        setTodoSaving(true);
-                                        try {
-                                          await updateClientTodo(selectedClientObj, cycleStart, catKey, {
-                                            ...catTodo,
-                                            closed: false,
-                                            items: [...allItems, newItem],
-                                          });
-                                          setTodoNewText('');
-                                          resetTodoDraftOptions();
-                                        } finally {
-                                          setTodoSaving(false);
-                                        }
-                                      }}
-                                      className="px-4 py-2 rounded-xl bg-[#fd7414] text-white font-bold text-sm disabled:opacity-40"
-                                    >
-                                      Add
-                                    </button>
-                                  </div>
-                                </>
-                              )}
+                            {categoryTodoMineOnly && categoryKioskTodoRows.length > 0 && (
+                              <p className="text-[10px] text-amber-800/90 mb-2">
+                                Uncheck &quot;only my tasks&quot; to drag-reorder the full list.
+                              </p>
+                            )}
+                            {categoryKioskTodoRows.length === 0 ? (
+                              <p className="text-xs italic text-slate-400 mb-2">
+                                {categoryTodoMineOnly
+                                  ? 'No tasks assigned to you here. Uncheck "Show only tasks assigned to me" to see the full team list.'
+                                  : 'No open tasks for this category.'}
+                              </p>
+                            ) : (
+                              <ul className="space-y-2 mb-3">
+                                {categoryKioskTodoRows.map((row) => (
+                                  <KioskClientTodoItem
+                                    key={`${row.cycleStart}__${row.item.id}`}
+                                    item={row.item}
+                                    allItems={row.catTodo?.items || []}
+                                    catTodo={row.catTodo || { closed: false, items: [] }}
+                                    catKey={row.categoryKey}
+                                    cycleStart={row.cycleStart}
+                                    client={selectedClientObj}
+                                    todoSaving={todoSaving}
+                                    setTodoSaving={setTodoSaving}
+                                    updateClientTodo={updateClientTodo}
+                                    canDragReorder={
+                                      categoryTodoCanDragReorder &&
+                                      Number(row.cycleStart) === Number(cycleStart)
+                                    }
+                                    getUrgencyClass={getUrgencyClass}
+                                    user={user}
+                                    staffEmail={meLower}
+                                    canManageTodos={canManageClientTodos}
+                                    canAddSubtasks={
+                                      !isCycleLocked(selectedClientObj, row.cycleStart) &&
+                                      canKioskStaffAddSubtasksToItem(row.item, meLower, {
+                                        allowManageAll: canManageClientTodos,
+                                      })
+                                    }
+                                    defaultAssigneeEmail={meLower}
+                                    uploadClientDocument={uploadClientDocument}
+                                    removeClientDocument={removeClientDocument}
+                                    canAttachFiles={
+                                      !isCycleLocked(selectedClientObj, row.cycleStart) &&
+                                      canKioskStaffAddSubtasksToItem(row.item, meLower, {
+                                        allowManageAll: canManageClientTodos,
+                                      })
+                                    }
+                                    isCycleLocked={isCycleLocked(
+                                      selectedClientObj,
+                                      row.cycleStart,
+                                    )}
+                                    assigneeOpenKey={
+                                      clientTodoAssigneeOpenKey ===
+                                      `category__${row.item.id}`
+                                        ? row.item.id
+                                        : null
+                                    }
+                                    onAssigneeOpenChange={(key) =>
+                                      setClientTodoAssigneeOpenKey(
+                                        key ? `category__${key}` : null,
+                                      )
+                                    }
+                                    assignableEmails={assignableEmails}
+                                    onAssigneesChange={(next) =>
+                                      updateClientTodoAssignees(
+                                        selectedClientObj,
+                                        row.cycleStart,
+                                        row.categoryKey,
+                                        row.item.id,
+                                        next,
+                                      )
+                                    }
+                                    onOpenOptions={(todoItem, subtask) =>
+                                      openClientTodoEditModal(
+                                        selectedClientObj,
+                                        row.cycleStart,
+                                        row.categoryKey,
+                                        todoItem,
+                                        subtask,
+                                      )
+                                    }
+                                  />
+                                ))}
+                              </ul>
+                            )}
+                            <div className="flex flex-wrap gap-2 items-center">
+                              <input
+                                type="text"
+                                value={todoNewText}
+                                onChange={(e) => setTodoNewText(e.target.value)}
+                                placeholder="New to-do..."
+                                className="flex-1 min-w-[160px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    if (todoNewText.trim()) {
+                                      const newItem = buildNewTodoItem(todoNewText);
+                                      setTodoSaving(true);
+                                      updateClientTodo(
+                                        selectedClientObj,
+                                        cycleStart,
+                                        currentCycleCategoryTodo.catKey,
+                                        {
+                                          ...currentCycleCategoryTodo.catTodo,
+                                          closed: false,
+                                          items: [
+                                            ...currentCycleCategoryTodo.allItems,
+                                            newItem,
+                                          ],
+                                        },
+                                      ).finally(() => {
+                                        setTodoSaving(false);
+                                        setTodoNewText('');
+                                        resetTodoDraftOptions();
+                                      });
+                                    }
+                                  }
+                                }}
+                              />
+                              {canManageClientTodos &&
+                                renderClientTodoAssigneePicker({
+                                  openKey: 'todo_add_assignees',
+                                  value: todoAddAssignees,
+                                  disabled:
+                                    todoSaving ||
+                                    isCycleLocked(selectedClientObj, cycleStart),
+                                  onChange: setTodoAddAssignees,
+                                })}
+                              <button
+                                type="button"
+                                onClick={() => setTodoOptionsOpen(true)}
+                                className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-black text-slate-600 uppercase tracking-widest hover:bg-slate-100 transition-all"
+                              >
+                                Options
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!todoNewText.trim() || todoSaving}
+                                onClick={async () => {
+                                  if (!todoNewText.trim()) return;
+                                  const newItem = buildNewTodoItem(todoNewText);
+                                  setTodoSaving(true);
+                                  try {
+                                    await updateClientTodo(
+                                      selectedClientObj,
+                                      cycleStart,
+                                      currentCycleCategoryTodo.catKey,
+                                      {
+                                        ...currentCycleCategoryTodo.catTodo,
+                                        closed: false,
+                                        items: [
+                                          ...currentCycleCategoryTodo.allItems,
+                                          newItem,
+                                        ],
+                                      },
+                                    );
+                                    setTodoNewText('');
+                                    resetTodoDraftOptions();
+                                  } finally {
+                                    setTodoSaving(false);
+                                  }
+                                }}
+                                className="px-4 py-2 rounded-xl bg-[#fd7414] text-white font-bold text-sm disabled:opacity-40"
+                              >
+                                Add
+                              </button>
                             </div>
-                          );
-                        })()
-                      )}
+                          </div>
+                        )}
 
                       {selectedClientObj && selectedRetainerCategory && (
                         <div className="mt-5 bg-white border border-slate-200 rounded-[24px] p-4">
@@ -2337,7 +2497,9 @@ const EmployeeKiosk = ({
                     ) : (
                       <div className={`text-[9px] font-bold mt-0.5 ${metaClass}`}>No due date</div>
                     )}
-                    {canManageClientTodos && client && (
+                    {client &&
+                      (canManageClientTodos ||
+                        canKioskStaffSeeTodoItem(row.item, meLower)) && (
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
                         <input
                           type="checkbox"
@@ -2354,7 +2516,8 @@ const EmployeeKiosk = ({
                           className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
                           title="Mark complete"
                         />
-                        {renderClientTodoAssigneePicker({
+                        {canManageClientTodos &&
+                          renderClientTodoAssigneePicker({
                           openKey: `sidebar__${row.clientId}__${row.cycleStart}__${row.categoryKey}__${row.item.id}`,
                           value: row.item.assigneeEmails,
                           disabled: todoSaving || isCycleLocked(client, row.cycleStart),
@@ -2368,6 +2531,7 @@ const EmployeeKiosk = ({
                               next,
                             ),
                         })}
+                        {canManageClientTodos && (
                         <button
                           type="button"
                           disabled={todoSaving || isCycleLocked(client, row.cycleStart)}
@@ -2383,6 +2547,7 @@ const EmployeeKiosk = ({
                         >
                           Options
                         </button>
+                        )}
                       </div>
                     )}
                     {!row.item.done && client && (

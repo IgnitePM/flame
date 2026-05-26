@@ -76,6 +76,11 @@ export function collectEffectiveAssigneesForTodoTree(item, fallbackUserEmail) {
   return [...set];
 }
 
+/** Kiosk staff may view/act on tasks assigned to them, unassigned tasks, or all if admin. */
+export function canKioskStaffSeeTodoItem(item, staffEmail, options = {}) {
+  return canKioskStaffAddSubtasksToItem(item, staffEmail, options);
+}
+
 /** Kiosk staff may add sub-tasks when they manage todos, are on the task tree, or the primary is unassigned. */
 export function canKioskStaffAddSubtasksToItem(item, staffEmail, { allowManageAll = false } = {}) {
   if (!item || item.done) return false;

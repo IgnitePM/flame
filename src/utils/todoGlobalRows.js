@@ -1,6 +1,7 @@
 import { orderTodosForDisplay } from "./todoListOrder.js";
 import { isClientActiveForWork } from "./clientActiveForWork.js";
 import {
+  getRetainerCategoryNameFromKey,
   isRetainerCategoryEnabled,
   isTodoCategoryKeyVisible,
 } from "./retainerCategories.js";
@@ -15,9 +16,16 @@ function buildLabelMap(c, projects, todoCategoryKey) {
       .replace(/\./g, "_");
   const labelMap = {};
   Object.keys(c.retainers || {}).forEach((cat) => {
-    if (!isRetainerCategoryEnabled(c, cat)) return;
     labelMap[keyOf(cat)] = cat;
   });
+  for (const cycleData of Object.values(c.todoCycles || {})) {
+    if (!cycleData || typeof cycleData !== 'object') continue;
+    for (const catKey of Object.keys(cycleData)) {
+      if (labelMap[catKey]) continue;
+      const resolved = getRetainerCategoryNameFromKey(c, catKey, todoCategoryKey);
+      labelMap[catKey] = resolved || catKey;
+    }
+  }
   labelMap[keyOf("General / Unclassified")] = "General / Unclassified";
   (projects || [])
     .filter((p) => p && p.clientId === c.id && !p.archived)
@@ -75,6 +83,20 @@ export function buildGlobalTodoRows(
       const cycleStart = Number(cycleKey);
       const todoState = cycles[cycleKey] || {};
       return rowsForClientCycle(c, cycleStart, todoState, projects, todoCategoryKey);
-    });
+    }).concat(
+      (() => {
+        if (!getTodoStateForCycle) return [];
+        const currentCycleStart = getBillingPeriod(c.billingDay || 1, 0).start;
+        if (cycleKeys.includes(String(currentCycleStart))) return [];
+        const todoState = getTodoStateForCycle(c, currentCycleStart);
+        return rowsForClientCycle(
+          c,
+          currentCycleStart,
+          todoState,
+          projects,
+          todoCategoryKey,
+        );
+      })(),
+    );
   });
 }
