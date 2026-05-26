@@ -684,9 +684,9 @@ export default function App() {
     setSelectedBillingTarget('');
   }, [clients, selectedClient, activeTask?.clientName]);
   const selectableRetainers = selectedClientObj
-    ? getEnabledRetainerCategoryNames(selectedClientObj).map((name) => ({
+    ? Object.keys(selectedClientObj.retainers || {}).map((name) => ({
         name,
-        enabled: true,
+        enabled: isRetainerCategoryEnabled(selectedClientObj, name),
       }))
     : [];
   const GENERAL_LABEL = 'General / Unclassified';

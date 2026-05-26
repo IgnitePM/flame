@@ -1015,11 +1015,15 @@ const AdminDashboard = ({
     () => filterClientsForTeamMember(clients, user?.email),
     [clients, user?.email],
   );
-  // Admin/billing manage every client; workspace access lists only restrict kiosk staff.
-  const visibleClients = canBilling ? clients : teamAccessibleClients;
+  // Workspace access lists only restrict kiosk staff — all other roles manage every client.
+  const staffClientScope = useMemo(
+    () => (isRestrictedStaff ? teamAccessibleClients : clients || []),
+    [isRestrictedStaff, teamAccessibleClients, clients],
+  );
+  const visibleClients = staffClientScope;
   const clientsActiveForWork = useMemo(
-    () => teamAccessibleClients.filter(isClientActiveForWork),
-    [teamAccessibleClients],
+    () => staffClientScope.filter(isClientActiveForWork),
+    [staffClientScope],
   );
 
   /** Move hour budget between retainer lines for a billing cycle (admin / billing). */
@@ -3748,6 +3752,14 @@ const AdminDashboard = ({
                           </>
                         )}
                         Renews on the {getOrdinalSuffix(c.billingDay || 1)}
+                        {!isClientPage && !clientHasEnabledRetainers(c) && (
+                          <>
+                            <span className="mx-1">•</span>
+                            <span className="text-amber-700/90 normal-case tracking-normal font-bold">
+                              No active retainer hours
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                     <div

@@ -15,12 +15,19 @@ export function isRetainerCategoryEnabled(client, category) {
   return Number.isFinite(amount) && amount > 0;
 }
 
+export function getConfiguredRetainerCategoryNames(client) {
+  return [
+    ...new Set([
+      ...Object.keys(client?.retainers || {}),
+      ...Object.keys(client?.retainerCategoryEnabled || {}),
+    ]),
+  ];
+}
+
 export function getEnabledRetainerCategoryNames(client) {
-  const keys = new Set([
-    ...Object.keys(client?.retainers || {}),
-    ...Object.keys(client?.retainerCategoryEnabled || {}),
-  ]);
-  return [...keys].filter((cat) => isRetainerCategoryEnabled(client, cat));
+  return getConfiguredRetainerCategoryNames(client).filter((cat) =>
+    isRetainerCategoryEnabled(client, cat),
+  );
 }
 
 export function getEnabledRetainerCategoryEntries(client) {
