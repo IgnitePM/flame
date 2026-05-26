@@ -1015,7 +1015,8 @@ const AdminDashboard = ({
     () => filterClientsForTeamMember(clients, user?.email),
     [clients, user?.email],
   );
-  const visibleClients = teamAccessibleClients;
+  // Admin/billing manage every client; workspace access lists only restrict kiosk staff.
+  const visibleClients = canBilling ? clients : teamAccessibleClients;
   const clientsActiveForWork = useMemo(
     () => teamAccessibleClients.filter(isClientActiveForWork),
     [teamAccessibleClients],
