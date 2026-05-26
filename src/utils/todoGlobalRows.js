@@ -55,6 +55,20 @@ function rowsForClientCycle(c, cycleStart, todoState, projects, todoCategoryKey)
   });
 }
 
+function dedupeTodoRowsAcrossCycles(rows) {
+  const byKey = new Map();
+  for (const row of rows || []) {
+    const itemId = row?.item?.id;
+    if (!itemId) continue;
+    const key = `${row.clientId}__${row.categoryKey}__${itemId}`;
+    const prev = byKey.get(key);
+    if (!prev || Number(row.cycleStart) >= Number(prev.cycleStart)) {
+      byKey.set(key, row);
+    }
+  }
+  return [...byKey.values()];
+}
+
 export function buildGlobalTodoRows(
   clients,
   projects,
@@ -68,35 +82,41 @@ export function buildGlobalTodoRows(
     if (!allCycles) {
       const cycleStart = getBillingPeriod(c.billingDay || 1, 0).start;
       const todoState = getTodoStateForCycle ? getTodoStateForCycle(c, cycleStart) : {};
-      return rowsForClientCycle(c, cycleStart, todoState, projects, todoCategoryKey);
+      return dedupeTodoRowsAcrossCycles(
+        rowsForClientCycle(c, cycleStart, todoState, projects, todoCategoryKey),
+      );
     }
 
     const cycles = c.todoCycles || {};
     const cycleKeys = Object.keys(cycles);
+    const currentCycleStart = getBillingPeriod(c.billingDay || 1, 0).start;
+
     if (!cycleKeys.length) {
-      const cycleStart = getBillingPeriod(c.billingDay || 1, 0).start;
-      const todoState = getTodoStateForCycle ? getTodoStateForCycle(c, cycleStart) : {};
-      return rowsForClientCycle(c, cycleStart, todoState, projects, todoCategoryKey);
+      const todoState = getTodoStateForCycle ? getTodoStateForCycle(c, currentCycleStart) : {};
+      return dedupeTodoRowsAcrossCycles(
+        rowsForClientCycle(c, currentCycleStart, todoState, projects, todoCategoryKey),
+      );
     }
 
-    return cycleKeys.flatMap((cycleKey) => {
-      const cycleStart = Number(cycleKey);
-      const todoState = cycles[cycleKey] || {};
-      return rowsForClientCycle(c, cycleStart, todoState, projects, todoCategoryKey);
-    }).concat(
-      (() => {
-        if (!getTodoStateForCycle) return [];
-        const currentCycleStart = getBillingPeriod(c.billingDay || 1, 0).start;
-        if (cycleKeys.includes(String(currentCycleStart))) return [];
-        const todoState = getTodoStateForCycle(c, currentCycleStart);
+    const cycleStartSet = new Set(cycleKeys.map((k) => Number(k)));
+    cycleStartSet.add(currentCycleStart);
+
+    const rows = [...cycleStartSet]
+      .sort((a, b) => a - b)
+      .flatMap((cycleStart) => {
+        const todoState =
+          cycleStart === currentCycleStart && getTodoStateForCycle
+            ? getTodoStateForCycle(c, cycleStart)
+            : cycles[String(cycleStart)] || {};
         return rowsForClientCycle(
           c,
-          currentCycleStart,
+          cycleStart,
           todoState,
           projects,
           todoCategoryKey,
         );
-      })(),
-    );
+      });
+
+    return dedupeTodoRowsAcrossCycles(rows);
   });
 }
