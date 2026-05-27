@@ -7,6 +7,7 @@ import {
 } from '../utils/cycleActivity.js';
 import { getEnabledRetainerCategoryNames } from '../utils/retainerCategories.js';
 import { safeDisplayForReact } from '../utils/safeReactText.js';
+import RetainerCategoryStats from './RetainerCategoryStats.jsx';
 
 function Section({ title, children, empty }) {
   return (
@@ -74,9 +75,7 @@ export default function ClientCycleActivityPanel({
       const catStats = stats?.perCategory?.[cat];
       const used = Number(stats?.categoryBreakdown?.[cat] || 0);
       const allotted = Number(catStats?.adjustedAllotted || client.retainers?.[cat] || 0);
-      const isDollar =
-        cat === 'Social Ad Budget' || client?.retainerUnits?.[cat] === 'dollar';
-      return { cat, used, allotted, isDollar };
+      return { cat, used, allotted, catStats };
     })
     .filter((row) => row.allotted > 0 || row.used > 0);
 
@@ -120,18 +119,26 @@ export default function ClientCycleActivityPanel({
           title="Retainer usage"
           empty={categoryUsage.length ? null : 'No retainer usage this cycle.'}
         >
-          <ul className="space-y-2">
-            {categoryUsage.map(({ cat, used, allotted, isDollar }) => (
+          <ul className="space-y-3">
+            {categoryUsage.map(({ cat, catStats }) => (
               <li
                 key={cat}
-                className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between rounded-xl bg-white border border-slate-100 px-3 py-2"
+                className="rounded-xl bg-white border border-slate-100 px-3 py-3"
               >
-                <span className="text-sm font-bold text-slate-800 break-words">{cat}</span>
-                <span className="text-xs font-black text-slate-600 shrink-0">
-                  {isDollar
-                    ? `$${used.toFixed(2)} / $${allotted.toFixed(2)}`
-                    : `${used.toFixed(2)}h / ${allotted.toFixed(2)}h`}
-                </span>
+                <div className="text-sm font-black text-slate-800 break-words mb-2">
+                  {cat}
+                </div>
+                <RetainerCategoryStats
+                  client={client}
+                  categoryName={cat}
+                  catStats={catStats}
+                  baseFallback={Number(client.retainers?.[cat] || 0)}
+                  cycleStart={cycleStart}
+                  cycleEnd={cycleEnd}
+                  variant="compact"
+                  showCycleDates={false}
+                  showDaysLeft={false}
+                />
               </li>
             ))}
           </ul>

@@ -5,6 +5,8 @@ import {
   getEnabledRetainerCategoryEntries,
   getEnabledRetainerCategoryNames,
 } from '../utils/retainerCategories.js';
+import { computeRetainerDaysLeft } from '../utils/retainerCategoryStats.js';
+import RetainerCategoryStats from './RetainerCategoryStats.jsx';
 import {
   ChevronLeft,
   ChevronRight,
@@ -168,6 +170,12 @@ const ClientPortal = ({
             <div className="text-sm font-bold text-slate-700 min-w-[160px] text-center">
               {new Date(mStart).toLocaleDateString()} -{' '}
               {new Date(mEnd).toLocaleDateString()}
+              {portalOffset === 0 && computeRetainerDaysLeft(mEnd) != null && (
+                <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-0.5">
+                  {computeRetainerDaysLeft(mEnd)} day
+                  {computeRetainerDaysLeft(mEnd) === 1 ? '' : 's'} left
+                </div>
+              )}
             </div>
             <button
               onClick={() => setPortalOffset((prev) => prev + 1)}
@@ -257,38 +265,28 @@ const ClientPortal = ({
                     <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">
                       Retainer Categories
                     </h4>
-                    <div className="space-y-3">
+                    <div className="space-y-4">
                       {getEnabledRetainerCategoryEntries(clientProfile).map(
-                        ([cat, base]) => {
-                          const used = stats.categoryBreakdown[cat] || 0;
-                          const pct =
-                            Number(base) > 0
-                              ? Math.min(100, (used / Number(base)) * 100)
-                              : 0;
-                          const over =
-                            Number(base) > 0 && used > Number(base);
-                          return (
-                            <div key={cat}>
-                              <div className="flex justify-between text-[10px] font-bold text-slate-500 mb-1">
-                                <span>{cat}</span>
-                                <span>
-                                  {used.toFixed(2)}h /{' '}
-                                  {Number(base).toFixed(2)}h
-                                </span>
-                              </div>
-                              <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
-                                <div
-                                  className={`h-2 rounded-full ${
-                                    over
-                                      ? 'bg-red-500'
-                                      : 'bg-emerald-500'
-                                  }`}
-                                  style={{ width: `${pct}%` }}
-                                />
-                              </div>
+                        ([cat, base]) => (
+                          <div
+                            key={cat}
+                            className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4"
+                          >
+                            <div className="text-sm font-black text-slate-800 mb-2">
+                              {cat}
                             </div>
-                          );
-                        },
+                            <RetainerCategoryStats
+                              client={clientProfile}
+                              categoryName={cat}
+                              catStats={stats?.perCategory?.[cat]}
+                              baseFallback={Number(base) || 0}
+                              cycleStart={mStart}
+                              cycleEnd={mEnd}
+                              variant="detailed"
+                              showDaysLeft={portalOffset === 0}
+                            />
+                          </div>
+                        ),
                       )}
                     </div>
                   </div>

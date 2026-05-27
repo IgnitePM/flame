@@ -69,10 +69,13 @@ import {
   clientHasEnabledRetainers,
   getEnabledRetainerCategoryEntries,
   getEnabledRetainerCategoryNames,
+  isRetainerCategoryDollar,
 } from '../utils/retainerCategories.js';
+import { computeRetainerDaysLeft } from '../utils/retainerCategoryStats.js';
 import ClientProfileSummary from './ClientProfileSummary.jsx';
 import ClientFilesPanel from './ClientFilesPanel.jsx';
 import ClientCycleActivityPanel from './ClientCycleActivityPanel.jsx';
+import RetainerCategoryStats from './RetainerCategoryStats.jsx';
 import TodoItemAttachments from './TodoItemAttachments.jsx';
 
 /** Normalize ?tab= for /admin/clients/:id (supports legacy `projects`). */
@@ -4070,6 +4073,12 @@ const AdminDashboard = ({
                           <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md">
                             {new Date(mStart).toLocaleDateString()} -{' '}
                             {new Date(mEnd).toLocaleDateString()}
+                            {offset === 0 && computeRetainerDaysLeft(mEnd) != null && (
+                              <span className="ml-2 text-slate-400">
+                                · {computeRetainerDaysLeft(mEnd)} day
+                                {computeRetainerDaysLeft(mEnd) === 1 ? '' : 's'} left
+                              </span>
+                            )}
                           </span>
                           <button
                             onClick={(e) => {
@@ -5439,22 +5448,8 @@ const AdminDashboard = ({
                               const used =
                                 stats.categoryBreakdown[cat] || 0;
                               const baseNum = Number(base) || 0;
-                              const isDollarCategory =
-                                cat === 'Social Ad Budget' || c?.retainerUnits?.[cat] === 'dollar';
+                              const isDollarCategory = isRetainerCategoryDollar(c, cat);
                               const catStats = stats?.perCategory?.[cat] || null;
-                              const carryoverForCat = Number(catStats?.carryover || 0);
-                              const allottedForCat = Number(catStats?.adjustedAllotted ?? baseNum);
-                              const usedDisplay = Number(used || 0).toFixed(2);
-                              const allottedDisplay = Number(allottedForCat || 0).toFixed(2);
-                              const pct =
-                                allottedForCat > 0
-                                  ? Math.min(
-                                      100,
-                                      (Number(used || 0) / allottedForCat) * 100,
-                                    )
-                                  : 0;
-                              const over =
-                                allottedForCat > 0 && used > allottedForCat;
                               const categoryTasks = periodTasks.filter(
                                 (t) => t.projectName === cat,
                               );
@@ -5495,19 +5490,23 @@ const AdminDashboard = ({
                                         {cat}
                                       </div>
                                       {(showClientSummary ||
+                                        showClientTasks ||
                                         showClientTimesheets) && (
-                                      <div className="text-[10px] font-bold text-slate-400">
-                                        {isDollarCategory
-                                          ? `$${usedDisplay} / $${allottedDisplay}`
-                                          : `${usedDisplay}h / ${allottedDisplay}h`}
-                                        {carryoverForCat !== 0 && (
-                                          <span className="ml-2">
-                                            (carryover:{' '}
-                                            {carryoverForCat > 0 ? '+' : ''}
-                                            {Number(carryoverForCat || 0).toFixed(2)}
-                                            {isDollarCategory ? '' : 'h'})
-                                          </span>
-                                        )}
+                                      <div className="mt-1">
+                                        <RetainerCategoryStats
+                                          client={c}
+                                          categoryName={cat}
+                                          catStats={catStats}
+                                          baseFallback={baseNum}
+                                          cycleStart={cycleStart}
+                                          cycleEnd={period.end}
+                                          variant={
+                                            showClientSummary ? 'detailed' : 'compact'
+                                          }
+                                          showProgressBar
+                                          showDaysLeft={offset === 0}
+                                          showCycleDates={showClientSummary}
+                                        />
                                       </div>
                                       )}
                                     </div>
@@ -5574,18 +5573,6 @@ const AdminDashboard = ({
                                         No logged tasks/expenses
                                       </div>
                                     ))}
-                                  </div>
-                                  )}
-                                  {showClientSummary && (
-                                  <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
-                                    <div
-                                      className={`h-2 rounded-full ${
-                                        over
-                                          ? 'bg-red-500'
-                                          : 'bg-emerald-500'
-                                      }`}
-                                      style={{ width: `${pct}%` }}
-                                    />
                                   </div>
                                   )}
 

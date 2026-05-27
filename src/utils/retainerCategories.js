@@ -41,6 +41,14 @@ export function clientHasEnabledRetainers(client) {
   return getEnabledRetainerCategoryNames(client).length > 0;
 }
 
+export function isRetainerCategoryDollar(client, categoryName) {
+  if (!categoryName) return false;
+  return (
+    categoryName === 'Social Ad Budget' ||
+    client?.retainerUnits?.[categoryName] === 'dollar'
+  );
+}
+
 export function normalizeRetainerCategoryEnabled(raw) {
   if (!raw || typeof raw !== 'object') return {};
   const out = {};

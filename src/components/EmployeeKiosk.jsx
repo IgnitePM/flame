@@ -39,6 +39,7 @@ import {
   sortTodoRowsByClientThenDue,
 } from '../utils/todoFilters.js';
 import { safeDisplayForReact } from '../utils/safeReactText.js';
+import RetainerCategoryStats from './RetainerCategoryStats.jsx';
 import {
   filterClientsForTeamMember,
   teamMemberCanViewClient,
@@ -1187,6 +1188,8 @@ const EmployeeKiosk = ({
           hasAvailable,
           eps,
           billingTarget: `retainer_${cat}`,
+          carryover: Number(pc.carryover ?? 0),
+          basePerCycle: Number(pc.baseActive ?? client.retainers?.[cat] ?? 0),
         });
       }
     }
@@ -1710,47 +1713,20 @@ const EmployeeKiosk = ({
                           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
                             Retainer Progress
                           </div>
-
-                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">
                             Category: {selectedRetainerCategory}
                           </div>
-                          <div className="text-xs font-black text-slate-700 mb-2">
-                            {isDollarCategory
-                              ? `$${Number(retainerCategoryUsedDisplay || 0).toFixed(2)} used / $${Number(categoryAllotted || 0).toFixed(2)} available`
-                              : `${Number(retainerCategoryUsedDisplay || 0).toFixed(2)}h used / ${Number(categoryAllotted || 0).toFixed(2)}h available`}
-                          </div>
-                          <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-3">
-                            <div
-                              className={`h-3 rounded-full transition-all duration-500 ${
-                                  (retainerCategoryUsedDisplay >
-                                  Number(categoryAllotted || 0))
-                                    ? 'bg-red-500'
-                                    : 'bg-emerald-500'
-                                }`}
-                              style={{
-                                width: `${Math.min(
-                                  100,
-                                  ((retainerCategoryUsedDisplay || 0) /
-                                    ((Number(categoryAllotted || 0) || 1))) *
-                                    100,
-                                )}%`,
-                              }}
-                            />
-                          </div>
-
-                          {/* Days left */}
-                          {cycleEndMs && (
-                            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-3">
-                              Days left:{' '}
-                              {Math.max(
-                                0,
-                                Math.ceil(
-                                  (cycleEndMs - Date.now()) / 86400000,
-                                ),
-                              )}{' '}
-                              days
-                            </div>
-                          )}
+                          <RetainerCategoryStats
+                            client={selectedClientObj}
+                            categoryName={selectedRetainerCategory}
+                            catStats={retainerStats?.perCategory?.[selectedRetainerCategory]}
+                            baseFallback={Number(
+                              selectedClientObj?.retainers?.[selectedRetainerCategory] || 0,
+                            )}
+                            cycleStart={cycleStartMs}
+                            cycleEnd={cycleEndMs}
+                            variant="detailed"
+                          />
                         </div>
                       )}
 
@@ -1857,45 +1833,20 @@ const EmployeeKiosk = ({
                           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
                             Retainer Progress
                           </div>
-
-                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">
                             Category: {selectedRetainerCategory}
                           </div>
-                          <div className="text-xs font-black text-slate-700 mb-2">
-                            {isDollarCategory
-                              ? `$${Number(retainerCategoryUsedDisplay || 0).toFixed(2)} used / $${Number(categoryAllotted || 0).toFixed(2)} available`
-                              : `${Number(retainerCategoryUsedDisplay || 0).toFixed(2)}h used / ${Number(categoryAllotted || 0).toFixed(2)}h available`}
-                          </div>
-                          <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-3">
-                            <div
-                              className={`h-3 rounded-full transition-all duration-500 ${
-                                retainerCategoryUsedDisplay > Number(categoryAllotted || 0)
-                                  ? 'bg-red-500'
-                                  : 'bg-emerald-500'
-                              }`}
-                              style={{
-                                width: `${Math.min(
-                                  100,
-                                  ((retainerCategoryUsedDisplay || 0) /
-                                    ((Number(categoryAllotted || 0) || 1))) *
-                                    100,
-                                )}%`,
-                              }}
-                            />
-                          </div>
-
-                          {cycleEndMs && (
-                            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-3">
-                              Days left:{' '}
-                              {Math.max(
-                                0,
-                                Math.ceil(
-                                  (cycleEndMs - Date.now()) / 86400000,
-                                ),
-                              )}{' '}
-                              days
-                            </div>
-                          )}
+                          <RetainerCategoryStats
+                            client={selectedClientObj}
+                            categoryName={selectedRetainerCategory}
+                            catStats={retainerStats?.perCategory?.[selectedRetainerCategory]}
+                            baseFallback={Number(
+                              selectedClientObj?.retainers?.[selectedRetainerCategory] || 0,
+                            )}
+                            cycleStart={cycleStartMs}
+                            cycleEnd={cycleEndMs}
+                            variant="detailed"
+                          />
                         </div>
                       )}
 
@@ -2472,6 +2423,14 @@ const EmployeeKiosk = ({
                               ? 'Cycle just rolled - totals refresh on next sync'
                               : `~${row.daysLeft} day${row.daysLeft === 1 ? '' : 's'} left in cycle`}
                           </div>
+                          {(row.carryover !== 0 || row.basePerCycle > 0) && (
+                            <div className="text-[9px] font-bold text-zinc-400 mt-0.5">
+                              Per cycle {fmt(row.basePerCycle)}
+                              {label}
+                              {row.carryover !== 0 &&
+                                ` · carryover ${row.carryover > 0 ? '+' : ''}${fmt(row.carryover)}${label}`}
+                            </div>
+                          )}
                           <div className="w-full bg-zinc-700 rounded-full h-1.5 overflow-hidden mt-1.5">
                             <div
                               className={`h-1.5 rounded-full ${
