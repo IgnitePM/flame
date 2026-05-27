@@ -5431,7 +5431,13 @@ const AdminDashboard = ({
                           <h5 className="text-sm sm:text-base font-black text-slate-700 uppercase tracking-widest mb-3">
                             Retainer Categories
                           </h5>
-                          <div className="space-y-2 min-w-0 max-w-full">
+                          <div
+                            className={
+                              showClientSummary
+                                ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 min-w-0 max-w-full items-stretch'
+                                : 'space-y-2 min-w-0 max-w-full'
+                            }
+                          >
                             {getEnabledRetainerCategoryEntries(c)
                               .sort((a, b) => {
                                 const ai = getRetainerCategorySortIndex(a[0]);
@@ -5466,7 +5472,7 @@ const AdminDashboard = ({
                                   className={[
                                     'min-w-0 max-w-full w-full',
                                     isClientPage && showClientSummary
-                                      ? 'rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:p-4 space-y-2'
+                                      ? 'rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:p-4 space-y-2 h-full flex flex-col'
                                       : '',
                                     isClientPage && showClientTasks
                                       ? 'border-b border-slate-200 pb-5 mb-5 last:border-b-0 last:pb-0 last:mb-0'

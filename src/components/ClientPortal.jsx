@@ -265,12 +265,12 @@ const ClientPortal = ({
                     <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">
                       Retainer Categories
                     </h4>
-                    <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                       {getEnabledRetainerCategoryEntries(clientProfile).map(
                         ([cat, base]) => (
                           <div
                             key={cat}
-                            className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                            className="rounded-2xl border border-slate-200 bg-slate-50 p-4 h-full flex flex-col"
                           >
                             <div className="text-sm font-black text-slate-800 mb-2">
                               {cat}
