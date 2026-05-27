@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, GripVertical, Pin } from 'lucide-react';
 import { toggleTodoPinnedById } from '../utils/todoListOrder.js';
 import {
@@ -44,6 +45,136 @@ function assigneeSummaryLabel(assignees, { inheritLabel = 'Assign' } = {}) {
   if (assignees.length === 0) return inheritLabel;
   if (assignees.length === 1) return assignees[0].split('@')[0];
   return `${assignees.length} people`;
+}
+
+function AssigneePicker({
+  openKey,
+  assigneeOpenKey,
+  assignees,
+  assignableEmails,
+  onChange,
+  onOpenChange,
+  inheritLabel = 'Assign',
+  align = 'left',
+  disabled = false,
+}) {
+  const buttonRef = React.useRef(null);
+  const assignOpen = assigneeOpenKey === openKey;
+  const [menuStyle, setMenuStyle] = React.useState(null);
+
+  React.useLayoutEffect(() => {
+    if (!assignOpen) {
+      setMenuStyle(null);
+      return;
+    }
+    const updatePosition = () => {
+      const el = buttonRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const width = Math.min(260, window.innerWidth - 16);
+      let left = align === 'right' ? rect.right - width : rect.left;
+      left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+      setMenuStyle({
+        top: rect.bottom + 6,
+        left,
+        width,
+      });
+    };
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [assignOpen, align]);
+
+  const menu =
+    assignOpen && menuStyle
+      ? createPortal(
+          <>
+            <button
+              type="button"
+              aria-label="Close assignee menu"
+              className="fixed inset-0 z-[200] cursor-default bg-transparent"
+              onClick={() => onOpenChange?.(null)}
+            />
+            <div
+              className="fixed z-[210] rounded-xl border border-slate-200 bg-white p-2 shadow-2xl"
+              style={{
+                top: menuStyle.top,
+                left: menuStyle.left,
+                width: menuStyle.width,
+              }}
+            >
+              <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-slate-400">
+                Assign to
+              </div>
+              {inheritLabel !== 'Assign' && assignees.length === 0 && (
+                <p className="mb-2 text-[10px] font-bold text-slate-500">
+                  Currently inherits primary task assignees.
+                </p>
+              )}
+              <div className="max-h-[180px] space-y-1 overflow-y-auto">
+                {assignableEmails.map((email) => {
+                  const checked = assignees.includes(email);
+                  return (
+                    <label
+                      key={email}
+                      className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-bold hover:bg-slate-50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => {
+                          const next = checked
+                            ? assignees.filter((e) => e !== email)
+                            : [...assignees, email].sort();
+                          onChange?.(next);
+                        }}
+                      />
+                      <span className="truncate">{email}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  className="rounded-lg bg-slate-100 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-slate-600"
+                  onClick={() => onChange?.([])}
+                >
+                  Clear
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg bg-[#fd7414] px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white"
+                  onClick={() => onOpenChange?.(null)}
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </>,
+          document.body,
+        )
+      : null;
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        disabled={disabled}
+        onClick={() => onOpenChange?.(assignOpen ? null : openKey)}
+        className="kiosk-light-control inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[9px] font-black uppercase tracking-widest text-black disabled:opacity-40"
+      >
+        {assigneeSummaryLabel(assignees, { inheritLabel })}
+        <ChevronDown className="w-3 h-3" />
+      </button>
+      {menu}
+    </>
+  );
 }
 
 export default function KioskClientTodoItem({
@@ -150,84 +281,12 @@ export default function KioskClientTodoItem({
 
   const subs = getSubtasks(item);
   const primaryAssignees = normalizeAssignees(item.assigneeEmails);
-
-  const renderAssigneePicker = ({
-    openKey,
-    assignees,
-    onChange,
-    inheritLabel = 'Assign',
-    align = 'left',
-  }) => {
-    const assignOpen = assigneeOpenKey === openKey;
-    return (
-      <div className="relative z-20">
-        <button
-          type="button"
-          disabled={todoSaving || isCycleLocked}
-          onClick={() =>
-            onAssigneeOpenChange?.(assignOpen ? null : openKey)
-          }
-          className="kiosk-light-control inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[9px] font-black uppercase tracking-widest text-black disabled:opacity-40"
-        >
-          {assigneeSummaryLabel(assignees, { inheritLabel })}
-          <ChevronDown className="w-3 h-3" />
-        </button>
-        {assignOpen && (
-          <div
-            className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} z-[130] mt-1 w-[260px] max-w-[85vw] rounded-xl border border-slate-200 bg-white p-2 shadow-xl`}
-          >
-            <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-slate-400">
-              Assign to
-            </div>
-            {inheritLabel !== 'Assign' && assignees.length === 0 && (
-              <p className="mb-2 text-[10px] font-bold text-slate-500">
-                Currently inherits primary task assignees.
-              </p>
-            )}
-            <div className="max-h-[180px] space-y-1 overflow-y-auto">
-              {assignableEmails.map((email) => {
-                const checked = assignees.includes(email);
-                return (
-                  <label
-                    key={email}
-                    className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-bold hover:bg-slate-50"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => {
-                        const next = checked
-                          ? assignees.filter((e) => e !== email)
-                          : [...assignees, email].sort();
-                        onChange?.(next);
-                      }}
-                    />
-                    <span className="truncate">{email}</span>
-                  </label>
-                );
-              })}
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                className="rounded-lg bg-slate-100 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-slate-600"
-                onClick={() => onChange?.([])}
-              >
-                Clear
-              </button>
-              <button
-                type="button"
-                className="rounded-lg bg-[#fd7414] px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white"
-                onClick={() => onAssigneeOpenChange?.(null)}
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
+  const primaryAssigneeOpen = assigneeOpenKey === itemAssigneeOpenKey;
+  const anySubAssigneeOpen =
+    !!assigneeOpenKey &&
+    assigneeOpenKey.startsWith(`${itemAssigneeOpenKey}__sub__`);
+  const assigneeMenuOpen = primaryAssigneeOpen || anySubAssigneeOpen;
+  const pickerDisabled = todoSaving || isCycleLocked;
 
   const dragOverProps = canDragReorder
     ? {
@@ -238,133 +297,151 @@ export default function KioskClientTodoItem({
       }
     : {};
 
+  const renderPrimaryControls = () => (
+    <div className="flex shrink-0 items-center justify-end gap-1">
+      <AssigneePicker
+        openKey={itemAssigneeOpenKey}
+        assigneeOpenKey={assigneeOpenKey}
+        assignees={primaryAssignees}
+        assignableEmails={assignableEmails}
+        onChange={onAssigneesChange}
+        onOpenChange={onAssigneeOpenChange}
+        disabled={pickerDisabled}
+      />
+      <button
+        type="button"
+        disabled={pickerDisabled}
+        onClick={() => onOpenOptions?.(item)}
+        className="kiosk-light-control shrink-0 px-2 py-1 rounded-lg bg-white border border-slate-200 text-[9px] font-black uppercase tracking-widest text-black"
+      >
+        Options
+      </button>
+    </div>
+  );
+
   return (
     <li
-      className={`relative flex flex-col gap-1 rounded-lg min-w-0 max-w-full ${getUrgencyClass(item)}`}
+      className={`relative flex flex-col gap-1 rounded-lg min-w-0 max-w-full ${
+        assigneeMenuOpen ? 'z-[120]' : 'z-0'
+      } ${getUrgencyClass(item)}`}
     >
       <div
-        className="grid grid-cols-[auto_auto_auto_minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 p-2 min-w-0 w-full"
+        className="flex flex-col gap-2 p-2 min-w-0 w-full"
         {...dragOverProps}
         onDrop={(e) =>
           applyDrop({ type: 'before-primary', primaryId: item.id }, e)
         }
       >
-        {canDragReorder ? (
-          <span
-            draggable={!todoSaving}
-            onDragStart={(e) => {
-              writeTodoDragPayload(e.dataTransfer, {
-                kind: 'primary',
-                id: item.id,
-              });
-            }}
-            className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0 select-none touch-none mt-0.5"
-            title="Drag to reorder or nest under another task"
-          >
-            <GripVertical className="w-4 h-4" aria-hidden />
-          </span>
-        ) : (
-          <span className="w-4 shrink-0" aria-hidden />
-        )}
-        <button
-          type="button"
-          disabled={todoSaving}
-          title={item.pinned ? 'Unpin from top' : 'Pin to top'}
-          onClick={() => {
-            setTodoSaving(true);
-            const next = toggleTodoPinnedById(allItems, item.id);
-            updateClientTodo(client, cycleStart, catKey, {
-              ...catTodo,
-              items: next,
-            }).finally(() => setTodoSaving(false));
-          }}
-          className={`shrink-0 p-1.5 rounded-lg border transition-colors ${
-            item.pinned
-              ? 'border-amber-200 bg-amber-50 text-amber-700'
-              : 'border-transparent text-slate-300 hover:text-amber-600 hover:bg-amber-50/80'
-          }`}
-        >
-          <Pin className="w-4 h-4" />
-        </button>
-        <input
-          type="checkbox"
-          checked={!!item.done}
-          onChange={async () => {
-            if (!item.done && !canMarkParentTodoDone(item)) {
-              window.alert(
-                'Complete every sub-task before marking this primary task complete.',
-              );
-              return;
-            }
-            setTodoSaving(true);
-            try {
-              const next = allItems.map((i) =>
-                i.id === item.id
-                  ? { ...i, done: !i.done, doneAt: !i.done ? Date.now() : null }
-                  : i,
-              );
-              await updateClientTodo(client, cycleStart, catKey, {
+        <div className="flex items-start gap-2 min-w-0 w-full">
+          {canDragReorder ? (
+            <span
+              draggable={!todoSaving}
+              onDragStart={(e) => {
+                writeTodoDragPayload(e.dataTransfer, {
+                  kind: 'primary',
+                  id: item.id,
+                });
+              }}
+              className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0 select-none touch-none mt-0.5"
+              title="Drag to reorder or nest under another task"
+            >
+              <GripVertical className="w-4 h-4" aria-hidden />
+            </span>
+          ) : (
+            <span className="w-4 shrink-0" aria-hidden />
+          )}
+          <button
+            type="button"
+            disabled={todoSaving}
+            title={item.pinned ? 'Unpin from top' : 'Pin to top'}
+            onClick={() => {
+              setTodoSaving(true);
+              const next = toggleTodoPinnedById(allItems, item.id);
+              updateClientTodo(client, cycleStart, catKey, {
                 ...catTodo,
                 items: next,
-              });
-            } finally {
-              setTodoSaving(false);
-            }
-          }}
-          disabled={todoSaving || isCycleLocked}
-          className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4 shrink-0 mt-0.5"
-        />
-        <div className="min-w-0">
-          <div className={`text-sm break-words ${item.done ? 'line-through opacity-70' : ''}`}>
-            {safeDisplayForReact(item.text) || '(no text)'}
-            {item.recurring && (
-              <span className="ml-2 text-[9px] font-black uppercase tracking-widest text-[#fd7414]">
-                Recurring
-              </span>
-            )}
-          </div>
-          {(item.dueDate || (subs.length > 0 && !item.done)) && (
-            <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] font-black uppercase tracking-widest">
-              {item.dueDate && (
-                <span>Due {new Date(item.dueDate).toLocaleDateString()}</span>
-              )}
-              {subs.length > 0 && !item.done && (
-                <span className="font-bold text-slate-500 normal-case tracking-normal">
-                  ({subs.filter((s) => !s.done).length} step
-                  {subs.filter((s) => !s.done).length === 1 ? '' : 's'} left)
+              }).finally(() => setTodoSaving(false));
+            }}
+            className={`shrink-0 p-1.5 rounded-lg border transition-colors ${
+              item.pinned
+                ? 'border-amber-200 bg-amber-50 text-amber-700'
+                : 'border-transparent text-slate-300 hover:text-amber-600 hover:bg-amber-50/80'
+            }`}
+          >
+            <Pin className="w-4 h-4" />
+          </button>
+          <input
+            type="checkbox"
+            checked={!!item.done}
+            onChange={async () => {
+              if (!item.done && !canMarkParentTodoDone(item)) {
+                window.alert(
+                  'Complete every sub-task before marking this primary task complete.',
+                );
+                return;
+              }
+              setTodoSaving(true);
+              try {
+                const next = allItems.map((i) =>
+                  i.id === item.id
+                    ? { ...i, done: !i.done, doneAt: !i.done ? Date.now() : null }
+                    : i,
+                );
+                await updateClientTodo(client, cycleStart, catKey, {
+                  ...catTodo,
+                  items: next,
+                });
+              } finally {
+                setTodoSaving(false);
+              }
+            }}
+            disabled={todoSaving || isCycleLocked}
+            className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4 shrink-0 mt-0.5"
+          />
+          <div className="min-w-0 flex-1">
+            <div className={`text-sm break-words ${item.done ? 'line-through opacity-70' : ''}`}>
+              {safeDisplayForReact(item.text) || '(no text)'}
+              {item.recurring && (
+                <span className="ml-2 text-[9px] font-black uppercase tracking-widest text-[#fd7414]">
+                  Recurring
                 </span>
               )}
+            </div>
+            {(item.dueDate || (subs.length > 0 && !item.done)) && (
+              <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] font-black uppercase tracking-widest">
+                {item.dueDate && (
+                  <span>Due {new Date(item.dueDate).toLocaleDateString()}</span>
+                )}
+                {subs.length > 0 && !item.done && (
+                  <span className="font-bold text-slate-500 normal-case tracking-normal">
+                    ({subs.filter((s) => !s.done).length} step
+                    {subs.filter((s) => !s.done).length === 1 ? '' : 's'} left)
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+          {canManageTodos && (
+            <div className="hidden sm:flex shrink-0 self-start">
+              {renderPrimaryControls()}
             </div>
           )}
         </div>
         {canManageTodos && (
-          <div className="relative z-20 col-start-5 flex shrink-0 items-center justify-end gap-1 self-start">
-            {renderAssigneePicker({
-              openKey: itemAssigneeOpenKey,
-              assignees: primaryAssignees,
-              onChange: onAssigneesChange,
-            })}
-            <button
-              type="button"
-              disabled={todoSaving || isCycleLocked}
-              onClick={() => onOpenOptions?.(item)}
-              className="kiosk-light-control shrink-0 px-2 py-1 rounded-lg bg-white border border-slate-200 text-[9px] font-black uppercase tracking-widest text-black"
-            >
-              Options
-            </button>
+          <div className="flex sm:hidden justify-end pl-8">
+            {renderPrimaryControls()}
           </div>
         )}
       </div>
       {subs.length > 0 && (
-        <ul className="relative z-0 ml-4 sm:ml-6 border-l border-slate-200 pl-3 space-y-1 pb-1 w-full min-w-0 max-w-full">
+        <ul className="ml-4 sm:ml-6 border-l border-slate-200 pl-3 space-y-1.5 pb-1 w-full min-w-0 max-w-full">
           {subs.map((sub) => {
             const subAssignees = normalizeAssignees(sub.assigneeEmails);
             const subAssigneeOpenKey = `${itemAssigneeOpenKey}__sub__${sub.id}`;
-            const subAssigneeOpen = assigneeOpenKey === subAssigneeOpenKey;
             return (
               <li
                 key={sub.id}
-                className={`relative rounded-md ${subAssigneeOpen ? 'z-30' : 'z-10'} ${getUrgencyClass(sub)}`}
+                className={`rounded-md ${getUrgencyClass(sub)}`}
                 {...dragOverProps}
                 onDrop={(e) =>
                   applyDrop(
@@ -377,8 +454,8 @@ export default function KioskClientTodoItem({
                   )
                 }
               >
-                <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 px-2 py-1.5 min-w-0 w-full">
-                  <div className="flex items-start gap-1.5 pt-0.5 shrink-0">
+                <div className="flex flex-col gap-1.5 px-2 py-1.5 min-w-0 w-full">
+                  <div className="flex items-start gap-2 min-w-0 w-full">
                     {canDragReorder && (
                       <span
                         draggable={!todoSaving}
@@ -389,7 +466,7 @@ export default function KioskClientTodoItem({
                             parentId: item.id,
                           });
                         }}
-                        className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0 select-none touch-none"
+                        className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0 select-none touch-none mt-0.5"
                         title="Drag to reorder, promote, or move between tasks"
                       >
                         <GripVertical className="w-3.5 h-3.5" aria-hidden />
@@ -422,31 +499,58 @@ export default function KioskClientTodoItem({
                           setTodoSaving(false);
                         }
                       }}
-                      className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4 shrink-0"
+                      className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4 shrink-0 mt-0.5"
                     />
-                  </div>
-                  <div className="min-w-0 py-0.5">
-                    <div className={`text-sm break-words ${sub.done ? 'line-through opacity-70' : ''}`}>
-                      {safeDisplayForReact(sub.text) || '(step)'}
+                    <div className="min-w-0 flex-1">
+                      <div className={`text-sm break-words ${sub.done ? 'line-through opacity-70' : ''}`}>
+                        {safeDisplayForReact(sub.text) || '(step)'}
+                      </div>
+                      {sub.dueDate && (
+                        <div className="mt-0.5 text-[10px] font-black uppercase tracking-widest">
+                          Due {new Date(sub.dueDate).toLocaleDateString()}
+                        </div>
+                      )}
                     </div>
-                    {sub.dueDate && (
-                      <div className="mt-0.5 text-[10px] font-black uppercase tracking-widest">
-                        Due {new Date(sub.dueDate).toLocaleDateString()}
+                    {canManageTodos && (
+                      <div className="hidden sm:flex shrink-0 self-start items-center gap-1">
+                        <AssigneePicker
+                          openKey={subAssigneeOpenKey}
+                          assigneeOpenKey={assigneeOpenKey}
+                          assignees={subAssignees}
+                          assignableEmails={assignableEmails}
+                          onChange={(next) => onSubtaskAssigneesChange?.(sub.id, next)}
+                          onOpenChange={onAssigneeOpenChange}
+                          inheritLabel="Inherit"
+                          align="right"
+                          disabled={pickerDisabled}
+                        />
+                        <button
+                          type="button"
+                          disabled={pickerDisabled}
+                          onClick={() => onOpenOptions?.(item, sub)}
+                          className="kiosk-light-control shrink-0 px-2 py-1 rounded-lg bg-white border border-slate-200 text-[9px] font-black uppercase tracking-widest text-black"
+                        >
+                          Options
+                        </button>
                       </div>
                     )}
                   </div>
                   {canManageTodos && (
-                    <div className="relative z-20 flex shrink-0 items-center justify-end gap-1 self-start">
-                      {renderAssigneePicker({
-                        openKey: subAssigneeOpenKey,
-                        assignees: subAssignees,
-                        onChange: (next) => onSubtaskAssigneesChange?.(sub.id, next),
-                        inheritLabel: 'Inherit',
-                        align: 'right',
-                      })}
+                    <div className="flex sm:hidden justify-end gap-1 pl-8">
+                      <AssigneePicker
+                        openKey={subAssigneeOpenKey}
+                        assigneeOpenKey={assigneeOpenKey}
+                        assignees={subAssignees}
+                        assignableEmails={assignableEmails}
+                        onChange={(next) => onSubtaskAssigneesChange?.(sub.id, next)}
+                        onOpenChange={onAssigneeOpenChange}
+                        inheritLabel="Inherit"
+                        align="right"
+                        disabled={pickerDisabled}
+                      />
                       <button
                         type="button"
-                        disabled={todoSaving || isCycleLocked}
+                        disabled={pickerDisabled}
                         onClick={() => onOpenOptions?.(item, sub)}
                         className="kiosk-light-control shrink-0 px-2 py-1 rounded-lg bg-white border border-slate-200 text-[9px] font-black uppercase tracking-widest text-black"
                       >
