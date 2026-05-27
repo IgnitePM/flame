@@ -528,6 +528,40 @@ const EmployeeKiosk = ({
     }
   };
 
+  const updateClientTodoSubtaskAssignees = async (
+    client,
+    cycleStart,
+    categoryKey,
+    itemId,
+    subtaskId,
+    nextAssignees,
+  ) => {
+    if (!updateClientTodo || !getTodoStateForCycle || !client) return;
+    if (isCycleLocked(client, cycleStart)) {
+      window.alert('This billing cycle is locked.');
+      return;
+    }
+    const todoState = getTodoStateForCycle(client, cycleStart);
+    const catTodo = todoState[categoryKey] || { closed: false, items: [] };
+    const items = catTodo.items || [];
+    setTodoSaving(true);
+    try {
+      const next = items.map((i) =>
+        i.id === itemId
+          ? mapItemSubtasks(i, (s) =>
+              s.id === subtaskId ? { ...s, assigneeEmails: nextAssignees } : s,
+            )
+          : i,
+      );
+      await updateClientTodo(client, cycleStart, categoryKey, {
+        ...catTodo,
+        items: next,
+      });
+    } finally {
+      setTodoSaving(false);
+    }
+  };
+
   const toggleClientTodoDone = async (
     client,
     cycleStart,
@@ -1497,17 +1531,9 @@ const EmployeeKiosk = ({
                                       selectedClientObj,
                                       row.cycleStart,
                                     )}
-                                    assigneeOpenKey={
-                                      clientTodoAssigneeOpenKey ===
-                                      `category__${row.item.id}`
-                                        ? row.item.id
-                                        : null
-                                    }
-                                    onAssigneeOpenChange={(key) =>
-                                      setClientTodoAssigneeOpenKey(
-                                        key ? `category__${key}` : null,
-                                      )
-                                    }
+                                    assigneeOpenKey={clientTodoAssigneeOpenKey}
+                                    itemAssigneeOpenKey={`category__${row.item.id}`}
+                                    onAssigneeOpenChange={setClientTodoAssigneeOpenKey}
                                     assignableEmails={assignableEmails}
                                     onAssigneesChange={(next) =>
                                       updateClientTodoAssignees(
@@ -1515,6 +1541,16 @@ const EmployeeKiosk = ({
                                         row.cycleStart,
                                         row.categoryKey,
                                         row.item.id,
+                                        next,
+                                      )
+                                    }
+                                    onSubtaskAssigneesChange={(subtaskId, next) =>
+                                      updateClientTodoSubtaskAssignees(
+                                        selectedClientObj,
+                                        row.cycleStart,
+                                        row.categoryKey,
+                                        row.item.id,
+                                        subtaskId,
                                         next,
                                       )
                                     }
@@ -1909,17 +1945,9 @@ const EmployeeKiosk = ({
                                       selectedClientObj,
                                       row.cycleStart,
                                     )}
-                                    assigneeOpenKey={
-                                      clientTodoAssigneeOpenKey ===
-                                      `category__${row.item.id}`
-                                        ? row.item.id
-                                        : null
-                                    }
-                                    onAssigneeOpenChange={(key) =>
-                                      setClientTodoAssigneeOpenKey(
-                                        key ? `category__${key}` : null,
-                                      )
-                                    }
+                                    assigneeOpenKey={clientTodoAssigneeOpenKey}
+                                    itemAssigneeOpenKey={`category__${row.item.id}`}
+                                    onAssigneeOpenChange={setClientTodoAssigneeOpenKey}
                                     assignableEmails={assignableEmails}
                                     onAssigneesChange={(next) =>
                                       updateClientTodoAssignees(
@@ -1927,6 +1955,16 @@ const EmployeeKiosk = ({
                                         row.cycleStart,
                                         row.categoryKey,
                                         row.item.id,
+                                        next,
+                                      )
+                                    }
+                                    onSubtaskAssigneesChange={(subtaskId, next) =>
+                                      updateClientTodoSubtaskAssignees(
+                                        selectedClientObj,
+                                        row.cycleStart,
+                                        row.categoryKey,
+                                        row.item.id,
+                                        subtaskId,
                                         next,
                                       )
                                     }
