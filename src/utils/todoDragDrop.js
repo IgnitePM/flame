@@ -5,8 +5,33 @@ import {
   removeSubtaskFromItems,
 } from './todoSubtasks.js';
 
+const TODO_DRAG_MIME = 'application/x-ignite-todo';
+
+/** @type {{ kind: 'primary', id: string } | { kind: 'subtask', id: string, parentId: string } | null} */
+let activeTodoDragPayload = null;
+
 export function encodeTodoDragPayload(payload) {
   return JSON.stringify(payload);
+}
+
+export function setActiveTodoDragPayload(payload) {
+  activeTodoDragPayload = payload || null;
+}
+
+export function clearActiveTodoDragPayload() {
+  activeTodoDragPayload = null;
+}
+
+/** Payload for dragover handlers — getData() is empty until drop in most browsers. */
+export function peekTodoDragPayload(dataTransfer) {
+  return activeTodoDragPayload;
+}
+
+export function hasTodoDragPayload(dataTransfer) {
+  if (activeTodoDragPayload) return true;
+  if (!dataTransfer?.types) return false;
+  const types = Array.from(dataTransfer.types);
+  return types.includes(TODO_DRAG_MIME) || types.includes('text/plain');
 }
 
 /** @returns {{ kind: 'primary', id: string } | { kind: 'subtask', id: string, parentId: string } | null} */
@@ -203,16 +228,23 @@ export function applyTodoListDragDrop(items, drag, drop) {
 }
 
 export function readTodoDragPayload(dataTransfer) {
-  if (!dataTransfer) return null;
-  const encoded = dataTransfer.getData('application/x-ignite-todo');
-  if (encoded) return decodeTodoDragPayload(encoded);
-  return decodeTodoDragPayload(dataTransfer.getData('text/plain'));
+  if (!dataTransfer) return activeTodoDragPayload;
+  const encoded =
+    dataTransfer.getData(TODO_DRAG_MIME) ||
+    dataTransfer.getData('text/plain');
+  const parsed = decodeTodoDragPayload(encoded);
+  return parsed || activeTodoDragPayload;
 }
 
 export function writeTodoDragPayload(dataTransfer, payload) {
   if (!dataTransfer || !payload) return;
+  setActiveTodoDragPayload(payload);
   const encoded = encodeTodoDragPayload(payload);
-  dataTransfer.setData('application/x-ignite-todo', encoded);
+  dataTransfer.setData(TODO_DRAG_MIME, encoded);
   dataTransfer.setData('text/plain', encoded);
   dataTransfer.effectAllowed = 'move';
+}
+
+export function endTodoDragSession() {
+  clearActiveTodoDragPayload();
 }

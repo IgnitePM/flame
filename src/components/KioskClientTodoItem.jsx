@@ -4,6 +4,9 @@ import { ChevronDown, GripVertical, Pin } from 'lucide-react';
 import { toggleTodoPinnedById } from '../utils/todoListOrder.js';
 import {
   applyTodoListDragDrop,
+  endTodoDragSession,
+  hasTodoDragPayload,
+  peekTodoDragPayload,
   readTodoDragPayload,
   writeTodoDragPayload,
 } from '../utils/todoDragDrop.js';
@@ -287,9 +290,11 @@ export default function KioskClientTodoItem({
   const clearDragVisuals = () => {
     setIsDragging(false);
     setDropHint(null);
+    endTodoDragSession();
   };
 
   const startPrimaryDrag = (e) => {
+    e.stopPropagation();
     writeTodoDragPayload(e.dataTransfer, {
       kind: 'primary',
       id: item.id,
@@ -299,6 +304,7 @@ export default function KioskClientTodoItem({
   };
 
   const startSubtaskDrag = (e, sub, subRowEl) => {
+    e.stopPropagation();
     writeTodoDragPayload(e.dataTransfer, {
       kind: 'subtask',
       id: sub.id,
@@ -308,8 +314,7 @@ export default function KioskClientTodoItem({
     setIsDragging(true);
   };
 
-  const computePrimaryDropTarget = (e) => {
-    const drag = readTodoDragPayload(e.dataTransfer);
+  const computePrimaryDropTarget = (e, drag) => {
     if (!drag) return null;
     if (drag.kind === 'primary' && drag.id === item.id) return null;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -323,10 +328,13 @@ export default function KioskClientTodoItem({
 
   const handlePrimaryDragOver = (e) => {
     if (!canDragReorder || todoSaving || isCycleLocked) return;
-    const target = computePrimaryDropTarget(e);
-    if (!target) return;
+    if (!hasTodoDragPayload(e.dataTransfer)) return;
     e.preventDefault();
+    e.stopPropagation();
     e.dataTransfer.dropEffect = 'move';
+    const drag = peekTodoDragPayload(e.dataTransfer);
+    const target = computePrimaryDropTarget(e, drag);
+    if (!target) return;
     setDropHint(target.type === 'nest-under-primary' ? 'nest' : 'reorder');
   };
 
@@ -335,7 +343,7 @@ export default function KioskClientTodoItem({
     e.stopPropagation();
     if (!canDragReorder || todoSaving || isCycleLocked) return;
     const drag = readTodoDragPayload(e.dataTransfer);
-    const dropTarget = computePrimaryDropTarget(e);
+    const dropTarget = computePrimaryDropTarget(e, drag);
     if (!drag || !dropTarget) return;
     const result = applyTodoListDragDrop(allItems, drag, dropTarget);
     clearDragVisuals();
@@ -365,8 +373,9 @@ export default function KioskClientTodoItem({
 
   const handleSubtaskDragOver = (e) => {
     if (!canDragReorder || todoSaving || isCycleLocked) return;
-    if (!readTodoDragPayload(e.dataTransfer)) return;
+    if (!hasTodoDragPayload(e.dataTransfer)) return;
     e.preventDefault();
+    e.stopPropagation();
     e.dataTransfer.dropEffect = 'move';
     setDropHint('subtask');
   };
@@ -407,15 +416,6 @@ export default function KioskClientTodoItem({
     assigneeOpenKey.startsWith(`${itemAssigneeOpenKey}__sub__`);
   const assigneeMenuOpen = primaryAssigneeOpen || anySubAssigneeOpen;
   const pickerDisabled = todoSaving || isCycleLocked;
-
-  const dragOverProps = canDragReorder
-    ? {
-        onDragOver: (e) => {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'move';
-        },
-      }
-    : {};
 
   const dropHintLabel =
     dropHint === 'reorder'
