@@ -98,11 +98,18 @@ function insertSubtaskInParent(parentItem, sub, beforeSubId) {
   return { ...parentItem, subtasks: subs };
 }
 
+function appendSubtaskToPrimary(items, parentId, sub) {
+  return items.map((i) =>
+    i.id === parentId ? insertSubtaskInParent(i, sub, null) : i,
+  );
+}
+
 /**
  * Apply drag-and-drop for client todo lists.
  *
  * drop targets:
- * - `{ type: 'before-primary', primaryId }`
+ * - `{ type: 'before-primary', primaryId }` — reorder before a primary row
+ * - `{ type: 'nest-under-primary', primaryId }` — nest dragged primary as last step
  * - `{ type: 'before-subtask', parentId, subtaskId }`
  */
 export function applyTodoListDragDrop(items, drag, drop) {
@@ -116,6 +123,25 @@ export function applyTodoListDragDrop(items, drag, drop) {
     const toIdx = display.findIndex((i) => i.id === drop.primaryId);
     if (fromIdx < 0 || toIdx < 0) return { ok: false, items: list };
     return { ok: true, items: reorderTodosDisplay(list, fromIdx, toIdx) };
+  }
+
+  if (drag.kind === 'primary' && drop.type === 'nest-under-primary') {
+    const primary = findPrimary(list, drag.id);
+    if (!primary) return { ok: false, items: list };
+    if (primary.id === drop.primaryId) {
+      return { ok: false, items: list, error: 'Cannot nest a task under itself.' };
+    }
+    if (hasSubtasks(primary)) {
+      return {
+        ok: false,
+        items: list,
+        error: 'Move or delete sub-tasks before nesting this task under another.',
+      };
+    }
+    const sub = subtaskFromPrimary(primary);
+    let next = list.filter((i) => i.id !== drag.id);
+    next = appendSubtaskToPrimary(next, drop.primaryId, sub);
+    return { ok: true, items: next };
   }
 
   if (drag.kind === 'subtask' && drop.type === 'before-subtask') {

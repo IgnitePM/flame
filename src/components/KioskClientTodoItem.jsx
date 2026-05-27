@@ -187,6 +187,7 @@ export default function KioskClientTodoItem({
   todoSaving,
   setTodoSaving,
   updateClientTodo,
+  onPersistItems,
   canDragReorder,
   getUrgencyClass,
   user,
@@ -224,6 +225,12 @@ export default function KioskClientTodoItem({
   };
 
   const persistItems = (nextItems, { errorMessage } = {}) => {
+    if (onPersistItems) {
+      onPersistItems(nextItems).catch?.(() => {
+        if (errorMessage) window.alert(errorMessage);
+      });
+      return;
+    }
     if (!updateClientTodo) return;
     setTodoSaving(true);
     updateClientTodo(client, cycleStart, catKey, {
@@ -234,6 +241,31 @@ export default function KioskClientTodoItem({
         if (errorMessage) window.alert(errorMessage);
       })
       .finally(() => setTodoSaving(false));
+  };
+
+  const handlePrimaryDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!canDragReorder || todoSaving || isCycleLocked) return;
+    const drag = readTodoDragPayload(e.dataTransfer);
+    if (!drag) return;
+    if (drag.kind === 'primary' && drag.id === item.id) return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const relativeY = e.clientY - rect.top;
+    const reorderZone = Math.min(36, rect.height * 0.25);
+    const dropTarget =
+      drag.kind === 'primary' && relativeY > reorderZone
+        ? { type: 'nest-under-primary', primaryId: item.id }
+        : { type: 'before-primary', primaryId: item.id };
+
+    const result = applyTodoListDragDrop(allItems, drag, dropTarget);
+    if (result.error) {
+      window.alert(result.error);
+      return;
+    }
+    if (!result.ok) return;
+    persistItems(result.items);
   };
 
   const applyDrop = (dropTarget, e) => {
@@ -324,14 +356,10 @@ export default function KioskClientTodoItem({
       className={`relative flex flex-col gap-1 rounded-lg min-w-0 max-w-full ${
         assigneeMenuOpen ? 'z-[120]' : 'z-0'
       } ${getUrgencyClass(item)}`}
+      {...dragOverProps}
+      onDrop={handlePrimaryDrop}
     >
-      <div
-        className="flex flex-col gap-2 p-2 min-w-0 w-full"
-        {...dragOverProps}
-        onDrop={(e) =>
-          applyDrop({ type: 'before-primary', primaryId: item.id }, e)
-        }
-      >
+      <div className="flex flex-col gap-2 p-2 min-w-0 w-full">
         <div className="flex items-start gap-2 min-w-0 w-full">
           {canDragReorder ? (
             <span

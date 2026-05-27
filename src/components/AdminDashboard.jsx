@@ -1847,19 +1847,16 @@ const AdminDashboard = ({
     });
     setTodoEditOptionsTitle(String(subtask ? subtask.text : item.text || ''));
     setTodoEditOptionsDue(asDateInput(subtask ? subtask.dueDate : item.dueDate));
-    if (subtask) {
-      setTodoEditOptionsRecurrence('none');
-    } else {
-      const t = item?.recurrence?.type;
-      let editMode = 'none';
-      if (t === 'weekly_weekday') editMode = 'weekly';
-      else if (t === 'biweekly_weekday') editMode = 'biweekly';
-      else if (t === 'daily_fixed') editMode = 'daily';
-      else if (t === 'annual_fixed') editMode = 'annual';
-      else if (t === 'monthly_fixed_day') editMode = 'monthly';
-      else if (item?.recurring) editMode = 'monthly';
-      setTodoEditOptionsRecurrence(editMode);
-    }
+    const recurrenceSource = subtask || item;
+    const t = recurrenceSource?.recurrence?.type;
+    let editMode = 'none';
+    if (t === 'weekly_weekday') editMode = 'weekly';
+    else if (t === 'biweekly_weekday') editMode = 'biweekly';
+    else if (t === 'daily_fixed') editMode = 'daily';
+    else if (t === 'annual_fixed') editMode = 'annual';
+    else if (t === 'monthly_fixed_day') editMode = 'monthly';
+    else if (recurrenceSource?.recurring) editMode = 'monthly';
+    setTodoEditOptionsRecurrence(editMode);
   };
 
   const applyTodoEditOptionsModal = async () => {
@@ -1906,8 +1903,18 @@ const AdminDashboard = ({
         return;
       }
       const clamped = clampSubtaskDueToParent(item, dueDate);
+      const recurrence = buildRecurrenceFromMode(todoEditOptionsRecurrence, clamped);
       const nextItem = mapItemSubtasks(item, (s) =>
-        s.id === subtaskId ? { ...s, text: title, dueDate: clamped } : s,
+        s.id === subtaskId
+          ? {
+              ...s,
+              text: title,
+              dueDate: clamped,
+              recurring: !!recurrence,
+              recurringId: recurrence ? s.recurringId || s.id : null,
+              recurrence,
+            }
+          : s,
       );
       nextList = list.map((i) => (i.id === itemId ? nextItem : i));
     } else {
@@ -7511,25 +7518,30 @@ const AdminDashboard = ({
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
               />
             </div>
-            {!todoEditOptionsTarget.subtaskId && (
             <div>
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-                Recurrence
+                {todoEditOptionsTarget.subtaskId ? 'Step recurrence' : 'Recurrence'}
               </label>
               <select
                 value={todoEditOptionsRecurrence}
                 onChange={(e) => setTodoEditOptionsRecurrence(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
               >
-                <option value="none">No repeat</option>
+                <option value="none">
+                  {todoEditOptionsTarget.subtaskId ? 'One-time step' : 'No repeat'}
+                </option>
                 <option value="daily">Daily</option>
                 <option value="weekly">Weekly (same weekday)</option>
                 <option value="biweekly">Bi-weekly (same weekday)</option>
                 <option value="monthly">Monthly (same day of month)</option>
                 <option value="annual">Annually (same calendar date)</option>
               </select>
+              {todoEditOptionsTarget.subtaskId && (
+                <p className="mt-1 text-[10px] font-bold text-slate-500">
+                  Recurring steps respawn under this primary task each billing cycle.
+                </p>
+              )}
             </div>
-            )}
             <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"

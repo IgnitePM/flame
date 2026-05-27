@@ -35,6 +35,132 @@ function effectiveRecurrence(item) {
   };
 }
 
+/** First due date for a recurrence rule inside a billing cycle window. */
+export function computeRecurringDueDate(recurrence, cycleStart) {
+  if (!recurrence || !recurrence.type) return null;
+  const base = new Date(cycleStart);
+  base.setHours(12, 0, 0, 0);
+  const cycleStartMs = base.getTime();
+
+  if (recurrence.type === 'daily_fixed') {
+    return cycleStartMs;
+  }
+
+  if (recurrence.type === 'monthly_fixed_day') {
+    const day = Number(recurrence.dayOfMonth || 0);
+    if (!day) return null;
+    const atMonth = (year, month) => {
+      const lastDay = new Date(year, month + 1, 0).getDate();
+      const clamped = Math.min(Math.max(day, 1), lastDay);
+      return new Date(year, month, clamped, 12, 0, 0, 0).getTime();
+    };
+    let t = atMonth(base.getFullYear(), base.getMonth());
+    if (t < cycleStartMs) t = atMonth(base.getFullYear(), base.getMonth() + 1);
+    return t;
+  }
+
+  const getNextWeekday = (weekday) => {
+    const wd = Number(weekday);
+    if (!Number.isFinite(wd) || wd < 0 || wd > 6) return null;
+    const d = new Date(base);
+    for (let step = 0; step < 7; step++) {
+      if (d.getDay() === wd) return d.getTime();
+      d.setDate(d.getDate() + 1);
+    }
+    return null;
+  };
+
+  if (recurrence.type === 'weekly_weekday') {
+    return getNextWeekday(recurrence.weekday);
+  }
+
+  if (recurrence.type === 'biweekly_weekday') {
+    const first = getNextWeekday(recurrence.weekday);
+    if (!first) return null;
+    const anchor = Number(recurrence.anchorMs || 0);
+    if (!anchor) return first;
+    const daysBetween = Math.floor((first - anchor) / 86400000);
+    const weeksBetween = Math.floor(daysBetween / 7);
+    return weeksBetween % 2 === 0 ? first : first + 7 * 86400000;
+  }
+
+  if (recurrence.type === 'annual_fixed') {
+    const month = Number(recurrence.month);
+    const day = Number(recurrence.day);
+    if (
+      !Number.isFinite(month) ||
+      month < 0 ||
+      month > 11 ||
+      !Number.isFinite(day) ||
+      day < 1
+    ) {
+      return null;
+    }
+    const tryYear = (y) => {
+      const last = new Date(y, month + 1, 0).getDate();
+      const dd = Math.min(Math.max(day, 1), last);
+      return new Date(y, month, dd, 12, 0, 0, 0).getTime();
+    };
+    let t = tryYear(base.getFullYear());
+    if (t < cycleStartMs) t = tryYear(base.getFullYear() + 1);
+    return t;
+  }
+
+  return null;
+}
+
+function shouldSubtaskPersistIntoNextCycle(sub) {
+  return !!sub?.recurring || !sub?.done;
+}
+
+/** Keep incomplete and recurring sub-tasks when carrying a primary row forward. */
+export function subtasksForCarryover(parentItem) {
+  return getSubtasks(parentItem)
+    .filter(shouldSubtaskPersistIntoNextCycle)
+    .map((sub) => ({ ...sub, done: false, doneAt: null }));
+}
+
+/** Sub-tasks for a newly materialized recurring primary in the next billing cycle. */
+export function projectSubtasksForNewRecurringPrimaryCycle(
+  oldParentItem,
+  newParentDueMs,
+  cycleStartMs,
+) {
+  const oldParentDue = Number(oldParentItem?.dueDate || 0);
+  return getSubtasks(oldParentItem)
+    .filter(shouldSubtaskPersistIntoNextCycle)
+    .map((sub) => {
+      let dueDate = projectSubtaskDueDateForNewCycle(
+        oldParentDue,
+        newParentDueMs,
+        sub.dueDate,
+      );
+      if (sub.recurring) {
+        const rec = effectiveRecurrence(sub);
+        const nextDue = computeRecurringDueDate(rec, cycleStartMs);
+        if (nextDue) dueDate = clampSubtaskDueToParentProxy(newParentDueMs, nextDue);
+      }
+      return {
+        ...sub,
+        id: newSubtaskId(),
+        done: false,
+        doneAt: null,
+        dueDate,
+        recurring: !!sub.recurring,
+        recurringId: sub.recurring ? sub.recurringId || sub.id : null,
+        recurrence: sub.recurrence || (sub.recurring ? effectiveRecurrence(sub) : null),
+      };
+    });
+}
+
+function clampSubtaskDueToParentProxy(parentDueMs, subDueMs) {
+  const cap = Number(parentDueMs || 0);
+  const sub = Number(subDueMs || 0);
+  if (!cap) return sub || null;
+  if (!sub) return null;
+  return Math.min(sub, cap);
+}
+
 /**
  * All recurrence anchor timestamps inside [windowStartMs, windowEndMs] (inclusive).
  */

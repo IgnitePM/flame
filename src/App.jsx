@@ -75,9 +75,12 @@ import {
 } from './utils/teamClientAccess.js';
 import {
   ensureRecurringSkipOnCategory,
+  computeRecurringDueDate,
+  projectSubtasksForNewRecurringPrimaryCycle,
   reconcileRecurringTodoInstances,
   recurringAnchorKey,
   removeTodoItemFromAllCycles,
+  subtasksForCarryover,
 } from './utils/recurringTodoMaterialize.js';
 import {
   addAttachmentToItem,
@@ -98,9 +101,6 @@ import {
   normalizeRetainerCategoryEnabled,
 } from './utils/retainerCategories.js';
 import {
-  getSubtasks,
-  newSubtaskId,
-  projectSubtaskDueDateForNewCycle,
   removeSubtaskFromItems,
 } from './utils/todoSubtasks.js';
 import {
@@ -1341,79 +1341,6 @@ export default function App() {
   const todoCategoryKey = (cat) =>
     String(cat ?? '').replace(/[~*[\]/]/g, '_').replace(/\./g, '_');
 
-  const computeRecurringDueDate = (recurrence, cycleStart) => {
-    if (!recurrence || !recurrence.type) return null;
-    const base = new Date(cycleStart);
-    base.setHours(12, 0, 0, 0);
-    const cycleStartMs = base.getTime();
-
-    if (recurrence.type === 'daily_fixed') {
-      return cycleStartMs;
-    }
-
-    if (recurrence.type === 'monthly_fixed_day') {
-      const day = Number(recurrence.dayOfMonth || 0);
-      if (!day) return null;
-      const atMonth = (year, month) => {
-        const lastDay = new Date(year, month + 1, 0).getDate();
-        const clamped = Math.min(Math.max(day, 1), lastDay);
-        return new Date(year, month, clamped, 12, 0, 0, 0).getTime();
-      };
-      let t = atMonth(base.getFullYear(), base.getMonth());
-      if (t < cycleStartMs) t = atMonth(base.getFullYear(), base.getMonth() + 1);
-      return t;
-    }
-
-    const getNextWeekday = (weekday) => {
-      const wd = Number(weekday);
-      if (!Number.isFinite(wd) || wd < 0 || wd > 6) return null;
-      const d = new Date(base);
-      for (let step = 0; step < 7; step++) {
-        if (d.getDay() === wd) return d.getTime();
-        d.setDate(d.getDate() + 1);
-      }
-      return null;
-    };
-
-    if (recurrence.type === 'weekly_weekday') {
-      return getNextWeekday(recurrence.weekday);
-    }
-
-    if (recurrence.type === 'biweekly_weekday') {
-      const first = getNextWeekday(recurrence.weekday);
-      if (!first) return null;
-      const anchor = Number(recurrence.anchorMs || 0);
-      if (!anchor) return first;
-      const daysBetween = Math.floor((first - anchor) / 86400000);
-      const weeksBetween = Math.floor(daysBetween / 7);
-      return weeksBetween % 2 === 0 ? first : first + 7 * 86400000;
-    }
-
-    if (recurrence.type === 'annual_fixed') {
-      const month = Number(recurrence.month);
-      const day = Number(recurrence.day);
-      if (
-        !Number.isFinite(month) ||
-        month < 0 ||
-        month > 11 ||
-        !Number.isFinite(day) ||
-        day < 1
-      ) {
-        return null;
-      }
-      const tryYear = (y) => {
-        const last = new Date(y, month + 1, 0).getDate();
-        const dd = Math.min(Math.max(day, 1), last);
-        return new Date(y, month, dd, 12, 0, 0, 0).getTime();
-      };
-      let t = tryYear(base.getFullYear());
-      if (t < cycleStartMs) t = tryYear(base.getFullYear() + 1);
-      return t;
-    }
-
-    return null;
-  };
-
   const carryoverCategoryKey = (cat) =>
     String(cat ?? '').replace(/[~*[\]/]/g, '_').replace(/\./g, '_');
 
@@ -1447,6 +1374,7 @@ export default function App() {
           assigneeEmails: Array.isArray(i.assigneeEmails)
             ? i.assigneeEmails.filter(Boolean)
             : [],
+          subtasks: subtasksForCarryover(i),
         }));
       // Create exactly one new iteration per recurring series (recurringId).
       // If multiple old unfinished recurring items exist, we still add only one
@@ -1485,13 +1413,11 @@ export default function App() {
               : [],
             recurrence: i.recurrence || effectiveRecurrence,
             dueDate: newParentDue,
-            subtasks: getSubtasks(i).map((s) => ({
-              ...s,
-              id: newSubtaskId(),
-              done: false,
-              doneAt: null,
-              dueDate: projectSubtaskDueDateForNewCycle(i.dueDate, newParentDue, s.dueDate),
-            })),
+            subtasks: projectSubtasksForNewRecurringPrimaryCycle(
+              i,
+              newParentDue,
+              cycleStart,
+            ),
           };
         });
       result[ck] = { closed: false, items: [...carried, ...recurring] };
@@ -1528,6 +1454,7 @@ export default function App() {
           assigneeEmails: Array.isArray(i.assigneeEmails)
             ? i.assigneeEmails.filter(Boolean)
             : [],
+          subtasks: subtasksForCarryover(i),
         }));
       // Create exactly one new iteration per recurring series (recurringId).
       const recurringSeeds = Array.from(
@@ -1564,13 +1491,11 @@ export default function App() {
               : [],
             recurrence: i.recurrence || effectiveRecurrence,
             dueDate: newParentDue,
-            subtasks: getSubtasks(i).map((s) => ({
-              ...s,
-              id: newSubtaskId(),
-              done: false,
-              doneAt: null,
-              dueDate: projectSubtaskDueDateForNewCycle(i.dueDate, newParentDue, s.dueDate),
-            })),
+            subtasks: projectSubtasksForNewRecurringPrimaryCycle(
+              i,
+              newParentDue,
+              cycleStart,
+            ),
           };
         });
       cycles[String(cycleStart)][ck] = { closed: false, items: [...carried, ...recurring] };

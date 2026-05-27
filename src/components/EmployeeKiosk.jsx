@@ -323,19 +323,16 @@ const EmployeeKiosk = ({
     });
     setClientTodoEditTitle(String(subtask ? subtask.text : item.text || ''));
     setClientTodoEditDue(asDateInput(subtask ? subtask.dueDate : item.dueDate));
-    if (subtask) {
-      setClientTodoEditRecurrence('none');
-    } else {
-      const t = item?.recurrence?.type;
-      let editMode = 'none';
-      if (t === 'weekly_weekday') editMode = 'weekly';
-      else if (t === 'biweekly_weekday') editMode = 'biweekly';
-      else if (t === 'daily_fixed') editMode = 'daily';
-      else if (t === 'annual_fixed') editMode = 'annual';
-      else if (t === 'monthly_fixed_day') editMode = 'monthly';
-      else if (item?.recurring) editMode = 'monthly';
-      setClientTodoEditRecurrence(editMode);
-    }
+    const recurrenceSource = subtask || item;
+    const t = recurrenceSource?.recurrence?.type;
+    let editMode = 'none';
+    if (t === 'weekly_weekday') editMode = 'weekly';
+    else if (t === 'biweekly_weekday') editMode = 'biweekly';
+    else if (t === 'daily_fixed') editMode = 'daily';
+    else if (t === 'annual_fixed') editMode = 'annual';
+    else if (t === 'monthly_fixed_day') editMode = 'monthly';
+    else if (recurrenceSource?.recurring) editMode = 'monthly';
+    setClientTodoEditRecurrence(editMode);
   };
 
   const applyClientTodoEditModal = async () => {
@@ -382,8 +379,18 @@ const EmployeeKiosk = ({
         return;
       }
       const clamped = clampSubtaskDueToParent(item, dueDate);
+      const recurrence = buildRecurrenceFromMode(clientTodoEditRecurrence, clamped);
       const nextItem = mapItemSubtasks(item, (s) =>
-        s.id === subtaskId ? { ...s, text: title, dueDate: clamped } : s,
+        s.id === subtaskId
+          ? {
+              ...s,
+              text: title,
+              dueDate: clamped,
+              recurring: !!recurrence,
+              recurringId: recurrence ? s.recurringId || s.id : null,
+              recurrence,
+            }
+          : s,
       );
       nextList = list.map((i) => (i.id === itemId ? nextItem : i));
     } else {
@@ -1033,12 +1040,53 @@ const EmployeeKiosk = ({
   );
 
   const categoryTodoCanDragReorder = React.useMemo(() => {
-    if (categoryTodoMineOnly) return false;
-    const cycleStarts = new Set(
-      categoryKioskTodoRows.map((row) => Number(row.cycleStart)),
-    );
-    return cycleStarts.size === 1;
-  }, [categoryKioskTodoRows, categoryTodoMineOnly]);
+    if (!canManageClientTodos || !cycleStart || !currentCycleCategoryTodo) return false;
+    if (selectedClientObj && isCycleLocked(selectedClientObj, cycleStart)) return false;
+    return !categoryTodoShowsPriorCycle;
+  }, [
+    canManageClientTodos,
+    cycleStart,
+    currentCycleCategoryTodo,
+    selectedClientObj,
+    categoryTodoShowsPriorCycle,
+  ]);
+
+  const persistCategoryTodoItems = React.useCallback(
+    async (nextItems) => {
+      if (
+        !updateClientTodo ||
+        !currentCycleCategoryTodo ||
+        !selectedClientObj ||
+        !cycleStart
+      ) {
+        return;
+      }
+      if (isCycleLocked(selectedClientObj, cycleStart)) {
+        window.alert('This billing cycle is locked.');
+        return;
+      }
+      setTodoSaving(true);
+      try {
+        await updateClientTodo(
+          selectedClientObj,
+          cycleStart,
+          currentCycleCategoryTodo.catKey,
+          {
+            ...currentCycleCategoryTodo.catTodo,
+            items: nextItems,
+          },
+        );
+      } finally {
+        setTodoSaving(false);
+      }
+    },
+    [
+      updateClientTodo,
+      currentCycleCategoryTodo,
+      selectedClientObj,
+      cycleStart,
+    ],
+  );
 
   const kioskFilteredRows = React.useMemo(() => {
     let rows = globalTodoRows.filter((row) =>
@@ -1476,10 +1524,15 @@ const EmployeeKiosk = ({
                             {categoryTodoCanDragReorder &&
                               categoryKioskTodoRows.length > 0 && (
                                 <p className="text-[10px] text-slate-400 mb-2">
-                                  Drag the grip to reorder. Drop a task on another to nest it as a step, or drop a step on a primary task to promote it. Pin keeps tasks at the top.
+                                  Drag the grip to reorder (drop on the top edge of a task) or nest under another task (drop on the body/steps). Pin keeps tasks at the top.
                                 </p>
                               )}
-                            {categoryTodoMineOnly && categoryKioskTodoRows.length > 0 && (
+                            {categoryTodoMineOnly && categoryTodoCanDragReorder && (
+                              <p className="text-[10px] text-slate-500 mb-2">
+                                Drag-reorder is available for admins while viewing filtered tasks.
+                              </p>
+                            )}
+                            {categoryTodoMineOnly && !categoryTodoCanDragReorder && categoryKioskTodoRows.length > 0 && (
                               <p className="text-[10px] text-amber-800/90 mb-2">
                                 Uncheck &quot;only my tasks&quot; to drag-reorder the full list.
                               </p>
@@ -1496,18 +1549,16 @@ const EmployeeKiosk = ({
                                   <KioskClientTodoItem
                                     key={`${row.cycleStart}__${row.item.id}`}
                                     item={row.item}
-                                    allItems={row.catTodo?.items || []}
-                                    catTodo={row.catTodo || { closed: false, items: [] }}
-                                    catKey={row.categoryKey}
-                                    cycleStart={row.cycleStart}
+                                    allItems={currentCycleCategoryTodo.allItems}
+                                    catTodo={currentCycleCategoryTodo.catTodo}
+                                    catKey={currentCycleCategoryTodo.catKey}
+                                    cycleStart={cycleStart}
                                     client={selectedClientObj}
                                     todoSaving={todoSaving}
                                     setTodoSaving={setTodoSaving}
                                     updateClientTodo={updateClientTodo}
-                                    canDragReorder={
-                                      categoryTodoCanDragReorder &&
-                                      Number(row.cycleStart) === Number(cycleStart)
-                                    }
+                                    onPersistItems={persistCategoryTodoItems}
+                                    canDragReorder={categoryTodoCanDragReorder}
                                     getUrgencyClass={getUrgencyClass}
                                     user={user}
                                     staffEmail={meLower}
@@ -1890,10 +1941,15 @@ const EmployeeKiosk = ({
                             {categoryTodoCanDragReorder &&
                               categoryKioskTodoRows.length > 0 && (
                                 <p className="text-[10px] text-slate-400 mb-2">
-                                  Drag the grip to reorder. Drop a task on another to nest it as a step, or drop a step on a primary task to promote it. Pin keeps tasks at the top.
+                                  Drag the grip to reorder (drop on the top edge of a task) or nest under another task (drop on the body/steps). Pin keeps tasks at the top.
                                 </p>
                               )}
-                            {categoryTodoMineOnly && categoryKioskTodoRows.length > 0 && (
+                            {categoryTodoMineOnly && categoryTodoCanDragReorder && (
+                              <p className="text-[10px] text-slate-500 mb-2">
+                                Drag-reorder is available for admins while viewing filtered tasks.
+                              </p>
+                            )}
+                            {categoryTodoMineOnly && !categoryTodoCanDragReorder && categoryKioskTodoRows.length > 0 && (
                               <p className="text-[10px] text-amber-800/90 mb-2">
                                 Uncheck &quot;only my tasks&quot; to drag-reorder the full list.
                               </p>
@@ -1910,18 +1966,16 @@ const EmployeeKiosk = ({
                                   <KioskClientTodoItem
                                     key={`${row.cycleStart}__${row.item.id}`}
                                     item={row.item}
-                                    allItems={row.catTodo?.items || []}
-                                    catTodo={row.catTodo || { closed: false, items: [] }}
-                                    catKey={row.categoryKey}
-                                    cycleStart={row.cycleStart}
+                                    allItems={currentCycleCategoryTodo.allItems}
+                                    catTodo={currentCycleCategoryTodo.catTodo}
+                                    catKey={currentCycleCategoryTodo.catKey}
+                                    cycleStart={cycleStart}
                                     client={selectedClientObj}
                                     todoSaving={todoSaving}
                                     setTodoSaving={setTodoSaving}
                                     updateClientTodo={updateClientTodo}
-                                    canDragReorder={
-                                      categoryTodoCanDragReorder &&
-                                      Number(row.cycleStart) === Number(cycleStart)
-                                    }
+                                    onPersistItems={persistCategoryTodoItems}
+                                    canDragReorder={categoryTodoCanDragReorder}
                                     getUrgencyClass={getUrgencyClass}
                                     user={user}
                                     staffEmail={meLower}
@@ -3279,6 +3333,28 @@ const EmployeeKiosk = ({
                   <option value="monthly">Monthly (same day of month)</option>
                   <option value="annual">Annually (same calendar date)</option>
                 </select>
+              </div>
+            )}
+            {clientTodoEditTarget.subtaskId && (
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                  Step recurrence
+                </label>
+                <select
+                  value={clientTodoEditRecurrence}
+                  onChange={(e) => setClientTodoEditRecurrence(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                >
+                  <option value="none">One-time step</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly (same weekday)</option>
+                  <option value="biweekly">Bi-weekly (same weekday)</option>
+                  <option value="monthly">Monthly (same day of month)</option>
+                  <option value="annual">Annually (same calendar date)</option>
+                </select>
+                <p className="mt-1 text-[10px] font-bold text-slate-500">
+                  Recurring steps respawn under this primary task each billing cycle.
+                </p>
               </div>
             )}
             <div className="flex justify-end gap-2 pt-1">
