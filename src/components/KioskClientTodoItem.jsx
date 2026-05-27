@@ -47,6 +47,44 @@ function assigneeSummaryLabel(assignees, { inheritLabel = 'Assign' } = {}) {
   return `${assignees.length} people`;
 }
 
+function setTodoDragGhost(e, sourceEl) {
+  if (!sourceEl || !e.dataTransfer) return;
+  const rect = sourceEl.getBoundingClientRect();
+  const ghost = sourceEl.cloneNode(true);
+  ghost.classList.add('kiosk-todo-drag-ghost');
+  ghost.style.width = `${Math.min(rect.width, 560)}px`;
+  ghost.style.position = 'fixed';
+  ghost.style.top = '-9999px';
+  ghost.style.left = '0';
+  ghost.style.opacity = '0.95';
+  ghost.style.transform = 'rotate(-1deg)';
+  ghost.style.boxShadow = '0 22px 44px rgb(15 23 42 / 0.28)';
+  ghost.style.pointerEvents = 'none';
+  ghost.style.zIndex = '99999';
+  document.body.appendChild(ghost);
+  e.dataTransfer.setDragImage(ghost, 28, 18);
+  window.setTimeout(() => {
+    if (ghost.parentNode) ghost.parentNode.removeChild(ghost);
+  }, 0);
+}
+
+function TodoDragHandle({ disabled, title, onDragStart, onDragEnd }) {
+  return (
+    <span
+      draggable={!disabled}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      className={`kiosk-todo-drag-handle shrink-0 select-none touch-none mt-0.5 ${
+        disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-grab active:cursor-grabbing'
+      }`}
+      title={title}
+      aria-label={title}
+    >
+      <GripVertical className="w-4 h-4" aria-hidden />
+    </span>
+  );
+}
+
 function AssigneePicker({
   openKey,
   assigneeOpenKey,
@@ -208,9 +246,12 @@ export default function KioskClientTodoItem({
   canAttachFiles = false,
 }) {
   const meLower = String(staffEmail || user?.email || '').trim().toLowerCase();
+  const rowRef = React.useRef(null);
   const [subtaskComposerOpen, setSubtaskComposerOpen] = React.useState(false);
   const [subtaskText, setSubtaskText] = React.useState('');
   const [subtaskDue, setSubtaskDue] = React.useState('');
+  const [isDragging, setIsDragging] = React.useState(false);
+  const [dropHint, setDropHint] = React.useState(null);
 
   const resetSubtaskComposer = () => {
     setSubtaskComposerOpen(false);
@@ -243,23 +284,61 @@ export default function KioskClientTodoItem({
       .finally(() => setTodoSaving(false));
   };
 
+  const clearDragVisuals = () => {
+    setIsDragging(false);
+    setDropHint(null);
+  };
+
+  const startPrimaryDrag = (e) => {
+    writeTodoDragPayload(e.dataTransfer, {
+      kind: 'primary',
+      id: item.id,
+    });
+    setTodoDragGhost(e, rowRef.current);
+    setIsDragging(true);
+  };
+
+  const startSubtaskDrag = (e, sub, subRowEl) => {
+    writeTodoDragPayload(e.dataTransfer, {
+      kind: 'subtask',
+      id: sub.id,
+      parentId: item.id,
+    });
+    setTodoDragGhost(e, subRowEl);
+    setIsDragging(true);
+  };
+
+  const computePrimaryDropTarget = (e) => {
+    const drag = readTodoDragPayload(e.dataTransfer);
+    if (!drag) return null;
+    if (drag.kind === 'primary' && drag.id === item.id) return null;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const relativeY = e.clientY - rect.top;
+    const reorderZone = Math.min(40, rect.height * 0.25);
+    if (drag.kind === 'primary' && relativeY > reorderZone) {
+      return { type: 'nest-under-primary', primaryId: item.id };
+    }
+    return { type: 'before-primary', primaryId: item.id };
+  };
+
+  const handlePrimaryDragOver = (e) => {
+    if (!canDragReorder || todoSaving || isCycleLocked) return;
+    const target = computePrimaryDropTarget(e);
+    if (!target) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDropHint(target.type === 'nest-under-primary' ? 'nest' : 'reorder');
+  };
+
   const handlePrimaryDrop = (e) => {
     e.preventDefault();
     e.stopPropagation();
     if (!canDragReorder || todoSaving || isCycleLocked) return;
     const drag = readTodoDragPayload(e.dataTransfer);
-    if (!drag) return;
-    if (drag.kind === 'primary' && drag.id === item.id) return;
-
-    const rect = e.currentTarget.getBoundingClientRect();
-    const relativeY = e.clientY - rect.top;
-    const reorderZone = Math.min(36, rect.height * 0.25);
-    const dropTarget =
-      drag.kind === 'primary' && relativeY > reorderZone
-        ? { type: 'nest-under-primary', primaryId: item.id }
-        : { type: 'before-primary', primaryId: item.id };
-
+    const dropTarget = computePrimaryDropTarget(e);
+    if (!drag || !dropTarget) return;
     const result = applyTodoListDragDrop(allItems, drag, dropTarget);
+    clearDragVisuals();
     if (result.error) {
       window.alert(result.error);
       return;
@@ -275,12 +354,21 @@ export default function KioskClientTodoItem({
     const drag = readTodoDragPayload(e.dataTransfer);
     if (!drag) return;
     const result = applyTodoListDragDrop(allItems, drag, dropTarget);
+    clearDragVisuals();
     if (result.error) {
       window.alert(result.error);
       return;
     }
     if (!result.ok) return;
     persistItems(result.items);
+  };
+
+  const handleSubtaskDragOver = (e) => {
+    if (!canDragReorder || todoSaving || isCycleLocked) return;
+    if (!readTodoDragPayload(e.dataTransfer)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDropHint('subtask');
   };
 
   const saveSubtask = async () => {
@@ -329,6 +417,15 @@ export default function KioskClientTodoItem({
       }
     : {};
 
+  const dropHintLabel =
+    dropHint === 'reorder'
+      ? 'Drop to reorder'
+      : dropHint === 'nest'
+        ? 'Drop to nest as step'
+        : dropHint === 'subtask'
+          ? 'Drop on step'
+          : null;
+
   const renderPrimaryControls = () => (
     <div className="flex shrink-0 items-center justify-end gap-1">
       <AssigneePicker
@@ -353,30 +450,43 @@ export default function KioskClientTodoItem({
 
   return (
     <li
-      className={`relative flex flex-col gap-1 rounded-lg min-w-0 max-w-full ${
+      ref={rowRef}
+      className={`relative flex flex-col gap-1 rounded-lg min-w-0 max-w-full transition-all duration-150 ${
         assigneeMenuOpen ? 'z-[120]' : 'z-0'
-      } ${getUrgencyClass(item)}`}
-      {...dragOverProps}
-      onDrop={handlePrimaryDrop}
+      } ${isDragging ? 'kiosk-todo-row-dragging' : ''} ${
+        dropHint === 'reorder' ? 'kiosk-todo-drop-reorder' : ''
+      } ${dropHint === 'nest' ? 'kiosk-todo-drop-nest' : ''} ${getUrgencyClass(item)}`}
+      onDragOver={canDragReorder ? handlePrimaryDragOver : undefined}
+      onDragLeave={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget)) return;
+        setDropHint(null);
+      }}
+      onDrop={canDragReorder ? handlePrimaryDrop : undefined}
     >
+      {dropHintLabel && !isDragging && (
+        <div className="pointer-events-none absolute right-2 top-1 z-20 rounded-md bg-black/85 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-white">
+          {dropHintLabel}
+        </div>
+      )}
       <div className="flex flex-col gap-2 p-2 min-w-0 w-full">
         <div className="flex items-start gap-2 min-w-0 w-full">
           {canDragReorder ? (
-            <span
-              draggable={!todoSaving}
-              onDragStart={(e) => {
-                writeTodoDragPayload(e.dataTransfer, {
-                  kind: 'primary',
-                  id: item.id,
-                });
-              }}
-              className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0 select-none touch-none mt-0.5"
+            <TodoDragHandle
+              disabled={todoSaving}
               title="Drag to reorder or nest under another task"
+              onDragStart={startPrimaryDrag}
+              onDragEnd={clearDragVisuals}
+            />
+          ) : canManageTodos ? (
+            <span
+              className="kiosk-todo-drag-handle shrink-0 mt-0.5 opacity-35 cursor-not-allowed"
+              title="Drag unavailable for prior-cycle or locked tasks"
+              aria-hidden
             >
-              <GripVertical className="w-4 h-4" aria-hidden />
+              <GripVertical className="w-4 h-4" />
             </span>
           ) : (
-            <span className="w-4 shrink-0" aria-hidden />
+            <span className="w-[1.625rem] shrink-0" aria-hidden />
           )}
           <button
             type="button"
@@ -469,8 +579,14 @@ export default function KioskClientTodoItem({
             return (
               <li
                 key={sub.id}
-                className={`rounded-md ${getUrgencyClass(sub)}`}
-                {...dragOverProps}
+                className={`relative rounded-md transition-all duration-150 ${
+                  dropHint === 'subtask' ? 'kiosk-todo-drop-subtask' : ''
+                } ${getUrgencyClass(sub)}`}
+                onDragOver={canDragReorder ? handleSubtaskDragOver : undefined}
+                onDragLeave={(e) => {
+                  if (e.currentTarget.contains(e.relatedTarget)) return;
+                  setDropHint(null);
+                }}
                 onDrop={(e) =>
                   applyDrop(
                     {
@@ -484,22 +600,23 @@ export default function KioskClientTodoItem({
               >
                 <div className="flex flex-col gap-1.5 px-2 py-1.5 min-w-0 w-full">
                   <div className="flex items-start gap-2 min-w-0 w-full">
-                    {canDragReorder && (
-                      <span
-                        draggable={!todoSaving}
-                        onDragStart={(e) => {
-                          writeTodoDragPayload(e.dataTransfer, {
-                            kind: 'subtask',
-                            id: sub.id,
-                            parentId: item.id,
-                          });
-                        }}
-                        className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0 select-none touch-none mt-0.5"
+                    {canDragReorder ? (
+                      <TodoDragHandle
+                        disabled={todoSaving}
                         title="Drag to reorder, promote, or move between tasks"
+                        onDragStart={(e) =>
+                          startSubtaskDrag(e, sub, e.currentTarget.closest('li'))
+                        }
+                        onDragEnd={clearDragVisuals}
+                      />
+                    ) : canManageTodos ? (
+                      <span
+                        className="kiosk-todo-drag-handle shrink-0 mt-0.5 opacity-35 cursor-not-allowed"
+                        aria-hidden
                       >
-                        <GripVertical className="w-3.5 h-3.5" aria-hidden />
+                        <GripVertical className="w-3.5 h-3.5" />
                       </span>
-                    )}
+                    ) : null}
                     <input
                       type="checkbox"
                       checked={!!sub.done}

@@ -1042,14 +1042,20 @@ const EmployeeKiosk = ({
   const categoryTodoCanDragReorder = React.useMemo(() => {
     if (!canManageClientTodos || !cycleStart || !currentCycleCategoryTodo) return false;
     if (selectedClientObj && isCycleLocked(selectedClientObj, cycleStart)) return false;
-    return !categoryTodoShowsPriorCycle;
+    return true;
   }, [
     canManageClientTodos,
     cycleStart,
     currentCycleCategoryTodo,
     selectedClientObj,
-    categoryTodoShowsPriorCycle,
   ]);
+
+  const categoryKioskTodoRowsForPanel = React.useMemo(() => {
+    if (!cycleStart) return categoryKioskTodoRows;
+    return categoryKioskTodoRows.filter(
+      (row) => Number(row.cycleStart) === Number(cycleStart),
+    );
+  }, [categoryKioskTodoRows, cycleStart]);
 
   const persistCategoryTodoItems = React.useCallback(
     async (nextItems) => {
@@ -1510,7 +1516,7 @@ const EmployeeKiosk = ({
                             </div>
                             {categoryTodoShowsPriorCycle && (
                               <p className="text-[10px] text-amber-800/90 mb-2">
-                                Showing open tasks from a prior billing cycle.
+                                Some sidebar tasks are from a prior billing cycle. This list shows the current cycle only (drag reorder works here).
                               </p>
                             )}
                             <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600 mb-2">
@@ -1522,9 +1528,9 @@ const EmployeeKiosk = ({
                               Show only tasks assigned to me
                             </label>
                             {categoryTodoCanDragReorder &&
-                              categoryKioskTodoRows.length > 0 && (
+                              categoryKioskTodoRowsForPanel.length > 0 && (
                                 <p className="text-[10px] text-slate-400 mb-2">
-                                  Drag the grip to reorder (drop on the top edge of a task) or nest under another task (drop on the body/steps). Pin keeps tasks at the top.
+                                  Use the white grip on the left to drag. Drop on a task&apos;s top edge to reorder, or on its body/steps to nest underneath.
                                 </p>
                               )}
                             {categoryTodoMineOnly && categoryTodoCanDragReorder && (
@@ -1532,12 +1538,7 @@ const EmployeeKiosk = ({
                                 Drag-reorder is available for admins while viewing filtered tasks.
                               </p>
                             )}
-                            {categoryTodoMineOnly && !categoryTodoCanDragReorder && categoryKioskTodoRows.length > 0 && (
-                              <p className="text-[10px] text-amber-800/90 mb-2">
-                                Uncheck &quot;only my tasks&quot; to drag-reorder the full list.
-                              </p>
-                            )}
-                            {categoryKioskTodoRows.length === 0 ? (
+                            {categoryKioskTodoRowsForPanel.length === 0 ? (
                               <p className="text-xs italic text-slate-400 mb-2">
                                 {categoryTodoMineOnly
                                   ? 'No tasks assigned to you here. Uncheck "Show only tasks assigned to me" to see the full team list.'
@@ -1545,7 +1546,7 @@ const EmployeeKiosk = ({
                               </p>
                             ) : (
                               <ul className="space-y-3 mb-3 overflow-visible">
-                                {categoryKioskTodoRows.map((row) => (
+                                {categoryKioskTodoRowsForPanel.map((row) => (
                                   <KioskClientTodoItem
                                     key={`${row.cycleStart}__${row.item.id}`}
                                     item={row.item}
@@ -1927,7 +1928,7 @@ const EmployeeKiosk = ({
                             </div>
                             {categoryTodoShowsPriorCycle && (
                               <p className="text-[10px] text-amber-800/90 mb-2">
-                                Showing open tasks from a prior billing cycle.
+                                Some sidebar tasks are from a prior billing cycle. This list shows the current cycle only (drag reorder works here).
                               </p>
                             )}
                             <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600 mb-2">
@@ -1939,9 +1940,9 @@ const EmployeeKiosk = ({
                               Show only tasks assigned to me
                             </label>
                             {categoryTodoCanDragReorder &&
-                              categoryKioskTodoRows.length > 0 && (
+                              categoryKioskTodoRowsForPanel.length > 0 && (
                                 <p className="text-[10px] text-slate-400 mb-2">
-                                  Drag the grip to reorder (drop on the top edge of a task) or nest under another task (drop on the body/steps). Pin keeps tasks at the top.
+                                  Use the white grip on the left to drag. Drop on a task&apos;s top edge to reorder, or on its body/steps to nest underneath.
                                 </p>
                               )}
                             {categoryTodoMineOnly && categoryTodoCanDragReorder && (
@@ -1949,12 +1950,7 @@ const EmployeeKiosk = ({
                                 Drag-reorder is available for admins while viewing filtered tasks.
                               </p>
                             )}
-                            {categoryTodoMineOnly && !categoryTodoCanDragReorder && categoryKioskTodoRows.length > 0 && (
-                              <p className="text-[10px] text-amber-800/90 mb-2">
-                                Uncheck &quot;only my tasks&quot; to drag-reorder the full list.
-                              </p>
-                            )}
-                            {categoryKioskTodoRows.length === 0 ? (
+                            {categoryKioskTodoRowsForPanel.length === 0 ? (
                               <p className="text-xs italic text-slate-400 mb-2">
                                 {categoryTodoMineOnly
                                   ? 'No tasks assigned to you here. Uncheck "Show only tasks assigned to me" to see the full team list.'
@@ -1962,7 +1958,7 @@ const EmployeeKiosk = ({
                               </p>
                             ) : (
                               <ul className="space-y-3 mb-3 overflow-visible">
-                                {categoryKioskTodoRows.map((row) => (
+                                {categoryKioskTodoRowsForPanel.map((row) => (
                                   <KioskClientTodoItem
                                     key={`${row.cycleStart}__${row.item.id}`}
                                     item={row.item}
