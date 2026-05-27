@@ -38,12 +38,18 @@ body {
 :is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .bg-slate-50,
 :is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .bg-slate-50\/30,
 :is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .bg-slate-50\/50,
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .bg-slate-50\/60,
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .bg-slate-50\/70,
 :is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .bg-slate-50\/80 {
   background-color: rgb(39 39 42 / 0.55) !important;
 }
 
 :is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .bg-slate-100 {
   background-color: rgb(63 63 70 / 0.45) !important;
+}
+
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .bg-slate-200 {
+  background-color: rgb(63 63 70 / 0.55) !important;
 }
 
 :is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .hover\:bg-slate-100:hover,
@@ -143,6 +149,10 @@ body {
 
 :is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-emerald-700 {
   color: rgb(52 211 153) !important;
+}
+
+:is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) .text-emerald-600 {
+  color: rgb(74 222 128) !important;
 }
 
 :is([data-kiosk-theme="dark"], [data-ignite-theme="dark"]) select option,

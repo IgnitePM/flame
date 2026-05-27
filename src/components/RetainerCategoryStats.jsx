@@ -45,7 +45,7 @@ export default function RetainerCategoryStats({
 
   const textMuted = tone === 'dark' ? 'text-zinc-400' : 'text-slate-400';
   const textBody = tone === 'dark' ? 'text-zinc-100' : 'text-slate-700';
-  const trackBg = tone === 'dark' ? 'bg-zinc-700' : 'bg-slate-200';
+  const trackBg = tone === 'dark' ? 'bg-zinc-700' : 'bg-slate-100';
 
   if (variant === 'mini') {
     return (

@@ -270,7 +270,7 @@ const ClientPortal = ({
                         ([cat, base]) => (
                           <div
                             key={cat}
-                            className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4"
+                            className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
                           >
                             <div className="text-sm font-black text-slate-800 mb-2">
                               {cat}

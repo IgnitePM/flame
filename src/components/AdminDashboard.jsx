@@ -5466,7 +5466,7 @@ const AdminDashboard = ({
                                   className={[
                                     'min-w-0 max-w-full w-full',
                                     isClientPage && showClientSummary
-                                      ? 'rounded-2xl border border-slate-100 bg-slate-50/60 p-3 sm:p-4 space-y-2'
+                                      ? 'rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:p-4 space-y-2'
                                       : '',
                                     isClientPage && showClientTasks
                                       ? 'border-b border-slate-200 pb-5 mb-5 last:border-b-0 last:pb-0 last:mb-0'
