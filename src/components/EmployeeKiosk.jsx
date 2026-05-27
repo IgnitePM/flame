@@ -77,6 +77,7 @@ const EmployeeKiosk = ({
   onLogClientExpense,
   getTodoStateForCycle,
   updateClientTodo,
+  deleteClientTodoItem,
   todoCategoryKey,
   projects = [],
   queueKioskTaskStart = () => {},
@@ -415,7 +416,10 @@ const EmployeeKiosk = ({
   };
 
   const deleteClientTodoEditTarget = async () => {
-    if (!clientTodoEditTarget || !updateClientTodo || !getTodoStateForCycle) {
+    if (
+      !clientTodoEditTarget ||
+      (!deleteClientTodoItem && !updateClientTodo)
+    ) {
       setClientTodoEditTarget(null);
       return;
     }
@@ -431,14 +435,6 @@ const EmployeeKiosk = ({
       setClientTodoEditTarget(null);
       return;
     }
-    const todoState = getTodoStateForCycle(client, cycleStart);
-    const catTodo = todoState[categoryKey] || { closed: false, items: [] };
-    const list = catTodo.items || [];
-    const item = list.find((i) => i.id === itemId);
-    if (!item) {
-      setClientTodoEditTarget(null);
-      return;
-    }
     const ok = window.confirm(
       subtaskId
         ? 'Delete this sub-task permanently?'
@@ -446,24 +442,52 @@ const EmployeeKiosk = ({
     );
     if (!ok) return;
 
-    let nextList = list;
-    let nextSkippedAnchors = Array.isArray(catTodo.skippedRecurringAnchors)
-      ? [...catTodo.skippedRecurringAnchors]
-      : [];
-    if (subtaskId) {
-      nextList = removeSubtaskFromItems(list, itemId, subtaskId);
-    } else {
-      if (item?.recurring) {
-        const skipKey = recurringAnchorKey(item.recurringId || item.id, item.dueDate);
-        if (skipKey && !nextSkippedAnchors.includes(skipKey)) {
-          nextSkippedAnchors.push(skipKey);
-        }
-      }
-      nextList = list.filter((i) => i.id !== itemId);
-    }
-
     setTodoSaving(true);
     try {
+      if (deleteClientTodoItem) {
+        const deleted = await deleteClientTodoItem(
+          clientId,
+          cycleStart,
+          categoryKey,
+          itemId,
+          { subtaskId },
+        );
+        if (deleted) setClientTodoEditTarget(null);
+        return;
+      }
+
+      if (!getTodoStateForCycle) {
+        setClientTodoEditTarget(null);
+        return;
+      }
+      const todoState = getTodoStateForCycle(client, cycleStart);
+      const catTodo = todoState[categoryKey] || { closed: false, items: [] };
+      const list = catTodo.items || [];
+      const item = list.find((i) => i.id === itemId);
+      if (!item) {
+        setClientTodoEditTarget(null);
+        return;
+      }
+
+      let nextList = list;
+      let nextSkippedAnchors = Array.isArray(catTodo.skippedRecurringAnchors)
+        ? [...catTodo.skippedRecurringAnchors]
+        : [];
+      if (subtaskId) {
+        nextList = removeSubtaskFromItems(list, itemId, subtaskId);
+      } else {
+        if (item?.recurring) {
+          const skipKey = recurringAnchorKey(
+            item.recurringId || item.id,
+            item.dueDate,
+          );
+          if (skipKey && !nextSkippedAnchors.includes(skipKey)) {
+            nextSkippedAnchors.push(skipKey);
+          }
+        }
+        nextList = list.filter((i) => i.id !== itemId);
+      }
+
       await updateClientTodo(client, cycleStart, categoryKey, {
         ...catTodo,
         items: nextList,
@@ -1418,7 +1442,7 @@ const EmployeeKiosk = ({
                             {categoryTodoCanDragReorder &&
                               categoryKioskTodoRows.length > 0 && (
                                 <p className="text-[10px] text-slate-400 mb-2">
-                                  Drag the grip to reorder. Pin keeps tasks at the top of the list.
+                                  Drag the grip to reorder. Drop a task on another to nest it as a step, or drop a step on a primary task to promote it. Pin keeps tasks at the top.
                                 </p>
                               )}
                             {categoryTodoMineOnly && categoryKioskTodoRows.length > 0 && (
@@ -1787,6 +1811,18 @@ const EmployeeKiosk = ({
                         </div>
                       )}
 
+                      <div className="mt-5 space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
+                          Progress Notes
+                        </label>
+                        <textarea
+                          value={activeTaskNotes}
+                          onChange={(e) => setActiveTaskNotes(e.target.value)}
+                          placeholder="Briefly describe what you've accomplished..."
+                          className="w-full p-5 border-orange-200 border rounded-2xl bg-white/70 focus:ring-2 focus:ring-[#fd7414] outline-none text-sm min-h-[120px] font-medium"
+                        />
+                      </div>
+
                       {/* To-do list for this category (current cycle) */}
                       {getTodoStateForCycle &&
                         updateClientTodo &&
@@ -1818,7 +1854,7 @@ const EmployeeKiosk = ({
                             {categoryTodoCanDragReorder &&
                               categoryKioskTodoRows.length > 0 && (
                                 <p className="text-[10px] text-slate-400 mb-2">
-                                  Drag the grip to reorder. Pin keeps tasks at the top of the list.
+                                  Drag the grip to reorder. Drop a task on another to nest it as a step, or drop a step on a primary task to promote it. Pin keeps tasks at the top.
                                 </p>
                               )}
                             {categoryTodoMineOnly && categoryKioskTodoRows.length > 0 && (
@@ -2103,18 +2139,6 @@ const EmployeeKiosk = ({
                           </div>
                         </div>
                       )}
-
-                      <div className="mt-5 space-y-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
-                          Progress Notes
-                        </label>
-                        <textarea
-                          value={activeTaskNotes}
-                          onChange={(e) => setActiveTaskNotes(e.target.value)}
-                          placeholder="Briefly describe what you've accomplished..."
-                          className="w-full p-5 border-orange-200 border rounded-2xl bg-white/70 focus:ring-2 focus:ring-[#fd7414] outline-none text-sm min-h-[120px] font-medium"
-                        />
-                      </div>
 
                       <button
                         onClick={handleStopTask}

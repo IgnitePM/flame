@@ -234,3 +234,61 @@ export function reconcileRecurringTodoInstances(
 
   return { cycleDataByCategory: next, changed };
 }
+
+/** Remove a primary task id from one category across every stored billing cycle. */
+export function removeTodoItemFromAllCycles(
+  cycles,
+  categoryKey,
+  itemId,
+  { recurringSkipKey } = {},
+) {
+  const next = { ...(cycles || {}) };
+  let removed = false;
+  for (const [cycleKey, cycleData] of Object.entries(next)) {
+    if (!cycleData || typeof cycleData !== 'object') continue;
+    const cat = cycleData[categoryKey];
+    if (!cat || !Array.isArray(cat.items)) continue;
+    if (!cat.items.some((i) => i?.id === itemId)) continue;
+    removed = true;
+    let skipped = Array.isArray(cat.skippedRecurringAnchors)
+      ? [...cat.skippedRecurringAnchors]
+      : [];
+    if (recurringSkipKey && !skipped.includes(recurringSkipKey)) {
+      skipped.push(recurringSkipKey);
+    }
+    next[cycleKey] = {
+      ...cycleData,
+      [categoryKey]: {
+        ...cat,
+        items: cat.items.filter((i) => i?.id !== itemId),
+        skippedRecurringAnchors: skipped,
+      },
+    };
+  }
+  return { cycles: next, removed };
+}
+
+/** Ensure recurring reconcile will not respawn a deleted occurrence this cycle. */
+export function ensureRecurringSkipOnCategory(
+  cycles,
+  cycleKey,
+  categoryKey,
+  skipKey,
+) {
+  if (!skipKey) return cycles || {};
+  const next = { ...(cycles || {}) };
+  const cycleData = next[cycleKey] || {};
+  const cat = cycleData[categoryKey] || { closed: false, items: [] };
+  const skipped = Array.isArray(cat.skippedRecurringAnchors)
+    ? [...cat.skippedRecurringAnchors]
+    : [];
+  if (skipped.includes(skipKey)) return next;
+  next[cycleKey] = {
+    ...cycleData,
+    [categoryKey]: {
+      ...cat,
+      skippedRecurringAnchors: [...skipped, skipKey],
+    },
+  };
+  return next;
+}

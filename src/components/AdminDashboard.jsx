@@ -30,9 +30,13 @@ import {
 } from 'lucide-react';
 import {
   orderTodosForDisplay,
-  reorderTodosDisplay,
   toggleTodoPinnedById,
 } from '../utils/todoListOrder.js';
+import {
+  applyTodoListDragDrop,
+  readTodoDragPayload,
+  writeTodoDragPayload,
+} from '../utils/todoDragDrop.js';
 import { buildGlobalTodoRows } from '../utils/todoGlobalRows.js';
 import { isClientActiveForWork } from '../utils/clientActiveForWork.js';
 import {
@@ -1001,6 +1005,7 @@ const AdminDashboard = ({
   getTodoStateForCycle,
   updateClientTodo,
   updateClientTodosBatch,
+  deleteClientTodoItem,
   uploadClientDocument,
   removeClientDocument,
   todoCategoryKey,
@@ -1935,25 +1940,21 @@ const AdminDashboard = ({
   };
 
   const deleteTodoEditOptionsTarget = async () => {
-    if (!todoEditOptionsTarget || !updateClientTodo || !getTodoStateForCycle) {
+    if (
+      !todoEditOptionsTarget ||
+      (!deleteClientTodoItem && !updateClientTodo)
+    ) {
       setTodoEditOptionsTarget(null);
       return;
     }
-    const { clientId, cycleStart, categoryKey, itemId, subtaskId } = todoEditOptionsTarget;
+    const { clientId, cycleStart, categoryKey, itemId, subtaskId } =
+      todoEditOptionsTarget;
     const client = clients.find((cl) => cl.id === clientId);
     if (!client) {
       setTodoEditOptionsTarget(null);
       return;
     }
     if (isCycleLocked(client, cycleStart)) {
-      setTodoEditOptionsTarget(null);
-      return;
-    }
-    const todoState = getTodoStateForCycle(client, cycleStart);
-    const catTodo = todoState[categoryKey] || { closed: false, items: [] };
-    const list = catTodo.items || [];
-    const item = list.find((i) => i.id === itemId);
-    if (!item) {
       setTodoEditOptionsTarget(null);
       return;
     }
@@ -1964,24 +1965,52 @@ const AdminDashboard = ({
     );
     if (!ok) return;
 
-    let nextList = list;
-    let nextSkippedAnchors = Array.isArray(catTodo.skippedRecurringAnchors)
-      ? [...catTodo.skippedRecurringAnchors]
-      : [];
-    if (subtaskId) {
-      nextList = removeSubtaskFromItems(list, itemId, subtaskId);
-    } else {
-      if (item?.recurring) {
-        const skipKey = recurringAnchorKey(item.recurringId || item.id, item.dueDate);
-        if (skipKey && !nextSkippedAnchors.includes(skipKey)) {
-          nextSkippedAnchors.push(skipKey);
-        }
-      }
-      nextList = list.filter((i) => i.id !== itemId);
-    }
-
     setTodoSaving(true);
     try {
+      if (deleteClientTodoItem) {
+        const deleted = await deleteClientTodoItem(
+          clientId,
+          cycleStart,
+          categoryKey,
+          itemId,
+          { subtaskId },
+        );
+        if (deleted) setTodoEditOptionsTarget(null);
+        return;
+      }
+
+      if (!getTodoStateForCycle) {
+        setTodoEditOptionsTarget(null);
+        return;
+      }
+      const todoState = getTodoStateForCycle(client, cycleStart);
+      const catTodo = todoState[categoryKey] || { closed: false, items: [] };
+      const list = catTodo.items || [];
+      const item = list.find((i) => i.id === itemId);
+      if (!item) {
+        setTodoEditOptionsTarget(null);
+        return;
+      }
+
+      let nextList = list;
+      let nextSkippedAnchors = Array.isArray(catTodo.skippedRecurringAnchors)
+        ? [...catTodo.skippedRecurringAnchors]
+        : [];
+      if (subtaskId) {
+        nextList = removeSubtaskFromItems(list, itemId, subtaskId);
+      } else {
+        if (item?.recurring) {
+          const skipKey = recurringAnchorKey(
+            item.recurringId || item.id,
+            item.dueDate,
+          );
+          if (skipKey && !nextSkippedAnchors.includes(skipKey)) {
+            nextSkippedAnchors.push(skipKey);
+          }
+        }
+        nextList = list.filter((i) => i.id !== itemId);
+      }
+
       await updateClientTodo(client, cycleStart, categoryKey, {
         ...catTodo,
         items: nextList,
@@ -4767,28 +4796,23 @@ const AdminDashboard = ({
                                           e.preventDefault();
                                           if (todoSaving || isCycleLocked(c, cycleStart) || !clientTodoFiltersAllowReorder)
                                             return;
-                                          const draggedId =
-                                            e.dataTransfer.getData('text/plain');
-                                          if (!draggedId || draggedId === item.id) return;
-                                          const disp = orderTodosForDisplay(items);
-                                          const fromIdx = disp.findIndex(
-                                            (i) => i.id === draggedId,
-                                          );
-                                          const toIdx = disp.findIndex(
-                                            (i) => i.id === item.id,
-                                          );
-                                          if (fromIdx < 0 || toIdx < 0) return;
-                                          const next = reorderTodosDisplay(
-                                            items,
-                                            fromIdx,
-                                            toIdx,
-                                          );
+                                          const drag = readTodoDragPayload(e.dataTransfer);
+                                          if (!drag) return;
+                                          const result = applyTodoListDragDrop(items, drag, {
+                                            type: 'before-primary',
+                                            primaryId: item.id,
+                                          });
+                                          if (result.error) {
+                                            window.alert(result.error);
+                                            return;
+                                          }
+                                          if (!result.ok) return;
                                           setTodoSaving(true);
                                           updateClientTodo(
                                             c,
                                             cycleStart,
                                             catKey,
-                                            { ...catTodo, items: next },
+                                            { ...catTodo, items: result.items },
                                           ).finally(() => setTodoSaving(false));
                                         }}
                                       >
@@ -4799,8 +4823,10 @@ const AdminDashboard = ({
                                             clientTodoFiltersAllowReorder
                                           }
                                           onDragStart={(e) => {
-                                            e.dataTransfer.setData('text/plain', item.id);
-                                            e.dataTransfer.effectAllowed = 'move';
+                                            writeTodoDragPayload(e.dataTransfer, {
+                                              kind: 'primary',
+                                              id: item.id,
+                                            });
                                           }}
                                           className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0 select-none touch-none"
                                           title="Drag to reorder"
@@ -5748,25 +5774,31 @@ const AdminDashboard = ({
                                                                 onDrop={(e) => {
                                                                   e.preventDefault();
                                                                   if (todoSaving || isCycleLocked(c, cycleStart) || !clientTodoFiltersAllowReorder) return;
-                                                                  const draggedId = e.dataTransfer.getData('text/plain');
-                                                                  if (!draggedId || draggedId === item.id) return;
-                                                                  const disp = orderTodosForDisplay(items);
-                                                                  const fromIdx = disp.findIndex((i) => i.id === draggedId);
-                                                                  const toIdx = disp.findIndex((i) => i.id === item.id);
-                                                                  if (fromIdx < 0 || toIdx < 0) return;
-                                                                  const next = reorderTodosDisplay(items, fromIdx, toIdx);
+                                                                  const drag = readTodoDragPayload(e.dataTransfer);
+                                                                  if (!drag) return;
+                                                                  const result = applyTodoListDragDrop(items, drag, {
+                                                                    type: 'before-primary',
+                                                                    primaryId: item.id,
+                                                                  });
+                                                                  if (result.error) {
+                                                                    window.alert(result.error);
+                                                                    return;
+                                                                  }
+                                                                  if (!result.ok) return;
                                                                   setTodoSaving(true);
                                                                   updateClientTodo(c, cycleStart, catKey, {
                                                                     ...catTodo,
-                                                                    items: next,
+                                                                    items: result.items,
                                                                   }).finally(() => setTodoSaving(false));
                                                                 }}
                                                               >
                                                               <span
                                                                 draggable={!(todoSaving || isCycleLocked(c, cycleStart)) && clientTodoFiltersAllowReorder}
                                                                 onDragStart={(e) => {
-                                                                  e.dataTransfer.setData('text/plain', item.id);
-                                                                  e.dataTransfer.effectAllowed = 'move';
+                                                                  writeTodoDragPayload(e.dataTransfer, {
+                                                                    kind: 'primary',
+                                                                    id: item.id,
+                                                                  });
                                                                 }}
                                                                 className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0 select-none touch-none"
                                                                 title="Drag to reorder"

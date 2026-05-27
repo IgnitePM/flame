@@ -73,7 +73,12 @@ import {
   filterClientsForTeamMember,
   teamMemberCanViewClient,
 } from './utils/teamClientAccess.js';
-import { reconcileRecurringTodoInstances } from './utils/recurringTodoMaterialize.js';
+import {
+  ensureRecurringSkipOnCategory,
+  reconcileRecurringTodoInstances,
+  recurringAnchorKey,
+  removeTodoItemFromAllCycles,
+} from './utils/recurringTodoMaterialize.js';
 import {
   addAttachmentToItem,
   buildClientDocumentRecord,
@@ -92,7 +97,12 @@ import {
   isRetainerCategoryEnabled,
   normalizeRetainerCategoryEnabled,
 } from './utils/retainerCategories.js';
-import { getSubtasks, newSubtaskId, projectSubtaskDueDateForNewCycle } from './utils/todoSubtasks.js';
+import {
+  getSubtasks,
+  newSubtaskId,
+  projectSubtaskDueDateForNewCycle,
+  removeSubtaskFromItems,
+} from './utils/todoSubtasks.js';
 import {
   Routes,
   Route,
@@ -246,6 +256,7 @@ export default function App() {
   const [liveTaskDuration, setLiveTaskDuration] = useState(0);
 
   const [clients, setClients] = useState([]);
+  const clientsRef = useRef([]);
   const [taskLogs, setTaskLogs] = useState([]);
   const [taskTypes, setTaskTypes] = useState([]);
   /** Own admins/{emailLower} doc — collection queries fail for kiosk/billing (Firestore rules). */
@@ -416,7 +427,11 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     const unsubTimesheets = onSnapshot(collection(db, 'timesheets'), (snapshot) => setTimesheets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.clockInTime - a.clockInTime)));
-    const unsubClients = onSnapshot(collection(db, 'clients'), (snapshot) => setClients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
+    const unsubClients = onSnapshot(collection(db, 'clients'), (snapshot) => {
+      const next = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+      clientsRef.current = next;
+      setClients(next);
+    });
     const unsubTasks = onSnapshot(collection(db, 'taskLogs'), (snapshot) => setTaskLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.clockInTime - a.clockInTime)));
     const unsubTaskTypes = onSnapshot(collection(db, 'taskTypes'), (snapshot) => setTaskTypes(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
     const unsubExpenses = onSnapshot(collection(db, 'expenses'), (snapshot) => setExpenses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a,b) => b.date - a.date)));
@@ -1568,11 +1583,22 @@ export default function App() {
     [],
   );
 
+  const resolveClient = useCallback((clientOrId) => {
+    const id =
+      typeof clientOrId === 'string' ? clientOrId : clientOrId?.id;
+    if (!id) return null;
+    return (
+      clientsRef.current.find((c) => c.id === id) ||
+      (typeof clientOrId === 'object' ? clientOrId : null)
+    );
+  }, []);
+
   const updateClientTodo = async (client, cycleStart, categoryKey, nextCategoryData) => {
-    const cycles = ensureCurrentCycleTodoData(client, cycleStart);
+    const freshClient = resolveClient(client) || client;
+    const cycles = ensureCurrentCycleTodoData(freshClient, cycleStart);
     const cycleData = cycles[String(cycleStart)] || {};
     cycles[String(cycleStart)] = { ...cycleData, [categoryKey]: nextCategoryData };
-    const period = getBillingPeriod(client.billingDay || 1, 0);
+    const period = getBillingPeriod(freshClient.billingDay || 1, 0);
     if (String(cycleStart) === String(period.start)) {
       const slice = cycles[String(cycleStart)];
       const { cycleDataByCategory, changed } = reconcileRecurringTodoInstances(
@@ -1583,21 +1609,22 @@ export default function App() {
       );
       if (changed) cycles[String(cycleStart)] = cycleDataByCategory;
     }
-    const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(client, cycles);
-    await updateDoc(doc(db, 'clients', client.id), { todoCycles: cycles, ...teamAccessPatch });
+    const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(freshClient, cycles);
+    await updateDoc(doc(db, 'clients', freshClient.id), { todoCycles: cycles, ...teamAccessPatch });
   };
 
   // Batch update multiple to-do categories in a single Firestore write.
   // This is important because calling `updateClientTodo` multiple times in a row
   // would otherwise overwrite earlier category updates based on stale client state.
   const updateClientTodosBatch = async (client, cycleStart, categoryKeyToData) => {
-    const cycles = ensureCurrentCycleTodoData(client, cycleStart);
+    const freshClient = resolveClient(client) || client;
+    const cycles = ensureCurrentCycleTodoData(freshClient, cycleStart);
     const cycleData = cycles[String(cycleStart)] || {};
     cycles[String(cycleStart)] = {
       ...cycleData,
       ...categoryKeyToData,
     };
-    const period = getBillingPeriod(client.billingDay || 1, 0);
+    const period = getBillingPeriod(freshClient.billingDay || 1, 0);
     if (String(cycleStart) === String(period.start)) {
       const slice = cycles[String(cycleStart)];
       const { cycleDataByCategory, changed } = reconcileRecurringTodoInstances(
@@ -1608,9 +1635,83 @@ export default function App() {
       );
       if (changed) cycles[String(cycleStart)] = cycleDataByCategory;
     }
-    const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(client, cycles);
-    await updateDoc(doc(db, 'clients', client.id), { todoCycles: cycles, ...teamAccessPatch });
+    const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(freshClient, cycles);
+    await updateDoc(doc(db, 'clients', freshClient.id), { todoCycles: cycles, ...teamAccessPatch });
   };
+
+  /** Delete a client task (or sub-task) in one Firestore write; removes primary tasks from all cycles. */
+  const deleteClientTodoItem = useCallback(
+    async (clientId, cycleStart, categoryKey, itemId, { subtaskId } = {}) => {
+      const client = resolveClient(clientId);
+      if (!client?.id) return false;
+
+      if (subtaskId) {
+        const cycles = ensureCurrentCycleTodoData(client, cycleStart);
+        const cat =
+          cycles[String(cycleStart)]?.[categoryKey] || { closed: false, items: [] };
+        const list = cat.items || [];
+        if (!list.some((i) => i?.id === itemId)) return false;
+        const nextList = removeSubtaskFromItems(list, itemId, subtaskId);
+        await updateClientTodo(client, cycleStart, categoryKey, {
+          ...cat,
+          items: nextList,
+        });
+        return true;
+      }
+
+      const todoState = getTodoStateForCycle(client, cycleStart);
+      const catTodo = todoState[categoryKey] || { closed: false, items: [] };
+      const item = (catTodo.items || []).find((i) => i?.id === itemId);
+      if (!item) return false;
+
+      let recurringSkipKey = '';
+      if (item.recurring) {
+        recurringSkipKey = recurringAnchorKey(
+          item.recurringId || item.id,
+          item.dueDate,
+        );
+      }
+
+      let cycles = ensureCurrentCycleTodoData(client, cycleStart);
+      const { cycles: strippedCycles, removed } = removeTodoItemFromAllCycles(
+        cycles,
+        categoryKey,
+        itemId,
+        { recurringSkipKey },
+      );
+      if (!removed) return false;
+
+      cycles = strippedCycles;
+      if (recurringSkipKey) {
+        cycles = ensureRecurringSkipOnCategory(
+          cycles,
+          String(cycleStart),
+          categoryKey,
+          recurringSkipKey,
+        );
+      }
+
+      const period = getBillingPeriod(client.billingDay || 1, 0);
+      if (String(cycleStart) === String(period.start)) {
+        const slice = cycles[String(cycleStart)];
+        const { cycleDataByCategory, changed } = reconcileRecurringTodoInstances(
+          slice,
+          period.start,
+          period.end,
+          newRecurringTodoRowId,
+        );
+        if (changed) cycles[String(cycleStart)] = cycleDataByCategory;
+      }
+
+      const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(client, cycles);
+      await updateDoc(doc(db, 'clients', client.id), {
+        todoCycles: cycles,
+        ...teamAccessPatch,
+      });
+      return true;
+    },
+    [resolveClient, newRecurringTodoRowId],
+  );
 
   const uploadClientDocument = useCallback(
     async (client, file, options = {}) => {
@@ -2440,6 +2541,7 @@ export default function App() {
     onLogClientExpense: logKioskClientExpense,
     getTodoStateForCycle,
     updateClientTodo,
+    deleteClientTodoItem,
     todoCategoryKey,
     projects,
     queueKioskTaskStart,
@@ -2513,6 +2615,7 @@ export default function App() {
     getTodoStateForCycle,
     updateClientTodo,
     updateClientTodosBatch,
+    deleteClientTodoItem,
     uploadClientDocument,
     removeClientDocument,
     todoCategoryKey,
