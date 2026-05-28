@@ -927,6 +927,79 @@ export default function App() {
     await updateDoc(doc(db, 'timesheets', activeShift.id), { clockOutTime: endTime, status: 'completed', totalSavedDuration: newTotal, duration: newTotal });
   };
 
+  const forceClockOutShift = useCallback(
+    async (shift, { adminNote = '' } = {}) => {
+      if (!shift?.id) {
+        return { ok: false, error: 'Missing shift.' };
+      }
+      if (shift.status !== 'active' && shift.status !== 'break') {
+        return { ok: false, error: 'This shift is not active.' };
+      }
+
+      const endTime = Date.now();
+      const adminTag = `[Clocked out by admin: ${user?.email || 'admin'}]`;
+
+      try {
+        const activeTasksForShift = taskLogs.filter(
+          (t) => t.shiftId === shift.id && t.status === 'active',
+        );
+
+        for (const task of activeTasksForShift) {
+          const segment = endTime - (task.lastResumeTime || task.clockInTime);
+          const newTotal = (task.totalSavedDuration || 0) + segment;
+          const noteParts = [
+            String(task.notes || '').trim(),
+            String(adminNote || '').trim(),
+            adminTag,
+          ].filter(Boolean);
+          await updateDoc(doc(db, 'taskLogs', task.id), {
+            clockOutTime: endTime,
+            status: 'completed',
+            totalSavedDuration: newTotal,
+            duration: newTotal,
+            notes: noteParts.join('\n\n'),
+          });
+        }
+
+        let newTotal = shift.totalSavedDuration || 0;
+        if (shift.status === 'active') {
+          newTotal += endTime - (shift.lastResumeTime || shift.clockInTime);
+        }
+        const shiftNoteParts = [
+          String(shift.shiftNote || '').trim(),
+          String(adminNote || '').trim(),
+          adminTag,
+        ].filter(Boolean);
+
+        await updateDoc(doc(db, 'timesheets', shift.id), {
+          clockOutTime: endTime,
+          status: 'completed',
+          totalSavedDuration: newTotal,
+          duration: newTotal,
+          forcedClockOutBy: user?.email || '',
+          forcedClockOutAt: endTime,
+          shiftNote: shiftNoteParts.join('\n\n'),
+        });
+
+        logAudit?.({
+          type: 'admin_force_clock_out',
+          entityType: 'timesheet',
+          entityId: shift.id,
+          meta: {
+            employeeName: shift.employeeName,
+            userId: shift.userId,
+            adminEmail: user?.email || '',
+          },
+        });
+
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err?.message || String(err) };
+      }
+    },
+    [taskLogs, user?.email, logAudit],
+  );
+
   const handleIdleAutoClockOut = useCallback(async () => {
     if (idleAutoClockOutLockRef.current) return;
     idleAutoClockOutLockRef.current = true;
@@ -2554,6 +2627,7 @@ export default function App() {
         `/kiosk?autostart=1&client=${encodeURIComponent(clientName)}&target=${encodeURIComponent(billingTarget)}`,
       );
     },
+    forceClockOutShift,
   };
 
   const adminDashboardRouteProps = {

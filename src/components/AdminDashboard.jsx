@@ -18,6 +18,7 @@ import {
   History,
   List,
   Lock,
+  LogOut,
   Pencil,
   Pin,
   Play,
@@ -1016,6 +1017,7 @@ const AdminDashboard = ({
   userTodos = [],
   updateUserTodos,
   navigateToKioskWithTask = () => {},
+  forceClockOutShift,
 }) => {
   const canBilling = currentUserRole === 'admin' || currentUserRole === 'billing';
   const isAdmin = currentUserRole === 'admin';
@@ -1037,6 +1039,52 @@ const AdminDashboard = ({
 
   /** Move hour budget between retainer lines for a billing cycle (admin / billing). */
   const [retainerMoveModal, setRetainerMoveModal] = useState(null);
+  const [forceClockOutLoadingId, setForceClockOutLoadingId] = useState(null);
+
+  const activeShiftsNow = React.useMemo(
+    () =>
+      (timesheets || []).filter(
+        (s) => s?.status === 'active' || s?.status === 'break',
+      ),
+    [timesheets],
+  );
+
+  const getActiveTaskForShift = React.useCallback(
+    (shiftId) =>
+      taskLogs.find((t) => t.shiftId === shiftId && t.status === 'active') ||
+      null,
+    [taskLogs],
+  );
+
+  const handleAdminForceClockOut = async (shift) => {
+    if (!isAdmin || !forceClockOutShift || !shift?.id) return;
+    const activeTask = getActiveTaskForShift(shift.id);
+    const taskLabel = activeTask
+      ? `${activeTask.clientName || 'client'} · ${activeTask.projectName || 'task'}`
+      : 'no active task';
+    const confirmed = window.confirm(
+      `Clock out ${shift.employeeName}? This will stop their shift (${taskLabel}) and save recorded time.`,
+    );
+    if (!confirmed) return;
+
+    const adminNote = window.prompt(
+      'Optional note for this clock-out (shown on the shift record):',
+      '',
+    );
+    if (adminNote === null) return;
+
+    setForceClockOutLoadingId(shift.id);
+    try {
+      const result = await forceClockOutShift(shift, {
+        adminNote: adminNote.trim(),
+      });
+      if (!result?.ok) {
+        window.alert(result?.error || 'Could not clock out this user.');
+      }
+    } finally {
+      setForceClockOutLoadingId(null);
+    }
+  };
 
   // Keep retainer categories stable in the UI even if Firestore map key ordering changes.
   const retainerCategoryOrder = Array.from(
@@ -2368,6 +2416,76 @@ const AdminDashboard = ({
             )}
           </div>
 
+          {isAdmin && activeShiftsNow.length > 0 && (
+            <div className="rounded-[32px] border border-amber-200 bg-amber-50/80 p-5 space-y-3">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h5 className="text-sm font-black text-amber-900 uppercase tracking-widest">
+                    Active shifts ({activeShiftsNow.length})
+                  </h5>
+                  <p className="text-xs text-amber-900/80 mt-1">
+                    Users currently clocked in. Admins can stop their task and
+                    clock them out here.
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {activeShiftsNow.map((shift) => {
+                  const activeTask = getActiveTaskForShift(shift.id);
+                  const loading = forceClockOutLoadingId === shift.id;
+                  return (
+                    <div
+                      key={shift.id}
+                      className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-2xl border border-amber-200/80 bg-white/90 p-4"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-black text-slate-900">
+                          {shift.employeeName}
+                        </div>
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mt-1 flex flex-wrap gap-x-2 gap-y-1">
+                          <span>
+                            {shift.status === 'break' ? 'On break' : 'Clocked in'}{' '}
+                            · {formatTime(getShiftDuration(shift))}
+                          </span>
+                          <span>
+                            Since{' '}
+                            {new Date(shift.clockInTime).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        </div>
+                        {activeTask ? (
+                          <div className="text-xs text-slate-600 mt-2">
+                            Working:{' '}
+                            <span className="font-bold">
+                              {activeTask.clientName || '—'}
+                            </span>
+                            {' · '}
+                            {activeTask.projectName || '—'}
+                          </div>
+                        ) : (
+                          <div className="text-xs text-slate-400 mt-2 italic">
+                            No active task
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => handleAdminForceClockOut(shift)}
+                        className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-white hover:bg-red-700 disabled:opacity-50"
+                      >
+                        <LogOut className="w-4 h-4" aria-hidden />
+                        {loading ? 'Clocking out…' : 'Clock out user'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="flex justify-end gap-2 px-2">
             <button
               onClick={exportCSV}
@@ -2449,6 +2567,11 @@ const AdminDashboard = ({
                               Manual
                             </span>
                           )}
+                          {(shift.status === 'active' || shift.status === 'break') && (
+                            <span className="bg-emerald-100 text-emerald-700 px-1.5 rounded text-[8px] flex items-center">
+                              {shift.status === 'break' ? 'On break' : 'Active now'}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -2472,6 +2595,19 @@ const AdminDashboard = ({
                       </button>
                       {!isRestrictedStaff && (
                         <>
+                      {isAdmin &&
+                        (shift.status === 'active' || shift.status === 'break') && (
+                        <button
+                          type="button"
+                          disabled={forceClockOutLoadingId === shift.id}
+                          onClick={() => handleAdminForceClockOut(shift)}
+                          className="px-3 py-2 rounded-xl bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 transition-colors text-[10px] font-black uppercase tracking-widest inline-flex items-center gap-1.5 disabled:opacity-50"
+                          title="Stop active task and clock out this user"
+                        >
+                          <LogOut className="w-4 h-4" aria-hidden />
+                          Clock out
+                        </button>
+                      )}
                       <button
                         onClick={() => startEditing('shift', shift)}
                         className="p-3 bg-slate-50 text-slate-500 rounded-xl hover:text-[#fd7414] transition-colors"
