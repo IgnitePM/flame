@@ -76,6 +76,7 @@ import ClientProfileSummary from './ClientProfileSummary.jsx';
 import ClientFilesPanel from './ClientFilesPanel.jsx';
 import ClientCycleActivityPanel from './ClientCycleActivityPanel.jsx';
 import RetainerCategoryStats from './RetainerCategoryStats.jsx';
+import TaskLogSessionDetail from './TaskLogSessionDetail.jsx';
 import TodoItemAttachments from './TodoItemAttachments.jsx';
 
 /** Normalize ?tab= for /admin/clients/:id (supports legacy `projects`). */
@@ -2529,12 +2530,14 @@ const AdminDashboard = ({
                                     </span>
                                   )}
                                 </div>
-                                {task.notes && (
-                                  <p className="text-xs text-slate-500 leading-relaxed font-medium mb-3 italic">
-                                    &quot;{task.notes}&quot;
-                                  </p>
-                                )}
-                                <div className="text-[10px] text-slate-400 font-bold flex items-center gap-2">
+                                <TaskLogSessionDetail
+                                  task={task}
+                                  clients={clients}
+                                  getTodoStateForCycle={getTodoStateForCycle}
+                                  getBillingPeriod={getBillingPeriod}
+                                  todoCategoryKey={todoCategoryKey}
+                                />
+                                <div className="text-[10px] text-slate-400 font-bold flex items-center gap-2 mt-2">
                                   {new Date(
                                     task.clockInTime,
                                   ).toLocaleTimeString([], {
@@ -4443,6 +4446,7 @@ const AdminDashboard = ({
                         periodProjectExps={periodProjectExps}
                         getTodoStateForCycle={getTodoStateForCycle}
                         todoCategoryKey={todoCategoryKey}
+                        getBillingPeriod={getBillingPeriod}
                         projects={projects}
                         formatTime={formatTime}
                         getTaskDuration={getTaskDuration}
@@ -4492,7 +4496,7 @@ const AdminDashboard = ({
                         ) : (
                           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                             {periodTasks.length > 0 && (
-                              <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4 max-h-72 overflow-y-auto">
+                              <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4 max-h-[32rem] overflow-y-auto">
                                 <h6 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">
                                   All retainer tasks ({periodTasks.length})
                                 </h6>
@@ -4511,11 +4515,14 @@ const AdminDashboard = ({
                                             ).toLocaleDateString()}{' '}
                                             • {task.projectName || '—'}
                                           </span>
-                                          {task.notes && (
-                                            <p className="text-xs text-slate-600 italic line-clamp-2 mt-0.5">
-                                              &quot;{task.notes}&quot;
-                                            </p>
-                                          )}
+                                          <TaskLogSessionDetail
+                                            task={task}
+                                            client={c}
+                                            getTodoStateForCycle={getTodoStateForCycle}
+                                            getBillingPeriod={getBillingPeriod}
+                                            todoCategoryKey={todoCategoryKey}
+                                            compact
+                                          />
                                         </div>
                                         <div className="flex items-center gap-2 shrink-0">
                                           <span className="font-black text-sm text-[#fd7414] font-mono">
@@ -4543,7 +4550,7 @@ const AdminDashboard = ({
                               </div>
                             )}
                             {periodExps.length > 0 && (
-                              <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4 max-h-72 overflow-y-auto">
+                              <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4 max-h-[32rem] overflow-y-auto">
                                 <h6 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">
                                   All retainer expenses ({periodExps.length})
                                 </h6>
@@ -4616,11 +4623,14 @@ const AdminDashboard = ({
                                               ).toLocaleDateString()}{' '}
                                               • {projTitle}
                                             </span>
-                                            {task.notes && (
-                                              <p className="text-xs text-slate-600 italic line-clamp-2 mt-0.5">
-                                                &quot;{task.notes}&quot;
-                                              </p>
-                                            )}
+                                            <TaskLogSessionDetail
+                                              task={task}
+                                              client={c}
+                                              getTodoStateForCycle={getTodoStateForCycle}
+                                              getBillingPeriod={getBillingPeriod}
+                                              todoCategoryKey={todoCategoryKey}
+                                              compact
+                                            />
                                           </div>
                                           <div className="flex items-center gap-2 shrink-0">
                                             <span className="font-black text-sm text-[#fd7414] font-mono">
@@ -5608,11 +5618,14 @@ const AdminDashboard = ({
                                                         <span className="text-[10px] text-slate-400 font-bold">
                                                           {new Date(task.clockInTime).toLocaleDateString()}
                                                         </span>
-                                                        {task.notes && (
-                                                          <p className="text-xs text-slate-600 italic line-clamp-1 mt-0.5">
-                                                            &quot;{task.notes}&quot;
-                                                          </p>
-                                                        )}
+                                                        <TaskLogSessionDetail
+                                                          task={task}
+                                                          client={c}
+                                                          getTodoStateForCycle={getTodoStateForCycle}
+                                                          getBillingPeriod={getBillingPeriod}
+                                                          todoCategoryKey={todoCategoryKey}
+                                                          compact
+                                                        />
                                                       </div>
                                                       <div className="flex items-center gap-2 shrink-0">
                                                         <span className="font-black text-sm text-[#fd7414] font-mono">

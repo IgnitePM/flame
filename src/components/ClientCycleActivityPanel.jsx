@@ -8,6 +8,7 @@ import {
 import { getEnabledRetainerCategoryNames } from '../utils/retainerCategories.js';
 import { safeDisplayForReact } from '../utils/safeReactText.js';
 import RetainerCategoryStats from './RetainerCategoryStats.jsx';
+import TaskLogSessionDetail from './TaskLogSessionDetail.jsx';
 
 function Section({ title, children, empty }) {
   return (
@@ -35,6 +36,7 @@ export default function ClientCycleActivityPanel({
   periodProjectExps = [],
   getTodoStateForCycle,
   todoCategoryKey,
+  getBillingPeriod,
   projects = [],
   formatTime,
   getTaskDuration,
@@ -203,11 +205,14 @@ export default function ClientCycleActivityPanel({
                         timeStyle: 'short',
                       })}
                     </div>
-                    {task.notes ? (
-                      <p className="text-xs text-slate-600 italic mt-1 break-words whitespace-pre-wrap">
-                        &quot;{task.notes}&quot;
-                      </p>
-                    ) : null}
+                    <TaskLogSessionDetail
+                      task={task}
+                      client={client}
+                      getTodoStateForCycle={getTodoStateForCycle}
+                      getBillingPeriod={getBillingPeriod}
+                      todoCategoryKey={todoCategoryKey}
+                      compact
+                    />
                   </div>
                   <span className="text-sm font-black text-[#fd7414] font-mono shrink-0">
                     {formatTime(getTaskDuration(task))}
