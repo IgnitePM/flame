@@ -2417,13 +2417,13 @@ const AdminDashboard = ({
           </div>
 
           {isAdmin && activeShiftsNow.length > 0 && (
-            <div className="rounded-[32px] border border-amber-200 bg-amber-50/80 p-5 space-y-3">
+            <div className="rounded-[32px] border border-slate-200 bg-slate-50 p-5 space-y-3">
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h5 className="text-sm font-black text-amber-900 uppercase tracking-widest">
+                  <h5 className="text-sm font-black text-slate-700 uppercase tracking-widest">
                     Active shifts ({activeShiftsNow.length})
                   </h5>
-                  <p className="text-xs text-amber-900/80 mt-1">
+                  <p className="text-xs text-slate-500 mt-1">
                     Users currently clocked in. Admins can stop their task and
                     clock them out here.
                   </p>
@@ -2436,10 +2436,10 @@ const AdminDashboard = ({
                   return (
                     <div
                       key={shift.id}
-                      className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-2xl border border-amber-200/80 bg-white/90 p-4"
+                      className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-2xl border border-slate-200 bg-white p-4"
                     >
                       <div className="min-w-0">
-                        <div className="font-black text-slate-900">
+                        <div className="font-black text-slate-800">
                           {shift.employeeName}
                         </div>
                         <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mt-1 flex flex-wrap gap-x-2 gap-y-1">
@@ -2458,7 +2458,7 @@ const AdminDashboard = ({
                         {activeTask ? (
                           <div className="text-xs text-slate-600 mt-2">
                             Working:{' '}
-                            <span className="font-bold">
+                            <span className="font-bold text-slate-800">
                               {activeTask.clientName || '—'}
                             </span>
                             {' · '}
