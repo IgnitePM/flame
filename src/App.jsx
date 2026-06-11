@@ -363,22 +363,23 @@ export default function App() {
 
   // Client Portal State
   const [portalOffset, setPortalOffset] = useState(0);
+  const POLICY_DEFAULTS = {
+    requireClockOutNote: false,
+    idleReminderMinutes: 0,
+    // Idle failsafe defaults ON: prompt after 2 hours of no kiosk activity.
+    idleFailsafeMinutes: 120,
+    idleFailsafeConfirmSeconds: 120,
+  };
   const [policy, setPolicy] = useState(() => {
-    const defaults = {
-      requireClockOutNote: false,
-      idleReminderMinutes: 0,
-      idleFailsafeMinutes: 0,
-      idleFailsafeConfirmSeconds: 120,
-    };
     try {
       const raw = localStorage.getItem('ignite_policy');
-      if (!raw) return defaults;
+      if (!raw) return POLICY_DEFAULTS;
       const parsed = JSON.parse(raw);
       return typeof parsed === 'object' && parsed
-        ? { ...defaults, ...parsed }
-        : defaults;
+        ? { ...POLICY_DEFAULTS, ...parsed }
+        : POLICY_DEFAULTS;
     } catch {
-      return defaults;
+      return POLICY_DEFAULTS;
     }
   });
 
@@ -392,6 +393,10 @@ export default function App() {
       }
       return next;
     });
+    // Policy must reach every kiosk device, not just this browser.
+    setDoc(doc(db, 'settings', 'policy'), updates, { merge: true }).catch(
+      () => {},
+    );
   };
 
   const computeNextRecurringExpenseDate = (currentDateMs, recurrence) => {
@@ -449,6 +454,23 @@ export default function App() {
       const items = Array.isArray(data.items) ? data.items : [];
       setUserTodos(items);
     });
+    // Shared policy (idle failsafe etc.) so kiosks on other devices honor it.
+    const unsubPolicy = onSnapshot(
+      doc(db, 'settings', 'policy'),
+      (snapshot) => {
+        if (!snapshot.exists()) return;
+        const data = snapshot.data() || {};
+        setPolicy((prev) => ({ ...prev, ...data }));
+        try {
+          localStorage.setItem('ignite_policy', JSON.stringify(data));
+        } catch {
+          // localStorage may be unavailable; Firestore copy is authoritative.
+        }
+      },
+      () => {
+        // Rules may not allow this read yet; local defaults still apply.
+      },
+    );
 
     return () => {
       unsubTimesheets();
@@ -459,6 +481,7 @@ export default function App() {
       unsubProjects();
       unsubAddons();
       unsubUserTodos();
+      unsubPolicy();
     };
   }, [user]);
 
@@ -779,6 +802,15 @@ export default function App() {
         (t.status === 'active' || t.status === 'break'),
     );
     if (existing) return;
+    // Clock-in is a user gesture, so this is the best moment to ask for
+    // notification permission (used by the idle "Still working?" failsafe).
+    try {
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {});
+      }
+    } catch {
+      // Notifications unsupported; failsafe still works via the modal.
+    }
     await addDoc(collection(db, 'timesheets'), {
       employeeName: user.displayName || user.email,
       clockInTime: Date.now(),
@@ -1030,19 +1062,27 @@ export default function App() {
     [taskLogs, timesheets, user?.email, logAudit],
   );
 
-  const handleIdleAutoClockOut = useCallback(async () => {
+  const handleIdleAutoClockOut = useCallback(async ({ endTime: endTimeArg } = {}) => {
     if (idleAutoClockOutLockRef.current) return;
     idleAutoClockOutLockRef.current = true;
     const { activeTask: task, activeShift: shift, activeTaskNotes: notes } =
       idleShutdownRef.current;
     const IDLE_TAG =
       '[Clock stopped automatically: session was idle — Ignite PM kiosk]';
-    const endTime = Date.now();
+    // Backdate the clock-out to when the idle deadline expired (e.g. the
+    // laptop slept overnight) so idle hours are not recorded as work time.
+    const endTime = Math.min(
+      Number(endTimeArg) > 0 ? Number(endTimeArg) : Date.now(),
+      Date.now(),
+    );
     let shiftUpdateError = null;
     try {
       if (task?.id) {
         try {
-          const segment = endTime - (task.lastResumeTime || task.clockInTime);
+          const segment = Math.max(
+            0,
+            endTime - (task.lastResumeTime || task.clockInTime),
+          );
           const newTotal = (task.totalSavedDuration || 0) + segment;
           const base = String(notes || '').trim() || String(task.notes || '').trim();
           const finalNotes = base ? `${base}\n\n${IDLE_TAG}` : IDLE_TAG;
@@ -1062,7 +1102,10 @@ export default function App() {
         try {
           let newTotal = shift.totalSavedDuration || 0;
           if (shift.status === 'active') {
-            newTotal += endTime - (shift.lastResumeTime || shift.clockInTime);
+            newTotal += Math.max(
+              0,
+              endTime - (shift.lastResumeTime || shift.clockInTime),
+            );
           }
           await updateDoc(doc(db, 'timesheets', shift.id), {
             clockOutTime: endTime,

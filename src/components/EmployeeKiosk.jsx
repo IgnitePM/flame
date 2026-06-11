@@ -811,32 +811,155 @@ const EmployeeKiosk = ({
     return () => clearInterval(timer);
   }, [policy?.idleReminderMinutes, activeTask, activeTaskNotes]);
 
+  /**
+   * Idle failsafe ("Are you still working?").
+   *
+   * Deadline-based on purpose: browsers throttle/pause timers in background
+   * tabs and during sleep, so a tick-by-tick countdown stalls forever and
+   * never clocks the user out. Instead we store absolute timestamps and on
+   * every check (interval tick, tab wake, user input) compare wall-clock
+   * time against them.
+   */
   const lastActivityRef = React.useRef(Date.now());
-  const [idleFailsafeOpen, setIdleFailsafeOpen] = React.useState(null);
+  const idleFailsafeOpenRef = React.useRef(null);
+  const [idleFailsafeOpen, setIdleFailsafeOpen] = React.useState(null); // { deadlineAt }
+  const [idleFailsafeNowMs, setIdleFailsafeNowMs] = React.useState(Date.now());
+
+  const idleFailsafeMin = Number(policy?.idleFailsafeMinutes || 0);
+  const idleFailsafeConfirmSec = Math.max(
+    10,
+    Number(policy?.idleFailsafeConfirmSeconds) || 120,
+  );
+
+  const closeIdleFailsafe = React.useCallback(() => {
+    idleFailsafeOpenRef.current = null;
+    setIdleFailsafeOpen(null);
+  }, []);
 
   React.useEffect(() => {
     if (activeShift) {
       lastActivityRef.current = Date.now();
     } else {
-      setIdleFailsafeOpen(null);
+      closeIdleFailsafe();
     }
-  }, [activeShift?.id]);
+  }, [activeShift?.id, closeIdleFailsafe]);
+
+  const playIdleAlertSound = React.useCallback(() => {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      const beep = (startAt) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = 880;
+        gain.gain.setValueAtTime(0.0001, startAt);
+        gain.gain.exponentialRampToValueAtTime(0.35, startAt + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.5);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(startAt);
+        osc.stop(startAt + 0.55);
+      };
+      const t0 = ctx.currentTime;
+      beep(t0);
+      beep(t0 + 0.7);
+      beep(t0 + 1.4);
+      window.setTimeout(() => {
+        ctx.close().catch(() => {});
+      }, 2600);
+    } catch {
+      // Audio blocked or unsupported; the modal still shows.
+    }
+  }, []);
+
+  const showIdleNotification = React.useCallback((secondsLeft) => {
+    try {
+      if (!('Notification' in window)) return;
+      if (Notification.permission !== 'granted') return;
+      const n = new Notification('Are you still working?', {
+        body: `No kiosk activity detected. Confirm within ${secondsLeft} seconds or your shift will be clocked out automatically.`,
+        tag: 'ignite-idle-failsafe',
+        requireInteraction: true,
+      });
+      n.onclick = () => {
+        try {
+          window.focus();
+        } catch {
+          // Focus can be denied; the notification itself was still seen.
+        }
+        n.close();
+      };
+    } catch {
+      // Notifications unsupported; the modal still shows.
+    }
+  }, []);
+
+  const runIdleFailsafeCheck = React.useCallback(() => {
+    if (!activeShift || typeof handleIdleAutoClockOut !== 'function') return;
+    if (idleFailsafeMin <= 0) return;
+    const now = Date.now();
+
+    const open = idleFailsafeOpenRef.current;
+    if (open) {
+      if (now >= open.deadlineAt) {
+        lastActivityRef.current = now;
+        closeIdleFailsafe();
+        handleIdleAutoClockOut({ endTime: open.deadlineAt });
+      }
+      return;
+    }
+
+    const idleMs = now - lastActivityRef.current;
+    const failsafeMs = idleFailsafeMin * 60 * 1000;
+    if (idleMs < failsafeMs) return;
+
+    const deadlineAt =
+      lastActivityRef.current + failsafeMs + idleFailsafeConfirmSec * 1000;
+    if (now >= deadlineAt) {
+      // Deep idle (machine slept / tab frozen past the whole confirm window):
+      // clock out immediately, backdated to when the deadline expired.
+      lastActivityRef.current = now;
+      handleIdleAutoClockOut({ endTime: deadlineAt });
+      return;
+    }
+
+    idleFailsafeOpenRef.current = { deadlineAt };
+    setIdleFailsafeOpen({ deadlineAt });
+    setIdleFailsafeNowMs(now);
+    playIdleAlertSound();
+    showIdleNotification(Math.max(1, Math.round((deadlineAt - now) / 1000)));
+  }, [
+    activeShift,
+    handleIdleAutoClockOut,
+    idleFailsafeMin,
+    idleFailsafeConfirmSec,
+    closeIdleFailsafe,
+    playIdleAlertSound,
+    showIdleNotification,
+  ]);
 
   React.useEffect(() => {
     if (!activeShift || typeof handleIdleAutoClockOut !== 'function') return;
-    const failsafeMin = Number(policy?.idleFailsafeMinutes || 0);
-    if (failsafeMin <= 0) return;
+    if (idleFailsafeMin <= 0) return;
 
     const bump = () => {
-      if (!idleFailsafeOpen) {
-        lastActivityRef.current = Date.now();
+      if (idleFailsafeOpenRef.current) return;
+      const idleMs = Date.now() - lastActivityRef.current;
+      if (idleMs >= idleFailsafeMin * 60 * 1000) {
+        // Threshold already passed (e.g. first click after waking the
+        // machine) — never silently erase the idle period.
+        runIdleFailsafeCheck();
+        return;
       }
+      lastActivityRef.current = Date.now();
     };
     window.addEventListener('pointerdown', bump);
     window.addEventListener('keydown', bump);
     window.addEventListener('scroll', bump, true);
     const onVis = () => {
-      if (document.visibilityState === 'visible') bump();
+      if (document.visibilityState === 'visible') runIdleFailsafeCheck();
     };
     document.addEventListener('visibilitychange', onVis);
     return () => {
@@ -845,47 +968,25 @@ const EmployeeKiosk = ({
       window.removeEventListener('scroll', bump, true);
       document.removeEventListener('visibilitychange', onVis);
     };
-  }, [activeShift, handleIdleAutoClockOut, idleFailsafeOpen, policy?.idleFailsafeMinutes]);
+  }, [activeShift, handleIdleAutoClockOut, idleFailsafeMin, runIdleFailsafeCheck]);
 
   React.useEffect(() => {
-    if (!activeShift || typeof handleIdleAutoClockOut !== 'function') return;
-    const failsafeMin = Number(policy?.idleFailsafeMinutes || 0);
-    if (failsafeMin <= 0) return;
-    const iv = window.setInterval(() => {
-      if (idleFailsafeOpen) return;
-      const idleMs = Date.now() - lastActivityRef.current;
-      if (idleMs >= failsafeMin * 60 * 1000) {
-        const sec = Math.max(
-          10,
-          Number(policy?.idleFailsafeConfirmSeconds) || 120,
-        );
-        setIdleFailsafeOpen({ seconds: sec });
-      }
-    }, 4000);
+    if (!activeShift || idleFailsafeMin <= 0) return;
+    const iv = window.setInterval(runIdleFailsafeCheck, 5000);
     return () => window.clearInterval(iv);
-  }, [
-    activeShift,
-    handleIdleAutoClockOut,
-    idleFailsafeOpen,
-    policy?.idleFailsafeMinutes,
-    policy?.idleFailsafeConfirmSeconds,
-  ]);
+  }, [activeShift, idleFailsafeMin, runIdleFailsafeCheck]);
 
+  // 1s display ticker while the prompt is open; the deadline itself is
+  // absolute, so throttled ticks only delay the displayed number, not the
+  // actual clock-out.
   React.useEffect(() => {
-    if (!idleFailsafeOpen || typeof handleIdleAutoClockOut !== 'function') return;
-    const { seconds } = idleFailsafeOpen;
-    if (seconds <= 0) {
-      handleIdleAutoClockOut();
-      setIdleFailsafeOpen(null);
-      return;
-    }
-    const t = window.setTimeout(() => {
-      setIdleFailsafeOpen((prev) =>
-        prev ? { seconds: Math.max(0, prev.seconds - 1) } : null,
-      );
+    if (!idleFailsafeOpen) return;
+    const iv = window.setInterval(() => {
+      setIdleFailsafeNowMs(Date.now());
+      runIdleFailsafeCheck();
     }, 1000);
-    return () => window.clearTimeout(t);
-  }, [idleFailsafeOpen, handleIdleAutoClockOut]);
+    return () => window.clearInterval(iv);
+  }, [idleFailsafeOpen, runIdleFailsafeCheck]);
 
   const meLower = String(staffEmail || user?.email || '').trim().toLowerCase();
 
@@ -3437,13 +3538,17 @@ const EmployeeKiosk = ({
               the kiosk, or your shift will end automatically.
             </p>
             <div className="text-3xl font-black text-[#fd7414] font-mono">
-              {idleFailsafeOpen.seconds}s
+              {Math.max(
+                0,
+                Math.ceil((idleFailsafeOpen.deadlineAt - idleFailsafeNowMs) / 1000),
+              )}
+              s
             </div>
             <button
               type="button"
               onClick={() => {
                 lastActivityRef.current = Date.now();
-                setIdleFailsafeOpen(null);
+                closeIdleFailsafe();
               }}
               className="w-full py-4 rounded-2xl bg-black text-white font-black text-sm uppercase tracking-widest hover:bg-slate-800"
             >

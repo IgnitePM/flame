@@ -2612,6 +2612,14 @@ const AdminDashboard = ({
                               Manual
                             </span>
                           )}
+                          {shift.autoStoppedReason === 'idle_timeout' && (
+                            <span
+                              className="bg-amber-100 text-amber-700 px-1.5 rounded text-[8px] flex items-center"
+                              title="This shift was ended automatically after inactivity — the user may have forgotten to clock out. Review the recorded time."
+                            >
+                              Auto clock-out (idle)
+                            </span>
+                          )}
                           {(shift.status === 'active' || shift.status === 'break') && (
                             <span className="bg-emerald-100 text-emerald-700 px-1.5 rounded text-[8px] flex items-center">
                               {shift.status === 'break' ? 'On break' : 'Active now'}

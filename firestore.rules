@@ -135,6 +135,14 @@ service cloud.firestore {
       allow read: if isSignedIn() && uid == request.auth.uid;
       allow create, update, delete: if isSignedIn() && uid == request.auth.uid;
     }
+
+    // Shared app policy (idle failsafe etc.) — readable by all staff so every
+    // kiosk device enforces the same settings; only billing/admin may change.
+    match /settings/{settingId} {
+      allow read: if isSignedIn();
+      allow create, update: if isBilling();
+      allow delete: if isAdmin();
+    }
   }
 }
 
