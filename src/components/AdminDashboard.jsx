@@ -1011,6 +1011,7 @@ const AdminDashboard = ({
   updateClientTodo,
   updateClientTodosBatch,
   deleteClientTodoItem,
+  setClientTodoItemDone,
   uploadClientDocument,
   removeClientDocument,
   todoCategoryKey,
@@ -1050,15 +1051,46 @@ const AdminDashboard = ({
   );
 
   const getActiveTaskForShift = React.useCallback(
-    (shiftId) =>
-      taskLogs.find((t) => t.shiftId === shiftId && t.status === 'active') ||
-      null,
-    [taskLogs],
+    (shift) => {
+      const shiftId = typeof shift === 'string' ? shift : shift?.id;
+      const userId = typeof shift === 'string' ? null : shift?.userId;
+      const byShiftId =
+        taskLogs.find((t) => t.shiftId === shiftId && t.status === 'active') ||
+        null;
+      if (byShiftId || !userId) return byShiftId;
+      // Fallback: the user's task may be tagged with a stale/duplicate shift
+      // id. Show it here as long as it isn't owned by another live shift.
+      const liveShiftIds = new Set(activeShiftsNow.map((s) => s.id));
+      const orphans = taskLogs
+        .filter(
+          (t) =>
+            t.status === 'active' &&
+            t.userId === userId &&
+            !liveShiftIds.has(t.shiftId),
+        )
+        .sort(
+          (a, b) =>
+            (b.lastResumeTime || b.clockInTime || 0) -
+            (a.lastResumeTime || a.clockInTime || 0),
+        );
+      return orphans[0] || null;
+    },
+    [taskLogs, activeShiftsNow],
+  );
+
+  /** True when this user has more than one live shift (one is likely stale). */
+  const shiftHasLiveDuplicate = React.useCallback(
+    (shift) =>
+      !!shift?.userId &&
+      activeShiftsNow.some(
+        (s) => s.id !== shift.id && s.userId === shift.userId,
+      ),
+    [activeShiftsNow],
   );
 
   const handleAdminForceClockOut = async (shift) => {
     if (!isAdmin || !forceClockOutShift || !shift?.id) return;
-    const activeTask = getActiveTaskForShift(shift.id);
+    const activeTask = getActiveTaskForShift(shift);
     const taskLabel = activeTask
       ? `${activeTask.clientName || 'client'} · ${activeTask.projectName || 'task'}`
       : 'no active task';
@@ -2431,8 +2463,9 @@ const AdminDashboard = ({
               </div>
               <div className="space-y-2">
                 {activeShiftsNow.map((shift) => {
-                  const activeTask = getActiveTaskForShift(shift.id);
+                  const activeTask = getActiveTaskForShift(shift);
                   const loading = forceClockOutLoadingId === shift.id;
+                  const hasDuplicate = shiftHasLiveDuplicate(shift);
                   return (
                     <div
                       key={shift.id}
@@ -2463,10 +2496,22 @@ const AdminDashboard = ({
                             </span>
                             {' · '}
                             {activeTask.projectName || '—'}
+                            {activeTask.shiftId !== shift.id && (
+                              <span className="ml-2 text-[9px] font-black uppercase tracking-widest text-amber-700">
+                                From another session
+                              </span>
+                            )}
                           </div>
                         ) : (
                           <div className="text-xs text-slate-400 mt-2 italic">
                             No active task
+                          </div>
+                        )}
+                        {hasDuplicate && (
+                          <div className="text-[10px] font-bold text-amber-700 mt-1">
+                            This user has another active shift — one of them is
+                            likely stale. Clocking out a stale shift will not
+                            stop their current task.
                           </div>
                         )}
                       </div>
@@ -3054,6 +3099,22 @@ const AdminDashboard = ({
                           }
                           setTodoSaving(true);
                           try {
+                            const client = clients.find((c) => c.id === row.clientId);
+                            if (!row.item.done && setClientTodoItemDone && client) {
+                              const ok = await setClientTodoItemDone(
+                                client,
+                                row.cycleStart,
+                                row.categoryKey,
+                                row.item,
+                                true,
+                              );
+                              if (!ok) {
+                                window.alert(
+                                  'Could not mark this task complete. Finish every sub-task first, then try again.',
+                                );
+                              }
+                              return;
+                            }
                             const items = row.catTodo.items || [];
                             const next = items.map((i) =>
                               i.id === row.item.id
@@ -3065,7 +3126,7 @@ const AdminDashboard = ({
                                 : i,
                             );
                             await updateClientTodo(
-                              clients.find((c) => c.id === row.clientId),
+                              client,
                               row.cycleStart,
                               row.categoryKey,
                               { ...row.catTodo, items: next },

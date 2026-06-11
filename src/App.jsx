@@ -76,12 +76,15 @@ import {
 import {
   ensureRecurringSkipOnCategory,
   computeRecurringDueDate,
+  markPrimaryTodoDoneAcrossCycles,
+  mergeOpenItemsFromPrevCycle,
   projectSubtasksForNewRecurringPrimaryCycle,
   reconcileRecurringTodoInstances,
   recurringAnchorKey,
   removeTodoItemFromAllCycles,
   subtasksForCarryover,
 } from './utils/recurringTodoMaterialize.js';
+import { canMarkParentTodoDone } from './utils/todoSubtasks.js';
 import {
   addAttachmentToItem,
   buildClientDocumentRecord,
@@ -767,6 +770,15 @@ export default function App() {
 
   // Tracking Logic
   const handleClockIn = async () => {
+    // Guard against duplicate active shifts (second tab/device, stale shift
+    // left over after a crash). Tasks attach to one shift id, so a duplicate
+    // makes the admin Active Shifts panel show "No active task".
+    const existing = timesheets.find(
+      (t) =>
+        t.userId === user?.uid &&
+        (t.status === 'active' || t.status === 'break'),
+    );
+    if (existing) return;
     await addDoc(collection(db, 'timesheets'), {
       employeeName: user.displayName || user.email,
       clockInTime: Date.now(),
@@ -940,8 +952,26 @@ export default function App() {
       const adminTag = `[Clocked out by admin: ${user?.email || 'admin'}]`;
 
       try {
+        // Other shifts still live for this user; tasks tied to them stay put.
+        const otherLiveShiftIds = new Set(
+          timesheets
+            .filter(
+              (s) =>
+                s.id !== shift.id &&
+                s.userId === shift.userId &&
+                (s.status === 'active' || s.status === 'break'),
+            )
+            .map((s) => s.id),
+        );
         const activeTasksForShift = taskLogs.filter(
-          (t) => t.shiftId === shift.id && t.status === 'active',
+          (t) =>
+            t.status === 'active' &&
+            (t.shiftId === shift.id ||
+              // Orphaned task: same user, but its shift id no longer matches
+              // any live shift (stale/duplicate shift was created later).
+              (shift.userId &&
+                t.userId === shift.userId &&
+                !otherLiveShiftIds.has(t.shiftId))),
         );
 
         for (const task of activeTasksForShift) {
@@ -997,7 +1027,7 @@ export default function App() {
         return { ok: false, error: err?.message || String(err) };
       }
     },
-    [taskLogs, user?.email, logAudit],
+    [taskLogs, timesheets, user?.email, logAudit],
   );
 
   const handleIdleAutoClockOut = useCallback(async () => {
@@ -1419,9 +1449,14 @@ export default function App() {
 
   const getTodoStateForCycle = (client, cycleStart) => {
     const cycles = client.todoCycles || {};
-    const existing = cycles[String(cycleStart)];
-    if (existing) return existing;
     const currentCycleStart = getBillingPeriod(client.billingDay || 1, 0).start;
+    const existing = cycles[String(cycleStart)];
+    if (existing) {
+      if (cycleStart !== currentCycleStart) return existing;
+      const prevStart = getBillingPeriod(client.billingDay || 1, -1).start;
+      const prevData = cycles[String(prevStart)] || {};
+      return mergeOpenItemsFromPrevCycle(existing, prevData);
+    }
     if (cycleStart !== currentCycleStart) return {};
     const prevStart = getBillingPeriod(client.billingDay || 1, -1).start;
     const prevData = cycles[String(prevStart)] || {};
@@ -1610,6 +1645,84 @@ export default function App() {
     const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(freshClient, cycles);
     await updateDoc(doc(db, 'clients', freshClient.id), { todoCycles: cycles, ...teamAccessPatch });
   };
+
+  /** Mark a primary client task complete across every stored billing cycle copy. */
+  const setClientTodoItemDone = useCallback(
+    async (client, cycleStart, categoryKey, item, done = true) => {
+      const freshClient = resolveClient(client) || client;
+      if (!freshClient?.id || !item?.id) return false;
+
+      if (done && !canMarkParentTodoDone(item)) return false;
+
+      const period = getBillingPeriod(freshClient.billingDay || 1, 0);
+      let cycles = { ...(freshClient.todoCycles || {}) };
+      if (String(cycleStart) === String(period.start)) {
+        cycles = ensureCurrentCycleTodoData(freshClient, cycleStart);
+      }
+
+      const todoState = getTodoStateForCycle(freshClient, cycleStart);
+      const catTodo = todoState[categoryKey] || { closed: false, items: [] };
+      const items = catTodo.items || [];
+      if (!items.some((row) => row?.id === item.id)) return false;
+
+      if (done) {
+        const nextItems = items.map((row) =>
+          row.id === item.id
+            ? { ...row, done: true, doneAt: Date.now() }
+            : row,
+        );
+        cycles[String(cycleStart)] = {
+          ...(cycles[String(cycleStart)] || {}),
+          [categoryKey]: { ...catTodo, items: nextItems },
+        };
+
+        let recurringSkipKey = '';
+        if (item.recurring) {
+          recurringSkipKey = recurringAnchorKey(
+            item.recurringId || item.id,
+            item.dueDate,
+          );
+        }
+
+        const { cycles: markedCycles, touched } = markPrimaryTodoDoneAcrossCycles(
+          cycles,
+          categoryKey,
+          item.id,
+          true,
+          { recurringSkipKey },
+        );
+        if (!touched) return false;
+        cycles = markedCycles;
+
+        if (String(cycleStart) === String(period.start)) {
+          const slice = cycles[String(period.start)];
+          const { cycleDataByCategory, changed } = reconcileRecurringTodoInstances(
+            slice,
+            period.start,
+            period.end,
+            newRecurringTodoRowId,
+          );
+          if (changed) cycles[String(period.start)] = cycleDataByCategory;
+        }
+      } else {
+        const nextItems = items.map((row) =>
+          row.id === item.id ? { ...row, done: false, doneAt: null } : row,
+        );
+        cycles[String(cycleStart)] = {
+          ...(cycles[String(cycleStart)] || {}),
+          [categoryKey]: { ...catTodo, items: nextItems },
+        };
+      }
+
+      const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(freshClient, cycles);
+      await updateDoc(doc(db, 'clients', freshClient.id), {
+        todoCycles: cycles,
+        ...teamAccessPatch,
+      });
+      return true;
+    },
+    [resolveClient, newRecurringTodoRowId],
+  );
 
   // Batch update multiple to-do categories in a single Firestore write.
   // This is important because calling `updateClientTodo` multiple times in a row
@@ -2539,6 +2652,7 @@ export default function App() {
     onLogClientExpense: logKioskClientExpense,
     getTodoStateForCycle,
     updateClientTodo,
+    setClientTodoItemDone,
     deleteClientTodoItem,
     todoCategoryKey,
     projects,
@@ -2613,6 +2727,7 @@ export default function App() {
     getTodoStateForCycle,
     updateClientTodo,
     updateClientTodosBatch,
+    setClientTodoItemDone,
     deleteClientTodoItem,
     uploadClientDocument,
     removeClientDocument,

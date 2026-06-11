@@ -228,6 +228,7 @@ export default function KioskClientTodoItem({
   todoSaving,
   setTodoSaving,
   updateClientTodo,
+  setClientTodoItemDone,
   onPersistItems,
   canDragReorder,
   getUrgencyClass,
@@ -247,6 +248,7 @@ export default function KioskClientTodoItem({
   uploadClientDocument,
   removeClientDocument,
   canAttachFiles = false,
+  showPriorCycleBadge = false,
 }) {
   const meLower = String(staffEmail || user?.email || '').trim().toLowerCase();
   const rowRef = React.useRef(null);
@@ -468,6 +470,11 @@ export default function KioskClientTodoItem({
           {dropHintLabel}
         </div>
       )}
+      {showPriorCycleBadge && (
+        <div className="px-2 pt-2 text-[9px] font-black uppercase tracking-widest text-amber-800">
+          Prior billing cycle
+        </div>
+      )}
       <div className="flex flex-col gap-2 p-2 min-w-0 w-full">
         <div className="flex items-start gap-2 min-w-0 w-full">
           {canDragReorder ? (
@@ -520,6 +527,21 @@ export default function KioskClientTodoItem({
               }
               setTodoSaving(true);
               try {
+                if (!item.done && setClientTodoItemDone) {
+                  const ok = await setClientTodoItemDone(
+                    client,
+                    cycleStart,
+                    catKey,
+                    item,
+                    true,
+                  );
+                  if (!ok) {
+                    window.alert(
+                      'Could not mark this task complete. Finish every sub-task first, then try again.',
+                    );
+                  }
+                  return;
+                }
                 const next = allItems.map((i) =>
                   i.id === item.id
                     ? { ...i, done: !i.done, doneAt: !i.done ? Date.now() : null }

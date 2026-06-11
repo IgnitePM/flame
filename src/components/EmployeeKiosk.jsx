@@ -78,6 +78,7 @@ const EmployeeKiosk = ({
   onLogClientExpense,
   getTodoStateForCycle,
   updateClientTodo,
+  setClientTodoItemDone,
   deleteClientTodoItem,
   todoCategoryKey,
   projects = [],
@@ -587,11 +588,26 @@ const EmployeeKiosk = ({
       );
       return;
     }
-    const todoState = getTodoStateForCycle(client, cycleStart);
-    const catTodo = todoState[categoryKey] || { closed: false, items: [] };
-    const items = catTodo.items || [];
     setTodoSaving(true);
     try {
+      if (!item.done && setClientTodoItemDone) {
+        const ok = await setClientTodoItemDone(
+          client,
+          cycleStart,
+          categoryKey,
+          item,
+          true,
+        );
+        if (!ok) {
+          window.alert(
+            'Could not mark this task complete. Finish every sub-task first, then try again.',
+          );
+        }
+        return;
+      }
+      const todoState = getTodoStateForCycle(client, cycleStart);
+      const catTodo = todoState[categoryKey] || { closed: false, items: [] };
+      const items = catTodo.items || [];
       const next = items.map((i) =>
         i.id === item.id
           ? { ...i, done: !i.done, doneAt: !i.done ? Date.now() : null }
@@ -1051,12 +1067,59 @@ const EmployeeKiosk = ({
     selectedClientObj,
   ]);
 
-  const categoryKioskTodoRowsForPanel = React.useMemo(() => {
-    if (!cycleStart) return categoryKioskTodoRows;
-    return categoryKioskTodoRows.filter(
-      (row) => Number(row.cycleStart) === Number(cycleStart),
-    );
-  }, [categoryKioskTodoRows, cycleStart]);
+  const categoryKioskTodoRowsForPanel = categoryKioskTodoRows;
+
+  const resolveCategoryTodoRowContext = React.useCallback(
+    (row) => {
+      if (!getTodoStateForCycle || !selectedClientObj || !row) return null;
+      const todoState = getTodoStateForCycle(selectedClientObj, row.cycleStart);
+      const catTodo = todoState[row.categoryKey] || { closed: false, items: [] };
+      const allItems = catTodo.items || [];
+      const item =
+        allItems.find((candidate) => candidate?.id === row.item?.id) || row.item;
+      return {
+        catKey: row.categoryKey,
+        catTodo,
+        allItems,
+        item,
+        isPriorCycle: !!(
+          cycleStart && Number(row.cycleStart) !== Number(cycleStart)
+        ),
+      };
+    },
+    [getTodoStateForCycle, selectedClientObj, cycleStart],
+  );
+
+  const persistCategoryTodoItemsForRow = React.useCallback(
+    async (row, nextItems) => {
+      if (!updateClientTodo || !selectedClientObj || !row) return;
+      if (isCycleLocked(selectedClientObj, row.cycleStart)) {
+        window.alert('This billing cycle is locked.');
+        return;
+      }
+      const ctx = resolveCategoryTodoRowContext(row);
+      if (!ctx) return;
+      setTodoSaving(true);
+      try {
+        await updateClientTodo(
+          selectedClientObj,
+          row.cycleStart,
+          ctx.catKey,
+          {
+            ...ctx.catTodo,
+            items: nextItems,
+          },
+        );
+      } finally {
+        setTodoSaving(false);
+      }
+    },
+    [
+      updateClientTodo,
+      selectedClientObj,
+      resolveCategoryTodoRowContext,
+    ],
+  );
 
   const persistCategoryTodoItems = React.useCallback(
     async (nextItems) => {
@@ -1519,7 +1582,7 @@ const EmployeeKiosk = ({
                             </div>
                             {categoryTodoShowsPriorCycle && (
                               <p className="text-[10px] text-amber-800/90 mb-2">
-                                Some sidebar tasks are from a prior billing cycle. This list shows the current cycle only (drag reorder works here).
+                                Tasks marked &quot;Prior cycle&quot; are from an earlier billing period. Complete their sub-tasks here, then check off the primary task.
                               </p>
                             )}
                             <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600 mb-2">
@@ -1549,20 +1612,29 @@ const EmployeeKiosk = ({
                               </p>
                             ) : (
                               <ul className="space-y-3 mb-3 overflow-visible">
-                                {categoryKioskTodoRowsForPanel.map((row) => (
+                                {categoryKioskTodoRowsForPanel.map((row) => {
+                                  const rowCtx = resolveCategoryTodoRowContext(row);
+                                  if (!rowCtx) return null;
+                                  const rowCanDragReorder =
+                                    categoryTodoCanDragReorder && !rowCtx.isPriorCycle;
+                                  return (
                                   <KioskClientTodoItem
                                     key={`${row.cycleStart}__${row.item.id}`}
-                                    item={row.item}
-                                    allItems={currentCycleCategoryTodo.allItems}
-                                    catTodo={currentCycleCategoryTodo.catTodo}
-                                    catKey={currentCycleCategoryTodo.catKey}
-                                    cycleStart={cycleStart}
+                                    item={rowCtx.item}
+                                    allItems={rowCtx.allItems}
+                                    catTodo={rowCtx.catTodo}
+                                    catKey={rowCtx.catKey}
+                                    cycleStart={row.cycleStart}
                                     client={selectedClientObj}
                                     todoSaving={todoSaving}
                                     setTodoSaving={setTodoSaving}
                                     updateClientTodo={updateClientTodo}
-                                    onPersistItems={persistCategoryTodoItems}
-                                    canDragReorder={categoryTodoCanDragReorder}
+                                    setClientTodoItemDone={setClientTodoItemDone}
+                                    onPersistItems={(nextItems) =>
+                                      persistCategoryTodoItemsForRow(row, nextItems)
+                                    }
+                                    canDragReorder={rowCanDragReorder}
+                                    showPriorCycleBadge={rowCtx.isPriorCycle}
                                     getUrgencyClass={getUrgencyClass}
                                     user={user}
                                     staffEmail={meLower}
@@ -1619,7 +1691,8 @@ const EmployeeKiosk = ({
                                       )
                                     }
                                   />
-                                ))}
+                                  );
+                                })}
                               </ul>
                             )}
                             <div className="flex flex-wrap gap-2 items-center">
@@ -1879,7 +1952,7 @@ const EmployeeKiosk = ({
                             </div>
                             {categoryTodoShowsPriorCycle && (
                               <p className="text-[10px] text-amber-800/90 mb-2">
-                                Some sidebar tasks are from a prior billing cycle. This list shows the current cycle only (drag reorder works here).
+                                Tasks marked &quot;Prior cycle&quot; are from an earlier billing period. Complete their sub-tasks here, then check off the primary task.
                               </p>
                             )}
                             <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600 mb-2">
@@ -1909,20 +1982,29 @@ const EmployeeKiosk = ({
                               </p>
                             ) : (
                               <ul className="space-y-3 mb-3 overflow-visible">
-                                {categoryKioskTodoRowsForPanel.map((row) => (
+                                {categoryKioskTodoRowsForPanel.map((row) => {
+                                  const rowCtx = resolveCategoryTodoRowContext(row);
+                                  if (!rowCtx) return null;
+                                  const rowCanDragReorder =
+                                    categoryTodoCanDragReorder && !rowCtx.isPriorCycle;
+                                  return (
                                   <KioskClientTodoItem
                                     key={`${row.cycleStart}__${row.item.id}`}
-                                    item={row.item}
-                                    allItems={currentCycleCategoryTodo.allItems}
-                                    catTodo={currentCycleCategoryTodo.catTodo}
-                                    catKey={currentCycleCategoryTodo.catKey}
-                                    cycleStart={cycleStart}
+                                    item={rowCtx.item}
+                                    allItems={rowCtx.allItems}
+                                    catTodo={rowCtx.catTodo}
+                                    catKey={rowCtx.catKey}
+                                    cycleStart={row.cycleStart}
                                     client={selectedClientObj}
                                     todoSaving={todoSaving}
                                     setTodoSaving={setTodoSaving}
                                     updateClientTodo={updateClientTodo}
-                                    onPersistItems={persistCategoryTodoItems}
-                                    canDragReorder={categoryTodoCanDragReorder}
+                                    setClientTodoItemDone={setClientTodoItemDone}
+                                    onPersistItems={(nextItems) =>
+                                      persistCategoryTodoItemsForRow(row, nextItems)
+                                    }
+                                    canDragReorder={rowCanDragReorder}
+                                    showPriorCycleBadge={rowCtx.isPriorCycle}
                                     getUrgencyClass={getUrgencyClass}
                                     user={user}
                                     staffEmail={meLower}
@@ -1979,7 +2061,8 @@ const EmployeeKiosk = ({
                                       )
                                     }
                                   />
-                                ))}
+                                  );
+                                })}
                               </ul>
                             )}
                             <div className="flex flex-wrap gap-2 items-center">

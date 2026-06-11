@@ -361,6 +361,95 @@ export function reconcileRecurringTodoInstances(
   return { cycleDataByCategory: next, changed };
 }
 
+/** Carry a single open primary row from the prior cycle into the current cycle view. */
+export function carryPrimaryTodoItemFromPrevCycle(item) {
+  return {
+    ...item,
+    done: false,
+    pinned: false,
+    assigneeEmails: Array.isArray(item.assigneeEmails)
+      ? item.assigneeEmails.filter(Boolean)
+      : [],
+    subtasks: subtasksForCarryover(item),
+  };
+}
+
+/**
+ * When the current billing cycle already exists in storage, merge in any open
+ * primary tasks from the prior cycle that were never copied forward.
+ */
+export function mergeOpenItemsFromPrevCycle(existingCycleData, prevCycleData) {
+  if (!existingCycleData || !prevCycleData) return existingCycleData || {};
+  const next = { ...existingCycleData };
+  let changed = false;
+
+  for (const [catKey, prevCat] of Object.entries(prevCycleData)) {
+    if (!prevCat || typeof prevCat !== 'object') continue;
+    const openPrev = (prevCat.items || []).filter((item) => item && !item.done);
+    if (!openPrev.length) continue;
+
+    const existingCat = next[catKey] || { closed: false, items: [] };
+    const existingIds = new Set((existingCat.items || []).map((item) => item?.id));
+    const toAdd = openPrev
+      .filter((item) => item?.id && !existingIds.has(item.id))
+      .map(carryPrimaryTodoItemFromPrevCycle);
+    if (!toAdd.length) continue;
+
+    changed = true;
+    next[catKey] = {
+      ...existingCat,
+      items: [...(existingCat.items || []), ...toAdd],
+    };
+  }
+
+  return changed ? next : existingCycleData;
+}
+
+/** Mark a primary task done/undone in every billing cycle where it exists. */
+export function markPrimaryTodoDoneAcrossCycles(
+  cycles,
+  categoryKey,
+  itemId,
+  done,
+  { recurringSkipKey } = {},
+) {
+  const next = { ...(cycles || {}) };
+  let touched = false;
+  const doneAt = done ? Date.now() : null;
+
+  for (const [cycleKey, cycleData] of Object.entries(next)) {
+    if (!cycleData || typeof cycleData !== 'object') continue;
+    const cat = cycleData[categoryKey];
+    if (!cat || !Array.isArray(cat.items)) continue;
+    const idx = cat.items.findIndex((item) => item?.id === itemId);
+    if (idx < 0) continue;
+
+    touched = true;
+    const items = [...cat.items];
+    items[idx] = { ...items[idx], done: !!done, doneAt: done ? doneAt : null };
+
+    let skipped = Array.isArray(cat.skippedRecurringAnchors)
+      ? [...cat.skippedRecurringAnchors]
+      : [];
+    if (done && recurringSkipKey && !skipped.includes(recurringSkipKey)) {
+      skipped.push(recurringSkipKey);
+    }
+
+    next[cycleKey] = {
+      ...cycleData,
+      [categoryKey]: {
+        ...cat,
+        items,
+        ...(done && recurringSkipKey
+          ? { skippedRecurringAnchors: skipped }
+          : {}),
+      },
+    };
+  }
+
+  return { cycles: next, touched };
+}
+
 /** Remove a primary task id from one category across every stored billing cycle. */
 export function removeTodoItemFromAllCycles(
   cycles,
