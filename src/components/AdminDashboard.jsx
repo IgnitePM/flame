@@ -7221,7 +7221,7 @@ const AdminDashboard = ({
           <div className="bg-slate-50 border border-slate-100 rounded-[32px] p-8 text-left">
             <h3 className="font-black text-xl mb-2">Kiosk Policies</h3>
             <p className="text-slate-400 text-sm font-medium mb-6">
-              These settings are stored locally in your browser for now.
+              Changes save automatically and apply to every kiosk device.
             </p>
             <div className="space-y-4">
               <label className="flex items-center gap-3 font-bold text-slate-700">
