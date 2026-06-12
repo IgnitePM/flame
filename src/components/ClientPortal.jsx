@@ -54,15 +54,18 @@ const ClientPortal = ({
   const mStart = period.start;
   const mEnd = period.end;
 
+  // Match by clientId when stamped (rename-safe); legacy rows by name.
+  const belongsToClient = (row) =>
+    row.clientId ? row.clientId === clientProfile.id : row.clientName === clientProfile.name;
   const cTasks = taskLogs.filter(
     (t) =>
-      t.clientName === clientProfile.name &&
+      belongsToClient(t) &&
       t.clockInTime >= mStart &&
       t.clockInTime <= mEnd,
   );
   const cExps = expenses.filter(
     (e) =>
-      e.clientName === clientProfile.name &&
+      belongsToClient(e) &&
       e.date >= mStart &&
       e.date <= mEnd,
   );

@@ -513,6 +513,8 @@ export default function App() {
 
   useEffect(() => {
     if (!user || !Array.isArray(expenses) || expenses.length === 0) return;
+    // Only staff materialize recurring expenses; portal users lack write access.
+    if (!myAdminDoc) return;
     if (recurringExpenseSyncInProgressRef.current) return;
     const recurringItems = expenses.filter(
       (e) => !!e?.recurring && !!e?.recurrence && Number(e?.date || 0) > 0,
@@ -566,7 +568,10 @@ export default function App() {
         if (toCreate.length > 0) {
           await Promise.all(
             toCreate.map((e) =>
-              addDoc(collection(db, 'expenses'), {
+              // Deterministic doc id (series + due date) makes this idempotent:
+              // two open tabs racing on the same instance write the same doc
+              // instead of creating duplicates.
+              setDoc(doc(db, 'expenses', `rec_${e.recurringId}_${Number(e.date || 0)}`), {
                 clientId: e.clientId || '',
                 clientName: e.clientName || '',
                 category: e.category || '',
@@ -591,7 +596,7 @@ export default function App() {
     };
 
     run();
-  }, [user, expenses]);
+  }, [user, expenses, myAdminDoc]);
 
   // Firestore: only role === 'admin' may read all admins/*; kiosk/billing must read doc(admins, ownEmail).
   useEffect(() => {
@@ -2097,24 +2102,36 @@ export default function App() {
     [clients],
   );
 
-  // Dynamic Billing Period & Global Carryover Logic
+  // Dynamic Billing Period & Global Carryover Logic.
+  // billingDay 29-31 is clamped to the last day of short months so cycle
+  // boundaries never roll into the wrong month (e.g. Feb 31 → Mar 3).
   const getBillingPeriod = (billingDay = 1, offsetMonths = 0) => {
+    const clampDay = (y, m, d) => {
+      const norm = new Date(y, m, 1); // normalize month overflow/underflow
+      const daysInMonth = new Date(norm.getFullYear(), norm.getMonth() + 1, 0).getDate();
+      return Math.min(d, daysInMonth);
+    };
     const now = new Date();
     let currentMonth = now.getMonth();
     let currentYear = now.getFullYear();
 
-    if (now.getDate() < billingDay) currentMonth--;
+    if (now.getDate() < clampDay(currentYear, currentMonth, billingDay)) currentMonth--;
     currentMonth += offsetMonths;
 
     while (currentMonth < 0) { currentMonth += 12; currentYear--; }
     while (currentMonth > 11) { currentMonth -= 12; currentYear++; }
 
-    const start = new Date(currentYear, currentMonth, billingDay, 0, 0, 0, 0).getTime();
-    
+    const start = new Date(
+      currentYear, currentMonth, clampDay(currentYear, currentMonth, billingDay), 0, 0, 0, 0,
+    ).getTime();
+
     let nextMonth = currentMonth + 1;
     let nextYear = currentYear;
     if (nextMonth > 11) { nextMonth = 0; nextYear++; }
-    const end = new Date(nextYear, nextMonth, billingDay - 1, 23, 59, 59, 999).getTime();
+    // End = the instant before the next cycle starts.
+    const end = new Date(
+      nextYear, nextMonth, clampDay(nextYear, nextMonth, billingDay), 0, 0, 0, 0,
+    ).getTime() - 1;
 
     return { start, end };
   };
@@ -2201,18 +2218,33 @@ export default function App() {
 
     const billingDay = client.billingDay || 1;
     const cycleAnchor = new Date(mStart);
-    const prevStart = new Date(
-      cycleAnchor.getFullYear(),
-      cycleAnchor.getMonth() - 1,
-      billingDay,
-      0,
-      0,
-      0,
-      0,
-    ).getTime();
+    // Clamp like getBillingPeriod so billingDay 29-31 doesn't roll the
+    // previous-cycle anchor into the wrong month.
+    const prevStart = (() => {
+      let y = cycleAnchor.getFullYear();
+      let m = cycleAnchor.getMonth() - 1;
+      if (m < 0) { m += 12; y--; }
+      const daysInMonth = new Date(y, m + 1, 0).getDate();
+      return new Date(y, m, Math.min(billingDay, daysInMonth), 0, 0, 0, 0).getTime();
+    })();
+
+    // Activity rows are matched by clientId when stamped (rename-safe);
+    // legacy rows fall back to the name match.
+    const rowBelongsToClient = (row) =>
+      row.clientId ? row.clientId === client.id : row.clientName === client.name;
+
+    // Add-ons bought for a specific cycle count toward that cycle even when
+    // purchased on a different date; legacy rows fall back to purchase date.
+    const addonInWindow = (a, winStart, winEndExclusive) => {
+      const cycleStart = Number(a.billingCycleStart);
+      if (Number.isFinite(cycleStart) && cycleStart > 0) {
+        return cycleStart >= winStart && cycleStart < winEndExclusive;
+      }
+      return a.date >= winStart && a.date < winEndExclusive;
+    };
 
     const previousCycleAddons = addons
-      .filter((a) => a.clientId === client.id && a.date >= prevStart && a.date < mStart)
+      .filter((a) => a.clientId === client.id && addonInWindow(a, prevStart, mStart))
       .filter((a) => !clientStartMs || a.date >= clientStartMs)
       .filter((a) => !globalResetMs || a.date >= globalResetMs);
 
@@ -2251,7 +2283,7 @@ export default function App() {
       if (!catIsDollar) {
         pastTasksCat = taskLogs.filter(
           (t) =>
-            t.clientName === client.name &&
+            rowBelongsToClient(t) &&
             t.clockInTime < mStart &&
             !t.projectId &&
             canonicalCategory(t.projectName) === cat,
@@ -2260,7 +2292,7 @@ export default function App() {
 
       let pastExpsCat = expenses.filter(
         (e) =>
-          e.clientName === client.name &&
+          rowBelongsToClient(e) &&
           e.date < mStart &&
           !e.projectId &&
           canonicalCategory(e.category) === cat,
@@ -2376,12 +2408,12 @@ export default function App() {
 
     const currentTasks = taskLogs.filter(
       (t) =>
-        t.clientName === client.name &&
+        rowBelongsToClient(t) &&
         !t.projectId &&
         taskOverlapsBillingWindow(t),
     );
-    const currentExps = expenses.filter(e => e.clientName === client.name && e.date >= mStart && e.date <= mEnd && !e.projectId);
-    const currentAddons = addons.filter(a => a.clientId === client.id && a.date >= mStart && a.date <= mEnd);
+    const currentExps = expenses.filter(e => rowBelongsToClient(e) && e.date >= mStart && e.date <= mEnd && !e.projectId);
+    const currentAddons = addons.filter(a => a.clientId === client.id && addonInWindow(a, mStart, mEnd + 1));
     const currentExpHours = currentExps.reduce((acc, e) => acc + (e.equivalentHours || 0), 0);
     const currentAddonHours = currentAddons.reduce((acc, a) => acc + Number(a.hours), 0);
     const currAddonByCat = allocateAddonHoursByCategory(currentAddons);
@@ -2563,8 +2595,25 @@ export default function App() {
         window.alert('Clock out time is invalid. Use the date and time picker.');
         return;
       }
+      if (clockOutMs <= clockInMs) {
+        window.alert('Clock out must be after clock in.');
+        return;
+      }
       updates.clockOutTime = clockOutMs;
-      updates.duration = updates.clockOutTime - updates.clockInTime;
+      // Recorded duration excludes breaks. Keep the original break time
+      // instead of flattening it back into billable time when the window
+      // is edited.
+      const original = (editingItem.type === 'shift' ? timesheets : taskLogs).find(
+        (r) => r.id === editingItem.id,
+      );
+      const origIn = Number(original?.clockInTime || 0);
+      const origOut = Number(original?.clockOutTime || 0);
+      const origDuration = Number(original?.duration ?? original?.totalSavedDuration ?? 0);
+      const breakMs =
+        origIn && origOut && origOut > origIn && origDuration > 0
+          ? Math.max(0, origOut - origIn - origDuration)
+          : 0;
+      updates.duration = Math.max(0, clockOutMs - clockInMs - breakMs);
       updates.totalSavedDuration = updates.duration;
     }
 
@@ -2614,19 +2663,26 @@ export default function App() {
             new Date(t.clockInTime).toLocaleTimeString(),
             t.clockOutTime ? new Date(t.clockOutTime).toLocaleTimeString() : "Active",
             formatTime(getTaskDuration(t)),
-            t.notes ? `"${t.notes.replace(/"/g, '""')}"` : ""
+            t.notes || ""
           ]);
         });
       }
     });
 
-    const csvContent = "data:text/csv;charset=utf-8," + rows.map(e => e.join(",")).join("\n");
-    const encodedUri = encodeURI(csvContent);
+    // Quote every field so commas/quotes/newlines in names or notes can't
+    // shift columns in the export.
+    const csvContent = rows
+      .map((r) => r.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `Ignite_Report_${new Date().toLocaleDateString()}.csv`);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Ignite_Report_${new Date().toLocaleDateString().replace(/[/\\]/g, '-')}.csv`);
     document.body.appendChild(link);
     link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   };
 
   const exportPDF = () => {

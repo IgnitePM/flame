@@ -1647,32 +1647,33 @@ const AdminDashboard = ({
       ]);
     });
 
-    const csvContent =
-      'data:text/csv;charset=utf-8,' +
-      rows
-        .map((r) =>
-          r
-            .map((cell) =>
-              `"${String(cell ?? '')
-                .replace(/"/g, '""')
-                .trim()}"`,
-            )
-            .join(','),
-        )
-        .join('\\n');
+    const csvContent = rows
+      .map((r) =>
+        r
+          .map((cell) =>
+            `"${String(cell ?? '')
+              .replace(/"/g, '""')
+              .trim()}"`,
+          )
+          .join(','),
+      )
+      .join('\n');
 
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', encodeURI(csvContent));
+    link.setAttribute('href', url);
     link.setAttribute(
       'download',
       `Ignite_InvoicePack_${client?.name || 'Client'}_${cycleStartStr}_${cycleEndStr}.csv`.replace(
-        /\\s+/g,
+        /\s+/g,
         '_',
       ),
     );
     document.body.appendChild(link);
     link.click();
     link.remove();
+    URL.revokeObjectURL(url);
   };
   const getDateRange = () => {
     const now = new Date();
@@ -1734,6 +1735,13 @@ const AdminDashboard = ({
   const projectApprovedCount = projects.filter(
     (p) => p.notificationState?.adminApproved && p.status === 'approved',
   ).length;
+  const clientFilterId = clientFilter
+    ? clients.find((c) => c.name === clientFilter)?.id || null
+    : null;
+  const taskMatchesClientFilter = (t) =>
+    t.clientName === clientFilter ||
+    (clientFilterId && t.clientId === clientFilterId);
+
   const filteredTimesheets = timesheets.filter((shift) => {
     if (isRestrictedStaff) {
       const uidOk = shift.userId && shift.userId === user?.uid;
@@ -1744,22 +1752,23 @@ const AdminDashboard = ({
           shift.employeeName === user?.email);
       if (!uidOk && !nameOk) return false;
     }
+    const q = searchQuery.toLowerCase();
     const matchesSearch =
       searchQuery === '' ||
-      shift.employeeName
+      String(shift.employeeName || '')
         .toLowerCase()
-        .includes(searchQuery.toLowerCase()) ||
+        .includes(q) ||
       taskLogs.some(
         (t) =>
           t.shiftId === shift.id &&
-          t.clientName
+          String(t.clientName || '')
             .toLowerCase()
-            .includes(searchQuery.toLowerCase()),
+            .includes(q),
       );
     const matchesClient =
       clientFilter === '' ||
       taskLogs.some(
-        (t) => t.shiftId === shift.id && t.clientName === clientFilter,
+        (t) => t.shiftId === shift.id && taskMatchesClientFilter(t),
       );
     let matchesDate = true;
     if (currentRange.start && currentRange.end) {
@@ -2565,9 +2574,7 @@ const AdminDashboard = ({
               const shiftTasks = [...byShiftId, ...byCompletedThisShift];
               const isExpanded = expandedShifts[shift.id];
               const visibleTasks = clientFilter
-                ? shiftTasks.filter(
-                    (t) => t.clientName === clientFilter,
-                  )
+                ? shiftTasks.filter(taskMatchesClientFilter)
                 : shiftTasks;
 
               return (
@@ -3877,8 +3884,11 @@ const AdminDashboard = ({
               const mEnd = period.end;
               const _isExpanded = isClientPage ? true : expandedClients[c.id];
 
+              // clientId matching is rename-safe; legacy rows match by name.
+              const rowIsForClient = (row) =>
+                row.clientId ? row.clientId === c.id : row.clientName === c.name;
               const periodTasks = taskLogs.filter((t) => {
-                if (t.clientName !== c.name || t.projectId) return false;
+                if (!rowIsForClient(t) || t.projectId) return false;
                 const startedThisCycle =
                   t.clockInTime >= mStart && t.clockInTime <= mEnd;
                 const completedThisCycle =
@@ -3890,13 +3900,13 @@ const AdminDashboard = ({
               });
               const periodExps = expenses.filter(
                 (e) =>
-                  e.clientName === c.name &&
+                  rowIsForClient(e) &&
                   e.date >= mStart &&
                   e.date <= mEnd &&
                   !e.projectId,
               );
               const periodProjectTasks = taskLogs.filter((t) => {
-                if (t.clientName !== c.name || !t.projectId) return false;
+                if (!rowIsForClient(t) || !t.projectId) return false;
                 const startedThisCycle =
                   t.clockInTime >= mStart && t.clockInTime <= mEnd;
                 const completedThisCycle =
@@ -3908,7 +3918,7 @@ const AdminDashboard = ({
               });
               const periodProjectExps = expenses.filter(
                 (e) =>
-                  e.clientName === c.name &&
+                  rowIsForClient(e) &&
                   e.projectId &&
                   e.date >= mStart &&
                   e.date <= mEnd,
