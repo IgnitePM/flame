@@ -12,12 +12,15 @@ import {
 import {
   getFirestore,
   collection,
+  query,
+  where,
   onSnapshot,
   addDoc,
   setDoc,
   updateDoc,
   doc,
   deleteDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import {
   getStorage,
@@ -61,11 +64,14 @@ export {
   sendPasswordResetEmail,
   // Firestore exports
   collection,
+  query,
+  where,
   onSnapshot,
   addDoc,
   setDoc,
   updateDoc,
   doc,
   deleteDoc,
+  writeBatch,
 };
 

@@ -54,9 +54,11 @@ import {
   signOut,
   onAuthStateChanged,
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
   sendPasswordResetEmail,
   collection,
+  query,
+  where,
+  writeBatch,
   onSnapshot,
   addDoc,
   setDoc,
@@ -253,7 +255,6 @@ export default function App() {
   // Auth Form States
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isSignUp, setIsSignUp] = useState(false);
 
   const [liveDuration, setLiveDuration] = useState(0);
   const [liveTaskDuration, setLiveTaskDuration] = useState(0);
@@ -432,8 +433,14 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // Staff (anyone with an admins/{email} doc) subscribe to the full workspace
+  // dataset. Client portal users get narrow, per-client queries instead so
+  // other clients' data never reaches their browser (see effects below).
   useEffect(() => {
-    if (!user) return;
+    if (!user || !adminDocReady) return;
+    const isDemoStaff = ENABLE_DEMOS && user.uid === 'demo-user-123';
+    if (!myAdminDoc && !isDemoStaff) return;
+
     const unsubTimesheets = onSnapshot(collection(db, 'timesheets'), (snapshot) => setTimesheets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.clockInTime - a.clockInTime)));
     const unsubClients = onSnapshot(collection(db, 'clients'), (snapshot) => {
       const next = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -483,7 +490,26 @@ export default function App() {
       unsubUserTodos();
       unsubPolicy();
     };
-  }, [user]);
+  }, [user, adminDocReady, myAdminDoc?.id]);
+
+  // Portal users (no admin doc): only the client docs that list their email.
+  useEffect(() => {
+    if (!user?.email || !adminDocReady || myAdminDoc) return;
+    if (ENABLE_DEMOS && (user.uid === 'demo-user-123' || user.uid === 'demo-client-123')) return;
+    const emailKey = String(user.email).trim().toLowerCase();
+    const unsub = onSnapshot(
+      query(collection(db, 'clients'), where('clientEmails', 'array-contains', emailKey)),
+      (snapshot) => {
+        const next = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        clientsRef.current = next;
+        setClients(next);
+      },
+      () => {
+        // Unauthorized accounts simply see the Access Denied screen.
+      },
+    );
+    return () => unsub();
+  }, [user, adminDocReady, myAdminDoc?.id]);
 
   useEffect(() => {
     if (!user || !Array.isArray(expenses) || expenses.length === 0) return;
@@ -590,6 +616,16 @@ export default function App() {
     return () => unsub();
   }, [user?.email]);
 
+  // New @ignitepm.com employees self-provision a kiosk-role admins doc so
+  // security rules recognize them as staff before an admin assigns a role.
+  useEffect(() => {
+    if (!user?.email || !adminDocReady || myAdminDoc) return;
+    const emailKey = String(user.email).trim().toLowerCase();
+    if (!emailKey.endsWith('@ignitepm.com')) return;
+    if (emailKey === 'chris@ignitepm.com') return; // owner bootstrap below
+    setDoc(doc(db, 'admins', emailKey), { email: user.email, role: 'kiosk' }).catch(() => {});
+  }, [user?.email, adminDocReady, myAdminDoc]);
+
   const canListAllAdmins =
     user?.email === 'chris@ignitepm.com' || myAdminDoc?.role === 'admin';
 
@@ -669,6 +705,89 @@ export default function App() {
     else if (isUserAdmin && view === 'client_portal')
       setView(currentUserRole === 'kiosk' ? 'employee' : 'admin');
   }, [isClientUser, isUserAdmin, currentUserRole, view]);
+
+  // Portal users: per-client activity queries (tasks, expenses, projects,
+  // addons stamped with their clientId). Security rules deny anything wider.
+  const portalClientId = isClientUser && clientProfile?.id !== 'demo' ? clientProfile?.id : null;
+  useEffect(() => {
+    if (!portalClientId) return;
+    const byClient = (name) =>
+      query(collection(db, name), where('clientId', '==', portalClientId));
+    const ignoreErr = () => {};
+    const unsubTasks = onSnapshot(byClient('taskLogs'), (s) =>
+      setTaskLogs(s.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => b.clockInTime - a.clockInTime)), ignoreErr);
+    const unsubExpenses = onSnapshot(byClient('expenses'), (s) =>
+      setExpenses(s.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => b.date - a.date)), ignoreErr);
+    const unsubProjects = onSnapshot(byClient('projects'), (s) =>
+      setProjects(s.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => b.createdAt - a.createdAt)), ignoreErr);
+    const unsubAddons = onSnapshot(byClient('addons'), (s) =>
+      setAddons(s.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => b.date - a.date)), ignoreErr);
+    return () => {
+      unsubTasks();
+      unsubExpenses();
+      unsubProjects();
+      unsubAddons();
+    };
+  }, [portalClientId]);
+
+  // One-time per session (admin/billing): stamp clientId onto legacy taskLogs
+  // and expenses (joins were name-based, which breaks on client rename and is
+  // required for scoped portal queries), and normalize clientEmails to
+  // lowercase so portal logins match regardless of how the email was typed.
+  const dataBackfillDoneRef = useRef({ tasks: false, expenses: false, clients: false });
+  useEffect(() => {
+    if (!user?.email || !isUserAdmin || currentUserRole === 'kiosk') return;
+    if (!clients?.length) return;
+
+    const done = dataBackfillDoneRef.current;
+    const idByName = new Map(clients.map((c) => [c.name, c.id]));
+    const updates = [];
+
+    if (!done.tasks && taskLogs.length) {
+      done.tasks = true;
+      taskLogs.forEach((t) => {
+        if (t.clientId || !t.clientName) return;
+        const cid = idByName.get(t.clientName);
+        if (cid) updates.push({ coll: 'taskLogs', id: t.id, patch: { clientId: cid } });
+      });
+    }
+    if (!done.expenses && expenses.length) {
+      done.expenses = true;
+      expenses.forEach((e) => {
+        const cur = String(e.clientId || '');
+        if (cur && cur !== 'manual') return;
+        const cid = idByName.get(e.clientName);
+        if (cid) updates.push({ coll: 'expenses', id: e.id, patch: { clientId: cid } });
+      });
+    }
+    if (!done.clients) {
+      done.clients = true;
+      clients.forEach((c) => {
+        const emails = Array.isArray(c.clientEmails) ? c.clientEmails : [];
+        const lowered = emails
+          .map((em) => String(em || '').trim().toLowerCase())
+          .filter(Boolean);
+        if (JSON.stringify(lowered) !== JSON.stringify(emails)) {
+          updates.push({ coll: 'clients', id: c.id, patch: { clientEmails: lowered } });
+        }
+      });
+    }
+
+    if (!updates.length) return;
+    (async () => {
+      for (let i = 0; i < updates.length; i += 400) {
+        const batch = writeBatch(db);
+        updates
+          .slice(i, i + 400)
+          .forEach((u) => batch.update(doc(db, u.coll, u.id), u.patch));
+        try {
+          await batch.commit();
+        } catch {
+          // Offline or permission hiccup; next session retries.
+        }
+      }
+    })();
+  }, [user?.email, isUserAdmin, currentUserRole, clients, taskLogs, expenses]);
 
   // One-time per session (admin/billing): backfill assignees → teamMemberAccessEmails for
   // data created before deploy. Ongoing: every updateClientTodo / updateClientTodosBatch
@@ -757,8 +876,8 @@ export default function App() {
   const handleEmailAuth = async (e) => {
     e.preventDefault();
     try {
-      if (isSignUp) await createUserWithEmailAndPassword(auth, email, password);
-      else await signInWithEmailAndPassword(auth, email, password);
+      // Accounts are provisioned by an administrator; public sign-up is disabled.
+      await signInWithEmailAndPassword(auth, email, password);
       setError('');
     } catch (err) { setError(err.message.replace('Firebase: ', '')); }
   };
@@ -911,6 +1030,7 @@ export default function App() {
       shiftId: activeShift.id,
       userId: user.uid,
       clientName: selectedClient,
+      clientId: startClient?.id || '',
       projectName: projName,
       projectId: targetId,
       clockInTime: Date.now(),
@@ -1177,7 +1297,18 @@ export default function App() {
     const targetId = isProject ? manualTaskValues.billingTarget.replace('project_', '') : null;
     const projName = isProject ? 'Custom Project' : manualTaskValues.billingTarget.replace('retainer_', '');
 
-    const startMs = new Date(manualTaskValues.date).getTime();
+    // Parse date-only values as LOCAL noon — `new Date('YYYY-MM-DD')` is
+    // interpreted as UTC midnight, which lands on the previous local day in
+    // negative-offset timezones and books the task into the wrong cycle.
+    const startMs = (() => {
+      const raw = String(manualTaskValues.date || '');
+      if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+        const [y, m, d] = raw.split('-').map(Number);
+        return new Date(y, m - 1, d, 12, 0, 0, 0).getTime();
+      }
+      return new Date(raw).getTime();
+    })();
+    if (!Number.isFinite(startMs)) return alert('Invalid date');
     const durationMs = ((Number(manualTaskValues.hours) || 0) * 3600000) + ((Number(manualTaskValues.minutes) || 0) * 60000);
     const endMs = startMs + durationMs;
 
@@ -1186,7 +1317,8 @@ export default function App() {
     });
 
     await addDoc(collection(db, 'taskLogs'), {
-      shiftId: shiftDoc.id, userId: 'manual', clientName: manualTaskValues.clientName, 
+      shiftId: shiftDoc.id, userId: 'manual', clientName: manualTaskValues.clientName,
+      clientId: manualClient?.id || '',
       projectName: projName, projectId: targetId,
       clockInTime: startMs, clockOutTime: endMs, duration: durationMs, totalSavedDuration: durationMs, status: 'completed', notes: manualTaskValues.notes
     });
@@ -1200,7 +1332,7 @@ export default function App() {
       const equivalentHours = isDollar ? 0 : rate > 0 ? (finalCost / rate) : 0;
 
       await addDoc(collection(db, 'expenses'), {
-        clientId: clientObj?.id || 'manual',
+        clientId: clientObj?.id || '',
         clientName: manualTaskValues.clientName,
         category: projName,
         projectId: targetId,
@@ -2618,19 +2750,14 @@ export default function App() {
             <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]" required />
             
             <button type="submit" className="w-full bg-[#fd7414] text-white py-4 rounded-2xl font-black transition-all shadow-lg hover:bg-[#e66a12] active:scale-95 text-lg">
-              {isSignUp ? 'Create Account' : 'Sign In'}
+              Sign In
             </button>
           </form>
 
           <div className="flex flex-col gap-2 justify-center items-center w-full px-2 mb-6">
-            <button onClick={() => setIsSignUp(!isSignUp)} className="text-xs font-bold text-slate-500 hover:text-[#fd7414] transition-colors">
-              {isSignUp ? 'Already have an account? Sign In' : 'Need an account? Sign Up'}
+            <button type="button" onClick={handleResetPassword} className="text-xs font-bold text-slate-500 hover:text-[#fd7414] transition-colors">
+              Forgot Password?
             </button>
-            {!isSignUp && (
-              <button type="button" onClick={handleResetPassword} className="text-xs font-bold text-slate-500 hover:text-[#fd7414] transition-colors">
-                Forgot Password?
-              </button>
-            )}
           </div>
 
           <div className="relative w-full flex items-center justify-center mb-6">
@@ -3911,7 +4038,9 @@ export default function App() {
                     retainers: editingClient.retainers,
                     retainerUnits: editingClient.retainerUnits || {},
                     hourlyRate: editingClient.hourlyRate || 0,
-                    clientEmails: editingClient.clientEmails || [],
+                    clientEmails: (editingClient.clientEmails || [])
+                      .map((em) => String(em || '').trim().toLowerCase())
+                      .filter(Boolean),
                     billingDay: editingClient.billingDay || 1,
                     status: editingClient.status || 'active',
                     teamMemberAccessEmails:

@@ -15,28 +15,35 @@ service cloud.firestore {
       return isSignedIn() && request.auth.token.email.matches('.*@ignitepm\\.com$');
     }
     function isAnyStaff() {
-      // Treat anyone with an admin doc as staff, regardless of role string,
-      // so role naming like "super_admin" doesn't accidentally lose permissions.
-      return isSignedIn() && (isIgniteStaff() || adminExists());
+      // Staff requires an admins/{email} doc. Unknown role strings (e.g.
+      // "super_admin") still count as staff so naming doesn't break access,
+      // but a bare @ignitepm.com email with no admin doc is NOT staff —
+      // the app self-provisions a kiosk-role doc on first login instead.
+      return isSignedIn() && adminExists();
     }
 
     function clientDoc(clientId) {
       return get(/databases/$(database)/documents/clients/$(clientId));
     }
 
-    // Internal staff (admin, billing, kiosk, etc.) may read client docs. Kiosk uses the same
-    // access as other staff; optional teamMemberAccessEmails on the client is a UI hint only.
+    // Staff may read any client; portal users only clients listing their email.
+    // Emails are stored lowercase, but tolerate the raw token casing too.
     function clientAllowsEmail(clientId) {
       return isSignedIn() &&
         (isAnyStaff() ||
          (clientDoc(clientId).data.clientEmails is list &&
-          clientDoc(clientId).data.clientEmails.hasAny([request.auth.token.email])));
+          clientDoc(clientId).data.clientEmails.hasAny([request.auth.token.email, emailLower()])));
     }
 
     function isCycleLocked(clientId, cycleStart) {
       return (clientDoc(clientId).data.cycleLocks is map) &&
         (clientDoc(clientId).data.cycleLocks[string(cycleStart)] is map) &&
         (clientDoc(clientId).data.cycleLocks[string(cycleStart)].locked == true);
+    }
+
+    // True when the doc carries a clientId the requester may access.
+    function docClientAllows(data) {
+      return data.clientId is string && data.clientId != '' && clientAllowsEmail(data.clientId);
     }
 
     // Default: deny unknown reads (must be explicitly allowed below).
@@ -46,56 +53,67 @@ service cloud.firestore {
 
     match /admins/{adminId} {
       allow read: if isSignedIn() && (isAdmin() || adminId == emailLower());
-      allow create, update, delete: if isAdmin();
+      // @ignitepm.com staff may self-provision their own kiosk-role doc so a
+      // new employee isn't locked out before an admin adds them. The owner
+      // account may always (re)create its own admin doc as a bootstrap anchor.
+      allow create: if isAdmin() ||
+        (isIgniteStaff() && adminId == emailLower() &&
+         request.resource.data.role == 'kiosk') ||
+        (emailLower() == 'chris@ignitepm.com' && adminId == 'chris@ignitepm.com');
+      allow update: if isAdmin() ||
+        (emailLower() == 'chris@ignitepm.com' && adminId == 'chris@ignitepm.com');
+      allow delete: if isAdmin();
     }
 
     match /clients/{clientId} {
       allow read: if clientAllowsEmail(clientId);
-      // Allow any staff (admin/billing/etc) to create clients, but exclude kiosk.
-      // This avoids role-string mismatches (e.g. "super_admin") blocking client creation.
-      allow create: if isSignedIn() && isAnyStaff() && !isKiosk();
-      // Billing can update billing related fields; keep simple: admin/billing can update.
-      // Staff can update notes/cycle notes as part of kiosk/admin workflows.
-      allow update: if isSignedIn() && isAnyStaff();
+      allow create: if isAnyStaff() && !isKiosk();
+      // Admin/billing (and unknown staff roles) may update anything; kiosk
+      // staff only the fields the kiosk UI writes (todos, docs, team access).
+      allow update: if isAnyStaff() && (
+        !isKiosk() ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+          ['todoCycles', 'teamMemberAccessEmails', 'documents']
+        )
+      );
       allow delete: if isAdmin();
     }
 
     match /projects/{projectId} {
-      allow read: if isSignedIn() && (
-        isAnyStaff() ||
-        (resource.data.clientId is string && clientAllowsEmail(resource.data.clientId))
-      );
+      allow read: if isAnyStaff() ||
+        (isSignedIn() && resource.data.clientId is string && clientAllowsEmail(resource.data.clientId));
 
-      allow create: if isSignedIn() && (
-        isAnyStaff() ||
-        (request.resource.data.clientId is string && clientAllowsEmail(request.resource.data.clientId))
-      );
+      // Clients may create project requests for themselves only.
+      allow create: if isAnyStaff() ||
+        (isSignedIn() &&
+         request.resource.data.clientId is string &&
+         clientAllowsEmail(request.resource.data.clientId) &&
+         request.resource.data.status == 'requested');
 
-      // Allow staff to update any project; clients can update their own
-      allow update: if isSignedIn() && (
-        isAnyStaff() ||
-        (resource.data.clientId is string && clientAllowsEmail(resource.data.clientId))
-      );
+      // Clients may only act on estimates: approve/reject + decision metadata.
+      allow update: if isAnyStaff() ||
+        (isSignedIn() &&
+         resource.data.clientId is string &&
+         clientAllowsEmail(resource.data.clientId) &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+           ['status', 'clientDecision', 'notificationState']
+         ) &&
+         request.resource.data.status in ['approved', 'rejected']);
 
-      // Allow staff to delete projects (admin/billing/kiosk or @ignitepm.com)
-      allow delete: if isSignedIn() && isAnyStaff();
+      allow delete: if isAnyStaff();
     }
 
     match /addons/{addonId} {
-      allow read: if isSignedIn() && (
-        isAnyStaff() ||
-        (resource.data.clientId is string && clientAllowsEmail(resource.data.clientId))
-      );
+      allow read: if isAnyStaff() ||
+        (isSignedIn() && resource.data.clientId is string && clientAllowsEmail(resource.data.clientId));
 
-      allow create: if isSignedIn() && (
-        isAnyStaff() ||
-        (request.resource.data.clientId is string && clientAllowsEmail(request.resource.data.clientId))
-      );
+      allow create: if isAnyStaff() ||
+        (isSignedIn() &&
+         request.resource.data.clientId is string &&
+         clientAllowsEmail(request.resource.data.clientId));
 
-      allow update: if isSignedIn() && (
-        isAnyStaff() ||
-        (resource.data.clientId is string && clientAllowsEmail(resource.data.clientId))
-      ) && (
+      // Pricing/billing fields live here — staff only, and never in a locked cycle.
+      allow update: if isAnyStaff() && (
         !(resource.data.clientId is string && resource.data.billingCycleStart is int && isCycleLocked(resource.data.clientId, resource.data.billingCycleStart))
       );
 
@@ -103,31 +121,32 @@ service cloud.firestore {
     }
 
     match /expenses/{expenseId} {
-      allow read: if isSignedIn();
-      allow create, update: if isAnyStaff();
-      allow delete: if isAnyStaff();
+      allow read: if isAnyStaff() || (isSignedIn() && docClientAllows(resource.data));
+      allow create, update, delete: if isAnyStaff();
     }
 
     match /taskLogs/{taskId} {
-      allow read: if isSignedIn();
-      allow create, update: if isAnyStaff();
-      allow delete: if isAnyStaff();
+      allow read: if isAnyStaff() || (isSignedIn() && docClientAllows(resource.data));
+      allow create, update, delete: if isAnyStaff();
     }
 
+    // Timesheets are internal employee records — never client-readable.
     match /timesheets/{timesheetId} {
-      allow read: if isSignedIn();
+      allow read: if isAnyStaff();
       allow create, update: if isAnyStaff();
       allow delete: if isAnyStaff();
     }
 
     match /auditLogs/{auditId} {
       allow read: if isBilling() || isAdmin();
-      allow create: if isSignedIn(); // app writes audit logs; keep permissive
+      // Staff log freely; portal users only events tagged with their client.
+      allow create: if isAnyStaff() ||
+        (isSignedIn() && docClientAllows(request.resource.data));
       allow update, delete: if isAdmin();
     }
 
     match /taskTypes/{taskTypeId} {
-      allow read: if isSignedIn();
+      allow read: if isAnyStaff();
       allow create, update, delete: if isBilling();
     }
 
@@ -136,13 +155,11 @@ service cloud.firestore {
       allow create, update, delete: if isSignedIn() && uid == request.auth.uid;
     }
 
-    // Shared app policy (idle failsafe etc.) — readable by all staff so every
-    // kiosk device enforces the same settings; only billing/admin may change.
+    // Shared app policy (idle failsafe etc.) — staff read; billing/admin write.
     match /settings/{settingId} {
-      allow read: if isSignedIn();
+      allow read: if isAnyStaff();
       allow create, update: if isBilling();
       allow delete: if isAdmin();
     }
   }
 }
-

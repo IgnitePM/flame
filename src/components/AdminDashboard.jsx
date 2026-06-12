@@ -3737,7 +3737,7 @@ const AdminDashboard = ({
 
                         const clientEmails = (addClientValues.clientEmails || '')
                           .split(/[,\n;]/g)
-                          .map((s) => s.trim())
+                          .map((s) => s.trim().toLowerCase())
                           .filter(Boolean);
 
                         try {
