@@ -2,6 +2,7 @@ import { orderTodosForDisplay, reorderTodosDisplay } from './todoListOrder.js';
 import {
   getSubtasks,
   hasSubtasks,
+  newSubtaskId,
   removeSubtaskFromItems,
 } from './todoSubtasks.js';
 
@@ -64,7 +65,9 @@ function findPrimary(items, id) {
 
 function primaryFromSubtask(sub) {
   return {
-    id: sub.id,
+    // Fresh id: the subtask id may also live in carried copies of the parent
+    // in other cycles, and primary ids must be unique across the list.
+    id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
     text: sub.text || '',
     done: !!sub.done,
     doneAt: sub.doneAt ?? null,
@@ -80,7 +83,9 @@ function primaryFromSubtask(sub) {
 
 function subtaskFromPrimary(primary) {
   return {
-    id: primary.id,
+    // Fresh id so the demoted row can't collide with copies of the old
+    // primary id in other cycles' data.
+    id: newSubtaskId(),
     text: primary.text || '',
     done: !!primary.done,
     doneAt: primary.doneAt ?? null,

@@ -383,6 +383,7 @@ export default function KioskClientTodoItem({
   };
 
   const saveSubtask = async () => {
+    if (todoSaving || isCycleLocked) return;
     const text = subtaskText.trim();
     if (!text || !updateClientTodo) return;
     const rawDue = parseDateInputToMs(subtaskDue);
@@ -497,9 +498,10 @@ export default function KioskClientTodoItem({
           )}
           <button
             type="button"
-            disabled={todoSaving}
+            disabled={todoSaving || isCycleLocked}
             title={item.pinned ? 'Unpin from top' : 'Pin to top'}
             onClick={() => {
+              if (todoSaving || isCycleLocked) return;
               setTodoSaving(true);
               const next = toggleTodoPinnedById(allItems, item.id);
               updateClientTodo(client, cycleStart, catKey, {
@@ -519,6 +521,7 @@ export default function KioskClientTodoItem({
             type="checkbox"
             checked={!!item.done}
             onChange={async () => {
+              if (todoSaving) return;
               if (!item.done && !canMarkParentTodoDone(item)) {
                 window.alert(
                   'Complete every sub-task before marking this primary task complete.',

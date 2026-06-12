@@ -29,7 +29,19 @@ export function reorderTodosDisplay(items, fromDisplayIndex, toDisplayIndex) {
   const moved = display[fromDisplayIndex];
   const rest = display.filter((_, i) => i !== fromDisplayIndex);
   const safeTo = Math.min(Math.max(0, toDisplayIndex), rest.length);
-  rest.splice(safeTo, 0, moved);
+
+  // Display always re-sorts pinned items first, so an item dropped across the
+  // pinned boundary would silently snap back. Adopt the pin state of the drop
+  // zone instead so the item stays where the user put it.
+  const pinnedCount = rest.filter((it) => it?.pinned).length;
+  let adjusted = moved;
+  if (safeTo < pinnedCount && !moved?.pinned) {
+    adjusted = { ...moved, pinned: true };
+  } else if (safeTo > pinnedCount && moved?.pinned) {
+    adjusted = { ...moved, pinned: false };
+  }
+
+  rest.splice(safeTo, 0, adjusted);
   return rest;
 }
 

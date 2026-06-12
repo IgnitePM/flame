@@ -1194,6 +1194,7 @@ const EmployeeKiosk = ({
   const persistCategoryTodoItemsForRow = React.useCallback(
     async (row, nextItems) => {
       if (!updateClientTodo || !selectedClientObj || !row) return;
+      if (todoSaving) return;
       if (isCycleLocked(selectedClientObj, row.cycleStart)) {
         window.alert('This billing cycle is locked.');
         return;
@@ -1219,6 +1220,7 @@ const EmployeeKiosk = ({
       updateClientTodo,
       selectedClientObj,
       resolveCategoryTodoRowContext,
+      todoSaving,
     ],
   );
 
@@ -1232,6 +1234,7 @@ const EmployeeKiosk = ({
       ) {
         return;
       }
+      if (todoSaving) return;
       if (isCycleLocked(selectedClientObj, cycleStart)) {
         window.alert('This billing cycle is locked.');
         return;
@@ -1256,6 +1259,7 @@ const EmployeeKiosk = ({
       currentCycleCategoryTodo,
       selectedClientObj,
       cycleStart,
+      todoSaving,
     ],
   );
 

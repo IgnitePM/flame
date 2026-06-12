@@ -1991,8 +1991,8 @@ const AdminDashboard = ({
       }
       const cap = parentDueCapMs(item);
       if (cap && dueDate && dueDate > cap) {
+        // Keep the modal open so the user can correct the date.
         window.alert('Sub-task due date cannot be after the primary task due date.');
-        setTodoEditOptionsTarget(null);
         return;
       }
       const clamped = clampSubtaskDueToParent(item, dueDate);
@@ -2033,9 +2033,15 @@ const AdminDashboard = ({
         ...catTodo,
         items: nextList,
       });
+      setTodoEditOptionsTarget(null);
+    } catch (err) {
+      // Keep the modal open so edits aren't silently lost on a failed save.
+      window.alert(
+        'Could not save changes. Check your connection and try again.\n\n' +
+          (err?.message || String(err)),
+      );
     } finally {
       setTodoSaving(false);
-      setTodoEditOptionsTarget(null);
     }
   };
 
@@ -3112,10 +3118,15 @@ const AdminDashboard = ({
                             );
                             return;
                           }
+                          if (todoSaving) return;
                           setTodoSaving(true);
                           try {
                             const client = clients.find((c) => c.id === row.clientId);
-                            if (!row.item.done && setClientTodoItemDone && client) {
+                            if (!client) {
+                              window.alert('Client not found for this task. It may have been deleted.');
+                              return;
+                            }
+                            if (!row.item.done && setClientTodoItemDone) {
                               const ok = await setClientTodoItemDone(
                                 client,
                                 row.cycleStart,

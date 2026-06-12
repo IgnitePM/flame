@@ -197,13 +197,16 @@ export function listRecurringAnchorsInWindow(recurrence, windowStartMs, windowEn
   if (recurrence.type === 'biweekly_weekday') {
     const wd = Number(recurrence.weekday);
     if (!Number.isFinite(wd) || wd < 0 || wd > 6) return [];
-    const anchor = Number(recurrence.anchorMs || 0);
+    // Without a stored anchor, the first matching weekday in the window
+    // becomes the anchor — otherwise every week would match (weekly cadence).
+    let anchor = Number(recurrence.anchorMs || 0);
     const out = [];
     const d = new Date(ws);
     d.setHours(12, 0, 0, 0);
     for (let guard = 0; guard < 800 && d.getTime() <= we; guard++) {
       if (d.getDay() === wd) {
         if (!anchor) {
+          anchor = d.getTime();
           out.push(d.getTime());
         } else {
           const days = Math.floor((d.getTime() - anchor) / 86400000);
@@ -266,13 +269,18 @@ function cloneRecurringInstanceFromTemplate(template, anchorDueMs, newTodoId) {
   const oldParentDue = Number(template?.dueDate || 0) || null;
   const newParentDue = Number(anchorDueMs) || null;
   const rid = String(template.recurringId || template.id || '');
-  const subs = getSubtasks(template).map((s) => ({
-    ...s,
-    id: newSubtaskId(),
-    done: false,
-    doneAt: null,
-    dueDate: projectSubtaskDueDateForNewCycle(oldParentDue, newParentDue, s.dueDate),
-  }));
+  // Same carry semantics as new-cycle materialization: recurring sub-tasks
+  // reset, unfinished one-time sub-tasks persist, completed one-time
+  // sub-tasks stay done (don't resurrect them on the next occurrence).
+  const subs = getSubtasks(template)
+    .filter(shouldSubtaskPersistIntoNextCycle)
+    .map((s) => ({
+      ...s,
+      id: newSubtaskId(),
+      done: false,
+      doneAt: null,
+      dueDate: projectSubtaskDueDateForNewCycle(oldParentDue, newParentDue, s.dueDate),
+    }));
   return {
     id: newTodoId(),
     text: template.text || '',
@@ -338,12 +346,15 @@ export function reconcileRecurringTodoInstances(
       for (const anchorMs of anchors) {
         const skipKey = recurringAnchorKey(stableRecurringSeriesId(template), anchorMs);
         if (skipKey && skippedSet.has(skipKey)) continue;
+        // An instance on the anchor day counts, and so does an open undated
+        // instance of the same series — spawning next to it would just look
+        // like a duplicate the user "can't get rid of".
         const exists = itemsMut.some(
           (it) =>
             it &&
             it.recurring &&
             stableRecurringSeriesId(it) === stableRecurringSeriesId(template) &&
-            sameCalendarDay(it.dueDate, anchorMs),
+            (sameCalendarDay(it.dueDate, anchorMs) || (!it.dueDate && !it.done)),
         );
         if (exists) continue;
         const fresh = cloneRecurringInstanceFromTemplate(template, anchorMs, newTodoId);
@@ -359,6 +370,33 @@ export function reconcileRecurringTodoInstances(
   }
 
   return { cycleDataByCategory: next, changed };
+}
+
+/**
+ * Drop newly seeded recurring rows that would duplicate a carried-over open
+ * instance of the same series (same due day, or the carried copy is undated).
+ * Happens when the prior instance's due date already falls inside the new
+ * cycle window — without this, rollover shows two identical tasks.
+ */
+export function dedupeRecurringSeedsAgainstCarried(carriedItems, seedItems) {
+  const carriedDuesByRid = new Map();
+  (carriedItems || []).forEach((it) => {
+    if (!it?.recurring) return;
+    const rid = stableRecurringSeriesId(it);
+    if (!rid) return;
+    if (!carriedDuesByRid.has(rid)) carriedDuesByRid.set(rid, []);
+    carriedDuesByRid.get(rid).push(Number(it.dueDate || 0));
+  });
+
+  return (seedItems || []).filter((seed) => {
+    const rid = stableRecurringSeriesId(seed);
+    const dues = rid ? carriedDuesByRid.get(rid) : null;
+    if (!dues || !dues.length) return true;
+    if (dues.some((d) => !d)) return false; // open undated copy already carried
+    const seedDue = Number(seed.dueDate || 0);
+    if (!seedDue) return false; // no computable occurrence; carried copy suffices
+    return !dues.some((d) => sameCalendarDay(d, seedDue));
+  });
 }
 
 /** Carry a single open primary row from the prior cycle into the current cycle view. */

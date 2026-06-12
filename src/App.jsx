@@ -78,6 +78,7 @@ import {
 import {
   ensureRecurringSkipOnCategory,
   computeRecurringDueDate,
+  dedupeRecurringSeedsAgainstCarried,
   markPrimaryTodoDoneAcrossCycles,
   mergeOpenItemsFromPrevCycle,
   projectSubtasksForNewRecurringPrimaryCycle,
@@ -1708,7 +1709,10 @@ export default function App() {
             ),
           };
         });
-      result[ck] = { closed: false, items: [...carried, ...recurring] };
+      // Don't seed a fresh instance when the carried-over open copy already
+      // represents the same occurrence (identical-looking duplicates).
+      const dedupedRecurring = dedupeRecurringSeedsAgainstCarried(carried, recurring);
+      result[ck] = { closed: false, items: [...carried, ...dedupedRecurring] };
     });
     return result;
   };
@@ -1786,7 +1790,10 @@ export default function App() {
             ),
           };
         });
-      cycles[String(cycleStart)][ck] = { closed: false, items: [...carried, ...recurring] };
+      // Same dedupe as getTodoStateForCycle: never persist a seed that
+      // duplicates a carried-over open instance of the series.
+      const dedupedRecurring = dedupeRecurringSeedsAgainstCarried(carried, recurring);
+      cycles[String(cycleStart)][ck] = { closed: false, items: [...carried, ...dedupedRecurring] };
     });
     return cycles;
   };
