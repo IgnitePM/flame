@@ -11,6 +11,7 @@ import {
   Copy,
   DollarSign,
   Edit3,
+  Eye,
   FileDown,
   FileText,
   FolderGit2,
@@ -79,6 +80,7 @@ import ClientCycleActivityPanel from './ClientCycleActivityPanel.jsx';
 import RetainerCategoryStats from './RetainerCategoryStats.jsx';
 import TaskLogSessionDetail from './TaskLogSessionDetail.jsx';
 import TodoItemAttachments from './TodoItemAttachments.jsx';
+import PayrollView from './PayrollView.jsx';
 
 /** Normalize ?tab= for /admin/clients/:id (supports legacy `projects`). */
 function parseClientSubTabFromSearch(search) {
@@ -969,6 +971,7 @@ const AdminDashboard = ({
   adminUsers,
   policy,
   updatePolicy,
+  previewClientPortal,
   newTaskType,
   setNewTaskType,
   newAdminEmail,
@@ -1490,6 +1493,209 @@ const AdminDashboard = ({
                   </tbody>
                 </table>`
           }
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+      printWindow.close();
+    }, 250);
+  };
+
+  // Invoice-style summary of billable items for a cycle. Reference only —
+  // the official invoice is generated and sent through QuickBooks.
+  const exportClientInvoicePDF = ({
+    client,
+    mStart,
+    mEnd,
+    stats,
+    periodExps,
+    periodProjectTasks,
+    periodProjectExps,
+    clientProjects,
+    addons,
+  }) => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      window.alert('Pop-up blocked. Allow pop-ups for this site to export the invoice PDF.');
+      return;
+    }
+
+    const esc = (v) =>
+      String(v ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    const fmtDate = (ms) => new Date(ms).toLocaleDateString();
+    const fmtMoney = (n) =>
+      Number(n || 0).toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+    const HST_RATE = 0.13;
+    const hourlyRate = Number(client?.hourlyRate || 0);
+    const projectTitle = (pid) =>
+      (clientProjects || []).find((p) => p.id === pid)?.title || 'Project';
+
+    // 1. Add-on hour blocks billed into this cycle (already priced w/ HST).
+    const cycleAddons = (addons || []).filter(
+      (a) => a.clientId === client?.id && a.billingCycleStart === mStart,
+    );
+
+    // 2. Custom project time this cycle, priced at the client's hourly rate.
+    const projectHoursById = {};
+    (periodProjectTasks || []).forEach((t) => {
+      if (!t.projectId) return;
+      projectHoursById[t.projectId] =
+        (projectHoursById[t.projectId] || 0) + getTaskDuration(t) / 3600000;
+    });
+    const projectTimeLines = Object.entries(projectHoursById).map(([pid, hours]) => ({
+      label: `${projectTitle(pid)} — project time`,
+      detail: `${hours.toFixed(2)}h × $${fmtMoney(hourlyRate)}/h`,
+      amount: hours * hourlyRate,
+    }));
+
+    // 3. Pass-through expenses (project + retainer dollar expenses).
+    const expenseLines = [
+      ...(periodProjectExps || []).map((e) => ({
+        label: `${projectTitle(e.projectId)} — ${e.description || 'expense'}`,
+        detail: fmtDate(e.date),
+        amount: Number(e.finalCost || e.amount || 0),
+      })),
+      ...(periodExps || [])
+        .filter((e) => !e.projectId && !(Number(e.equivalentHours || 0) > 0))
+        .map((e) => ({
+          label: e.description || 'Expense',
+          detail: fmtDate(e.date),
+          amount: Number(e.finalCost || e.amount || 0),
+        })),
+    ];
+
+    const addonsTotal = cycleAddons.reduce(
+      (acc, a) => acc + Number(a.priceBreakdown?.total || 0),
+      0,
+    );
+    const projectSubtotal = projectTimeLines.reduce((acc, l) => acc + l.amount, 0);
+    const projectHst = projectSubtotal * HST_RATE;
+    const expensesTotal = expenseLines.reduce((acc, l) => acc + l.amount, 0);
+    const grandTotal = addonsTotal + projectSubtotal + projectHst + expensesTotal;
+
+    const lineRows = (lines) =>
+      lines
+        .map(
+          (l) => `
+            <tr>
+              <td>${esc(l.label)}</td>
+              <td class="muted">${esc(l.detail)}</td>
+              <td class="num">$${fmtMoney(l.amount)}</td>
+            </tr>`,
+        )
+        .join('');
+
+    const html = `
+      <html>
+        <head>
+          <title>Ignite PM — ${esc(client?.name || 'Client')} Invoice Reference</title>
+          <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 32px; color: #111827; }
+            h1 { color: #fd7414; margin: 0 0 4px 0; }
+            .ref-banner { background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; padding: 10px 14px; border-radius: 10px; font-size: 12px; font-weight: 700; margin: 14px 0 20px 0; }
+            .meta { color: #475569; margin-bottom: 22px; font-size: 13px; }
+            h2 { margin: 22px 0 8px 0; font-size: 15px; color: #0f172a; }
+            table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+            th, td { border: 1px solid #e2e8f0; padding: 9px 10px; text-align: left; vertical-align: top; }
+            th { background-color: #f8fafc; color: #334155; }
+            td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+            .muted { color: #64748b; }
+            .totals { margin-top: 26px; width: 320px; margin-left: auto; }
+            .totals td { border: none; padding: 5px 10px; font-size: 13px; }
+            .totals .grand td { border-top: 2px solid #0f172a; font-weight: 800; font-size: 15px; }
+          </style>
+        </head>
+        <body>
+          <h1>${esc(client?.name || 'Client')} — Invoice Summary</h1>
+          <div class="ref-banner">
+            Reference only — the official invoice is generated and sent through QuickBooks.
+          </div>
+          <div class="meta">
+            Billing period: ${fmtDate(mStart)} – ${fmtDate(mEnd)}<br/>
+            Generated: ${new Date().toLocaleString()}<br/>
+            Hourly rate on file: $${fmtMoney(hourlyRate)}/h
+          </div>
+
+          <h2>Retainer (covered by monthly agreement)</h2>
+          <table>
+            <thead>
+              <tr><th>Allotted</th><th>Used</th><th>Remaining / Carryover</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>${stats ? `${(stats.adjustedAllotted ?? 0).toFixed(2)}h` : '—'}</td>
+                <td>${stats ? `${(stats.currentUsed ?? 0).toFixed(2)}h` : '—'}</td>
+                <td>${stats ? `${((stats.adjustedAllotted ?? 0) - (stats.currentUsed ?? 0)).toFixed(2)}h` : '—'}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h2>Add-on hour blocks (this cycle)</h2>
+          ${
+            cycleAddons.length === 0
+              ? `<div class="muted">None.</div>`
+              : `<table>
+                  <thead>
+                    <tr><th>Date</th><th>Category</th><th class="num">Hours</th><th class="num">Subtotal</th><th class="num">HST</th><th class="num">Total</th></tr>
+                  </thead>
+                  <tbody>
+                    ${cycleAddons
+                      .map(
+                        (a) => `
+                          <tr>
+                            <td>${fmtDate(a.date)}</td>
+                            <td>${esc(a.category || 'Additional Hours')}</td>
+                            <td class="num">${Number(a.hours || 0).toFixed(2)}</td>
+                            <td class="num">$${fmtMoney(a.priceBreakdown?.subtotal)}</td>
+                            <td class="num">$${fmtMoney(a.priceBreakdown?.hst)}</td>
+                            <td class="num">$${fmtMoney(a.priceBreakdown?.total)}</td>
+                          </tr>`,
+                      )
+                      .join('')}
+                  </tbody>
+                </table>`
+          }
+
+          <h2>Custom project time (this cycle)</h2>
+          ${
+            projectTimeLines.length === 0
+              ? `<div class="muted">None.</div>`
+              : `<table>
+                  <thead><tr><th>Item</th><th>Detail</th><th class="num">Amount</th></tr></thead>
+                  <tbody>${lineRows(projectTimeLines)}</tbody>
+                </table>`
+          }
+
+          <h2>Billable expenses (this cycle)</h2>
+          ${
+            expenseLines.length === 0
+              ? `<div class="muted">None.</div>`
+              : `<table>
+                  <thead><tr><th>Item</th><th>Date</th><th class="num">Amount</th></tr></thead>
+                  <tbody>${lineRows(expenseLines)}</tbody>
+                </table>`
+          }
+
+          <table class="totals">
+            <tbody>
+              <tr><td>Add-on blocks (incl. HST)</td><td class="num">$${fmtMoney(addonsTotal)}</td></tr>
+              <tr><td>Project time subtotal</td><td class="num">$${fmtMoney(projectSubtotal)}</td></tr>
+              <tr><td>HST (13%) on project time</td><td class="num">$${fmtMoney(projectHst)}</td></tr>
+              <tr><td>Billable expenses</td><td class="num">$${fmtMoney(expensesTotal)}</td></tr>
+              <tr class="grand"><td>Total</td><td class="num">$${fmtMoney(grandTotal)}</td></tr>
+            </tbody>
+          </table>
         </body>
       </html>
     `;
@@ -2329,6 +2535,7 @@ const AdminDashboard = ({
                   },
                 ]
               : []),
+            ...(isAdmin ? [{ id: 'payroll', label: 'Payroll', icon: DollarSign }] : []),
             ...(!isRestrictedStaff ? [{ id: 'tasks', label: 'Config', icon: Settings }] : []),
             ...(isAdmin ? [{ id: 'users', label: 'Users', icon: Users }] : []),
           ].map((tab) => (
@@ -2375,6 +2582,16 @@ const AdminDashboard = ({
           </button>
         </div>
       </div>
+
+      {/* Payroll Tab (Wagepoint hours) */}
+      {adminTab === 'payroll' && isAdmin && (
+        <PayrollView
+          timesheets={timesheets}
+          policy={policy}
+          updatePolicy={updatePolicy}
+          canEditSettings={isAdmin}
+        />
+      )}
 
       {/* Timesheets Tab */}
       {adminTab === 'timesheets' && (
@@ -4112,6 +4329,19 @@ const AdminDashboard = ({
                       >
                         <DollarSign className="w-5 h-5" />
                       </button>
+                      {isClientPage && previewClientPortal && !isRestrictedStaff && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            previewClientPortal(c.id);
+                          }}
+                          className="p-2 text-slate-400 bg-slate-100 rounded-xl transition-colors hover:text-[#fd7414]"
+                          title="Preview the client portal as this client"
+                        >
+                          <Eye className="w-5 h-5" />
+                        </button>
+                      )}
                       <button
                         type="button"
                         disabled={isRestrictedStaff}
@@ -4406,6 +4636,37 @@ const AdminDashboard = ({
                               >
                                 <FileText className="w-3 h-3" />
                                 Export PDF
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isRestrictedStaff}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  exportClientInvoicePDF({
+                                    client: c,
+                                    mStart,
+                                    mEnd,
+                                    stats,
+                                    periodExps,
+                                    periodProjectTasks,
+                                    periodProjectExps,
+                                    clientProjects,
+                                    addons,
+                                  });
+                                }}
+                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white border border-orange-200 text-[#fd7414] transition-colors ${
+                                  isRestrictedStaff
+                                    ? 'opacity-40 cursor-not-allowed'
+                                    : 'hover:bg-orange-50'
+                                }`}
+                                title={
+                                  isRestrictedStaff
+                                    ? 'Admin only'
+                                    : 'Invoice-style summary (reference for QuickBooks)'
+                                }
+                              >
+                                <FileText className="w-3 h-3" />
+                                Invoice PDF
                               </button>
                               <button
                                 type="button"

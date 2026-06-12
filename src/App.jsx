@@ -367,12 +367,17 @@ export default function App() {
 
   // Client Portal State
   const [portalOffset, setPortalOffset] = useState(0);
+  // Admin-only: preview the client portal as a specific client.
+  const [portalPreviewClientId, setPortalPreviewClientId] = useState(null);
   const POLICY_DEFAULTS = {
     requireClockOutNote: false,
     idleReminderMinutes: 0,
     // Idle failsafe defaults ON: prompt after 2 hours of no kiosk activity.
     idleFailsafeMinutes: 120,
     idleFailsafeConfirmSeconds: 120,
+    // Payroll (Wagepoint) export settings.
+    payrollFrequency: 'biweekly',
+    payrollAnchorDate: '',
   };
   const [policy, setPolicy] = useState(() => {
     try {
@@ -2929,6 +2934,7 @@ export default function App() {
     adminTab,
     setAdminTab,
     currentUserRole,
+    previewClientPortal: (clientId) => setPortalPreviewClientId(clientId),
     user,
     clients,
     taskLogs,
@@ -3015,8 +3021,54 @@ export default function App() {
     dashboardTitle: 'Workspace',
   };
 
-  const content =
-    view === 'client_portal' && clientProfile ? (
+  const portalPreviewClient =
+    isUserAdmin && portalPreviewClientId
+      ? clients.find((c) => c.id === portalPreviewClientId) || null
+      : null;
+
+  const content = portalPreviewClient ? (
+    <div>
+      <div className="sticky top-0 z-50 bg-amber-400 text-black px-4 py-2.5 flex items-center justify-between gap-3 shadow-md">
+        <span className="text-xs font-black uppercase tracking-widest">
+          Previewing client portal — {portalPreviewClient.name} (what this
+          client&apos;s contacts see when they sign in)
+        </span>
+        <button
+          type="button"
+          onClick={() => setPortalPreviewClientId(null)}
+          className="px-4 py-1.5 rounded-xl bg-black text-white text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shrink-0"
+        >
+          Exit preview
+        </button>
+      </div>
+      <ClientPortal
+        clientProfile={portalPreviewClient}
+        portalOffset={portalOffset}
+        setPortalOffset={setPortalOffset}
+        taskLogs={taskLogs}
+        expenses={expenses}
+        projects={projects}
+        addons={addons}
+        getBillingPeriod={getBillingPeriod}
+        getGlobalRetainerStats={(client, start, end) =>
+          getGlobalRetainerStats(client, start, end)
+        }
+        formatTime={formatTime}
+        getTaskDuration={getTaskDuration}
+        getTodoStateForCycle={getTodoStateForCycle}
+        todoCategoryKey={todoCategoryKey}
+        setAddonModal={setAddonModal}
+        setProjectModal={setProjectModal}
+        updateProject={(projectId, data) =>
+          updateDoc(doc(db, 'projects', projectId), data)
+        }
+        logAudit={logAudit}
+        setUser={() => {}}
+        signOut={() => setPortalPreviewClientId(null)}
+        auth={auth}
+      />
+    </div>
+  ) : view === 'client_portal' && clientProfile ? (
       <ClientPortal
         clientProfile={clientProfile}
         portalOffset={portalOffset}

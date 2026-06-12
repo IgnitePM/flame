@@ -45,6 +45,56 @@ import {
   teamMemberCanViewClient,
 } from '../utils/teamClientAccess.js';
 
+/** Hours-tracked vs estimated-hours bar for a custom project (kiosk panels). */
+const KioskProjectProgressCard = ({ project, stats, className = '' }) => {
+  const tracked = Number(stats?.trackedHours || 0);
+  const budget = Number(stats?.budgetHours || 0);
+  const hasBudget = budget > 0;
+  const pct = hasBudget ? Math.min((tracked / budget) * 100, 100) : 0;
+  const over = hasBudget && tracked > budget;
+  const estimateCost = Number(
+    project?.estimate?.cost ?? project?.estimatedBudget ?? 0,
+  );
+  return (
+    <div className={`${className} bg-white border border-slate-200 rounded-[24px] p-4`}>
+      <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
+        Project Progress
+      </div>
+      <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">
+        Project: {String(project?.title || 'Custom Project')}
+      </div>
+      <div className="flex justify-between items-baseline mb-1">
+        <span className={`text-sm font-black ${over ? 'text-red-600' : 'text-slate-800'}`}>
+          {tracked.toFixed(2)}h tracked
+        </span>
+        <span className="text-xs font-bold text-slate-400">
+          {hasBudget ? `of ${budget.toFixed(1)}h estimated` : 'no hour estimate set'}
+        </span>
+      </div>
+      {hasBudget && (
+        <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden mb-2">
+          <div
+            className={`h-full rounded-full transition-all ${over ? 'bg-red-500' : 'bg-[#fd7414]'}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
+      <div className="flex justify-between text-[10px] font-bold text-slate-400">
+        {hasBudget ? (
+          <span className={over ? 'text-red-500 font-black' : ''}>
+            {over
+              ? `${(tracked - budget).toFixed(2)}h over estimate`
+              : `${(budget - tracked).toFixed(2)}h remaining`}
+          </span>
+        ) : (
+          <span />
+        )}
+        {estimateCost > 0 && <span>Budget ${estimateCost.toFixed(2)}</span>}
+      </div>
+    </div>
+  );
+};
+
 const EmployeeKiosk = ({
   user,
   activeShift,
@@ -753,6 +803,51 @@ const EmployeeKiosk = ({
       : null;
   })();
 
+  // Custom project selected/active: show project budget + to-dos in the same
+  // panels the retainer categories use.
+  const selectedProject = (() => {
+    const list = projects || [];
+    if (activeTask) {
+      return activeTask.projectId
+        ? list.find((p) => p.id === activeTask.projectId) || null
+        : null;
+    }
+    if (selectedBillingTarget?.startsWith('project_')) {
+      const pid = selectedBillingTarget.replace('project_', '');
+      return list.find((p) => p.id === pid) || null;
+    }
+    return null;
+  })();
+
+  // Unified "what is the kiosk pointed at" — retainer category name, or the
+  // project pseudo-category (`project_<id>`) used by todoCycles keys.
+  const selectedTodoCategoryName =
+    selectedRetainerCategory ||
+    (selectedProject ? `project_${selectedProject.id}` : null);
+  const selectedTodoCategoryLabel =
+    selectedRetainerCategory ||
+    (selectedProject ? selectedProject.title || 'Custom Project' : null);
+
+  const selectedProjectStats = React.useMemo(() => {
+    if (!selectedProject) return null;
+    const now = Date.now();
+    const durationOf = (t) => {
+      const saved = Number(t.totalSavedDuration ?? t.duration ?? 0);
+      if (t.status === 'active') {
+        return saved + Math.max(0, now - (t.lastResumeTime || t.clockInTime || now));
+      }
+      return saved;
+    };
+    const trackedHours =
+      (taskLogs || [])
+        .filter((t) => t.projectId === selectedProject.id)
+        .reduce((acc, t) => acc + durationOf(t), 0) / 3600000;
+    const budgetHours = Number(
+      selectedProject.estimate?.hours ?? selectedProject.estimatedHours ?? 0,
+    );
+    return { trackedHours, budgetHours };
+  }, [selectedProject, taskLogs, liveTaskDuration]);
+
   const selectedRetainerNote =
     selectedClientObj && cycleStart && selectedRetainerCategory
       ? selectedClientObj.cycleNotes?.[String(cycleStart)]?.[
@@ -1082,14 +1177,14 @@ const EmployeeKiosk = ({
   );
 
   const categoryKioskTodoRows = React.useMemo(() => {
-    if (!selectedClientObj || !selectedRetainerCategory) return [];
+    if (!selectedClientObj || !selectedTodoCategoryName) return [];
     let rows = globalTodoRows.filter(
       (row) =>
         row.clientId === selectedClientObj.id &&
         kioskRowMatchesSelectedCategory(
           row,
           selectedClientObj,
-          selectedRetainerCategory,
+          selectedTodoCategoryName,
         ) &&
         !row.item?.done,
     );
@@ -1114,7 +1209,7 @@ const EmployeeKiosk = ({
   }, [
     globalTodoRows,
     selectedClientObj,
-    selectedRetainerCategory,
+    selectedTodoCategoryName,
     categoryTodoMineOnly,
     canManageClientTodos,
     meLower,
@@ -1127,14 +1222,14 @@ const EmployeeKiosk = ({
     if (
       !getTodoStateForCycle ||
       !selectedClientObj ||
-      !selectedRetainerCategory ||
+      !selectedTodoCategoryName ||
       !cycleStart
     ) {
       return null;
     }
     const catKey = todoCategoryKey
-      ? todoCategoryKey(selectedRetainerCategory)
-      : safeCategoryKey(selectedRetainerCategory);
+      ? todoCategoryKey(selectedTodoCategoryName)
+      : safeCategoryKey(selectedTodoCategoryName);
     const todoState = getTodoStateForCycle(selectedClientObj, cycleStart);
     const catTodo = todoState[catKey] || { closed: false, items: [] };
     return {
@@ -1145,7 +1240,7 @@ const EmployeeKiosk = ({
   }, [
     getTodoStateForCycle,
     selectedClientObj,
-    selectedRetainerCategory,
+    selectedTodoCategoryName,
     cycleStart,
     todoCategoryKey,
   ]);
@@ -1644,14 +1739,14 @@ const EmployeeKiosk = ({
                         Begin Work Block
                       </button>
 
-                      {selectedClientObj && selectedRetainerCategory && (
+                      {selectedClientObj && selectedTodoCategoryLabel && (
                         <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4 space-y-3">
                           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
                             Company profile — {selectedClientObj.name}
                           </div>
                           <ClientProfileSummary client={selectedClientObj} />
                           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 pt-2 border-t border-slate-100">
-                            Notes for {selectedRetainerCategory}
+                            Notes for {selectedTodoCategoryLabel}
                           </div>
                           <div className="space-y-3">
                             <div>
@@ -1662,14 +1757,16 @@ const EmployeeKiosk = ({
                                 {selectedClientGeneralNote || 'No client notes yet.'}
                               </div>
                             </div>
-                            <div>
-                              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
-                                {selectedRetainerCategory} Note
+                            {selectedRetainerCategory && (
+                              <div>
+                                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                                  {selectedRetainerCategory} Note
+                                </div>
+                                <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                                  {selectedRetainerNote || 'No category note yet.'}
+                                </div>
                               </div>
-                              <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
-                                {selectedRetainerNote || 'No category note yet.'}
-                              </div>
-                            </div>
+                            )}
                           </div>
                         </div>
                       )}
@@ -1678,11 +1775,11 @@ const EmployeeKiosk = ({
                       {getTodoStateForCycle &&
                         updateClientTodo &&
                         selectedClientObj &&
-                        selectedRetainerCategory &&
+                        selectedTodoCategoryName &&
                         currentCycleCategoryTodo && (
                           <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
                             <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
-                              To-do — {selectedRetainerCategory}
+                              To-do — {selectedTodoCategoryLabel}
                               {currentCycleCategoryTodo.catTodo.closed && (
                                 <span className="ml-2 px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[9px] font-bold uppercase">
                                   Closed
@@ -1912,6 +2009,15 @@ const EmployeeKiosk = ({
                         </div>
                       )}
 
+                      {/* Project budget progress (custom project selected) */}
+                      {selectedProject && selectedProjectStats && (
+                        <KioskProjectProgressCard
+                          project={selectedProject}
+                          stats={selectedProjectStats}
+                          className="mt-4"
+                        />
+                      )}
+
                       {/* Log Social Ad Spend (kiosk-only when Social Ad Budget selected) */}
                       {isSocialAdCategory && selectedClientObj && onLogSocialAdSpend && (
                         <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
@@ -2032,6 +2138,15 @@ const EmployeeKiosk = ({
                         </div>
                       )}
 
+                      {/* Project budget progress (working a custom project) */}
+                      {selectedProject && selectedProjectStats && (
+                        <KioskProjectProgressCard
+                          project={selectedProject}
+                          stats={selectedProjectStats}
+                          className="mt-5"
+                        />
+                      )}
+
                       <div className="mt-5 space-y-2">
                         <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
                           Progress Notes
@@ -2048,11 +2163,11 @@ const EmployeeKiosk = ({
                       {getTodoStateForCycle &&
                         updateClientTodo &&
                         selectedClientObj &&
-                        selectedRetainerCategory &&
+                        selectedTodoCategoryName &&
                         currentCycleCategoryTodo && (
                           <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
                             <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
-                              To-do — {selectedRetainerCategory}
+                              To-do — {selectedTodoCategoryLabel}
                               {currentCycleCategoryTodo.catTodo.closed && (
                                 <span className="ml-2 px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[9px] font-bold uppercase">
                                   Closed
