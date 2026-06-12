@@ -66,14 +66,19 @@ service cloud.firestore {
     }
 
     match /clients/{clientId} {
-      allow read: if clientAllowsEmail(clientId);
+      // resource.data (not a get()) so the portal's
+      // where('clientEmails','array-contains', email) list query is provable.
+      allow read: if isAnyStaff() ||
+        (isSignedIn() &&
+         resource.data.clientEmails is list &&
+         resource.data.clientEmails.hasAny([request.auth.token.email, emailLower()]));
       allow create: if isAnyStaff() && !isKiosk();
       // Admin/billing (and unknown staff roles) may update anything; kiosk
       // staff only the fields the kiosk UI writes (todos, docs, team access).
       allow update: if isAnyStaff() && (
         !isKiosk() ||
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(
-          ['todoCycles', 'teamMemberAccessEmails', 'documents']
+          ['todoCycles', 'teamMemberAccessEmails', 'documents', 'generalNotes', 'cycleNotes']
         )
       );
       allow delete: if isAdmin();
