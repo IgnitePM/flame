@@ -376,6 +376,8 @@ export default function App() {
   const [portalOffset, setPortalOffset] = useState(0);
   // Admin-only: preview the client portal as a specific client.
   const [portalPreviewClientId, setPortalPreviewClientId] = useState(null);
+  // Slack notification settings (settings/notifications, read by Cloud Functions).
+  const [notifySettings, setNotifySettings] = useState({});
   const POLICY_DEFAULTS = {
     requireClockOutNote: false,
     idleReminderMinutes: 0,
@@ -527,6 +529,12 @@ export default function App() {
       const items = Array.isArray(data.items) ? data.items : [];
       setUserTodos(items);
     });
+    // Slack notification settings (webhook + toggles) read by Cloud Functions.
+    const unsubNotify = onSnapshot(
+      doc(db, 'settings', 'notifications'),
+      (snapshot) => setNotifySettings(snapshot.exists() ? snapshot.data() : {}),
+      () => {},
+    );
     // Shared policy (idle failsafe etc.) so kiosks on other devices honor it.
     const unsubPolicy = onSnapshot(
       doc(db, 'settings', 'policy'),
@@ -555,6 +563,7 @@ export default function App() {
       unsubProjects();
       unsubAddons();
       unsubUserTodos();
+      unsubNotify();
       unsubPolicy();
     };
   }, [user, adminDocReady, myAdminDoc?.id]);
@@ -2628,6 +2637,9 @@ export default function App() {
     setAdminTab,
     currentUserRole,
     previewClientPortal: (clientId) => setPortalPreviewClientId(clientId),
+    notifySettings,
+    updateNotifySettings: (patch) =>
+      setDoc(doc(db, 'settings', 'notifications'), patch, { merge: true }),
     user,
     clients,
     taskLogs,

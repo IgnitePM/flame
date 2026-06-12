@@ -81,6 +81,7 @@ import RetainerCategoryStats from './RetainerCategoryStats.jsx';
 import TaskLogSessionDetail from './TaskLogSessionDetail.jsx';
 import TodoItemAttachments from './TodoItemAttachments.jsx';
 import PayrollView from './PayrollView.jsx';
+import SlackNotificationsCard from './SlackNotificationsCard.jsx';
 import {
   exportClientCyclePDF,
   exportClientInvoicePDF,
@@ -977,6 +978,8 @@ const AdminDashboard = ({
   policy,
   updatePolicy,
   previewClientPortal,
+  notifySettings,
+  updateNotifySettings,
   newTaskType,
   setNewTaskType,
   newAdminEmail,
@@ -6960,6 +6963,11 @@ const AdminDashboard = ({
               </div>
             </div>
           </div>
+
+          <SlackNotificationsCard
+            notifySettings={notifySettings}
+            updateNotifySettings={updateNotifySettings}
+          />
 
           <div className="flex flex-col sm:flex-row gap-4">
             <input
