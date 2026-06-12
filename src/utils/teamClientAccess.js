@@ -38,6 +38,11 @@ export function teamMemberCanViewClient(client, userEmail) {
 
   const raw = client?.teamMemberAccessEmails;
   if (raw == null) return true;
+  // Malformed single-email string: honor it as a one-entry restriction
+  // instead of silently granting everyone access.
+  if (typeof raw === 'string') {
+    return raw.trim() ? normalizeEmail(raw) === me : false;
+  }
   if (!Array.isArray(raw)) return true;
   if (raw.length === 0) return false;
   return raw.map(normalizeEmail).includes(me);

@@ -26,7 +26,9 @@ export function taskMatchesDueWindow(item, dueFilter, now = Date.now()) {
   const due = Number(item?.dueDate || 0);
   const t0 = startOfTodayMs(now);
   if (!due) return true;
-  if (dueFilter === "all_future") return due >= t0;
+  // Overdue tasks stay visible in every window (consistent with the shorter
+  // windows below) — hiding them under "all future" buried late work.
+  if (dueFilter === "all_future") return true;
   if (due < t0) return true;
   const end =
     dueFilter === "next7"

@@ -93,8 +93,15 @@ const ClientPortal = ({
     (cat) => (cat?.items || []).length > 0,
   );
 
+  // Requests still in flight; once active they live in Custom Projects below
+  // (previously 'active' projects showed in both sections).
   const pendingRequests = cProjects.filter((p) =>
-    ['requested', 'estimate_sent', 'approved', 'active'].includes(p.status),
+    ['requested', 'estimate_sent', 'approved'].includes(p.status),
+  );
+  const visibleProjects = cProjects.filter(
+    (p) =>
+      !['requested', 'estimate_sent'].includes(p.status) &&
+      String(p.title || '').trim() !== '',
   );
 
   const stats = getGlobalRetainerStats(clientProfile, mStart, mEnd, {
@@ -428,13 +435,13 @@ const ClientPortal = ({
           </div>
         )}
 
-        {cProjects.length > 0 && (
+        {visibleProjects.length > 0 && (
           <div className="bg-white p-8 sm:p-10 rounded-[40px] shadow-sm border border-slate-100 space-y-6">
             <h3 className="font-black text-xl text-slate-900 mb-2">
               Custom Projects
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {cProjects.map((p) => {
+              {visibleProjects.map((p) => {
                 const pTasks = taskLogs.filter((t) => t.projectId === p.id);
                 const pHours =
                   pTasks.reduce(
@@ -448,7 +455,7 @@ const ClientPortal = ({
                   >
                     <div className="flex justify-between items-start mb-2">
                       <h4 className="font-black text-slate-800 text-lg">
-                        {p.title}
+                        {String(p.title || '')}
                       </h4>
                       <span
                         className={`text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full ${
@@ -463,7 +470,7 @@ const ClientPortal = ({
                       </span>
                     </div>
                     <p className="text-xs text-slate-500 font-medium mb-4 italic line-clamp-2">
-                      &quot;{p.description}&quot;
+                      &quot;{String(p.description || '')}&quot;
                     </p>
                     <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
                       <Clock className="w-3 h-3" />{' '}

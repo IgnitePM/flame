@@ -798,13 +798,17 @@ const EmployeeKiosk = ({
     selectedRetainerCategory,
   );
 
+  // Remind once per task — a blocking alert every minute would interrupt work.
+  const noteReminderShownForTaskRef = React.useRef(null);
   React.useEffect(() => {
     if (!policy?.idleReminderMinutes || !activeTask) return;
     const minutes = Number(policy.idleReminderMinutes) || 0;
     if (minutes <= 0) return;
     const timer = setInterval(() => {
+      if (noteReminderShownForTaskRef.current === activeTask.id) return;
       const runningForMs = Date.now() - (activeTask.lastResumeTime || activeTask.clockInTime);
       if (runningForMs > minutes * 60 * 1000 && (!activeTaskNotes || activeTaskNotes.trim() === '')) {
+        noteReminderShownForTaskRef.current = activeTask.id;
         window.alert('Reminder: please add a quick progress note for this task.');
       }
     }, 60000);

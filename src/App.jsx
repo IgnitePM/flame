@@ -354,6 +354,8 @@ export default function App() {
   const kioskAutostartClockInAttemptedRef = useRef(false);
   const recurringExpenseSyncInProgressRef = useRef(false);
   const recurringTodoReconcileInFlightRef = useRef(false);
+  const policyWritePendingRef = useRef({});
+  const policyWriteTimerRef = useRef(null);
   const [activeTaskNotes, setActiveTaskNotes] = useState('');
 
   const idleShutdownRef = useRef({
@@ -395,10 +397,18 @@ export default function App() {
       }
       return next;
     });
-    // Policy must reach every kiosk device, not just this browser.
-    setDoc(doc(db, 'settings', 'policy'), updates, { merge: true }).catch(
-      () => {},
-    );
+    // Policy must reach every kiosk device, not just this browser. Debounce
+    // the write so typing in a settings field doesn't fire one per keystroke.
+    policyWritePendingRef.current = { ...policyWritePendingRef.current, ...updates };
+    if (policyWriteTimerRef.current) clearTimeout(policyWriteTimerRef.current);
+    policyWriteTimerRef.current = setTimeout(() => {
+      const pending = policyWritePendingRef.current;
+      policyWritePendingRef.current = {};
+      policyWriteTimerRef.current = null;
+      setDoc(doc(db, 'settings', 'policy'), pending, { merge: true }).catch(
+        () => {},
+      );
+    }, 600);
   };
 
   const computeNextRecurringExpenseDate = (currentDateMs, recurrence) => {
@@ -1054,7 +1064,10 @@ export default function App() {
     if (!activeShift) {
       if (!kioskAutostartClockInAttemptedRef.current) {
         kioskAutostartClockInAttemptedRef.current = true;
-        handleClockIn();
+        // On failure, allow a retry instead of leaving autostart stuck.
+        Promise.resolve(handleClockIn()).catch(() => {
+          kioskAutostartClockInAttemptedRef.current = false;
+        });
       }
       return;
     }
@@ -1064,7 +1077,10 @@ export default function App() {
       return;
     }
     setKioskAutostartPending(false);
-    handleStartTask();
+    Promise.resolve(handleStartTask()).catch(() => {
+      // Shift exists but the task didn't start (offline/permissions); the
+      // kiosk UI still lets the user start it manually.
+    });
   }, [
     user,
     kioskAutostartPending,
@@ -1075,6 +1091,7 @@ export default function App() {
   ]);
 
   const handleTakeBreak = async () => {
+    if (!activeShift) return;
     if (activeTask) await handleStopTask();
     const endTime = Date.now();
     const segment = endTime - (activeShift.lastResumeTime || activeShift.clockInTime);
@@ -1082,10 +1099,12 @@ export default function App() {
   };
 
   const handleEndBreak = async () => {
+    if (!activeShift) return;
     await updateDoc(doc(db, 'timesheets', activeShift.id), { status: 'active', lastResumeTime: Date.now() });
   };
 
   const handleClockOut = async () => {
+    if (!activeShift) return;
     if (policy.requireClockOutNote && (!activeTaskNotes || activeTaskNotes.trim() === '')) {
       window.alert('Please add a brief note before clocking out.');
       return;
@@ -2550,7 +2569,7 @@ export default function App() {
 
   const currentRange = getDateRange();
   const filteredTimesheets = timesheets.filter(shift => {
-    const matchesSearch = searchQuery === '' || shift.employeeName.toLowerCase().includes(searchQuery.toLowerCase()) || taskLogs.some(t => t.shiftId === shift.id && t.clientName.toLowerCase().includes(searchQuery.toLowerCase()));
+    const matchesSearch = searchQuery === '' || String(shift.employeeName || '').toLowerCase().includes(searchQuery.toLowerCase()) || taskLogs.some(t => t.shiftId === shift.id && String(t.clientName || '').toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesClient = clientFilter === '' || taskLogs.some(t => t.shiftId === shift.id && t.clientName === clientFilter);
     let matchesDate = true;
     if (currentRange.start && currentRange.end) matchesDate = shift.clockInTime >= currentRange.start && shift.clockInTime <= currentRange.end;
@@ -2694,6 +2713,12 @@ export default function App() {
 
   const exportPDF = () => {
     const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      window.alert(
+        'Could not open the report window. Allow pop-ups for this site and try again.',
+      );
+      return;
+    }
     let html = `
       <html>
         <head>

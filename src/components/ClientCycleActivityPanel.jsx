@@ -238,7 +238,7 @@ export default function ClientCycleActivityPanel({
                   <div className="min-w-0">
                     <div className="text-xs font-bold text-slate-800 break-words">
                       {exp.category || '—'}
-                      {exp.description ? ` · ${exp.description}` : ''}
+                      {exp.description ? ` · ${String(exp.description)}` : ''}
                     </div>
                     <div className="text-[10px] font-bold text-slate-400">
                       {new Date(exp.date).toLocaleDateString()}

@@ -1159,6 +1159,7 @@ const AdminDashboard = ({
     clientStartDate: '',
     clientEmails: '',
   });
+  const [addClientSaving, setAddClientSaving] = useState(false);
   const [clientNotesOpen, setClientNotesOpen] = useState({});
   const [clientNotesDraft, setClientNotesDraft] = useState({});
   const [clientNotesSaving, setClientNotesSaving] = useState({});
@@ -2605,7 +2606,7 @@ const AdminDashboard = ({
                         )}
                       </div>
                       <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center font-black text-slate-400 shrink-0">
-                        {shift.employeeName[0]}
+                        {String(shift.employeeName || '?')[0]}
                       </div>
                       <div>
                         <h4 className="font-black text-lg">
@@ -3734,7 +3735,9 @@ const AdminDashboard = ({
                       Cancel
                     </button>
                     <button
+                      disabled={addClientSaving}
                       onClick={async () => {
+                        if (addClientSaving) return;
                         const name = (addClientValues.name || '').trim();
                         if (!name) return;
 
@@ -3758,6 +3761,7 @@ const AdminDashboard = ({
                           .map((s) => s.trim().toLowerCase())
                           .filter(Boolean);
 
+                        setAddClientSaving(true);
                         try {
                           await addDoc(collection('clients'), {
                             name,
@@ -3776,11 +3780,13 @@ const AdminDashboard = ({
                             'Could not create client. You may need admin or billing access.\n\n' +
                               (err?.message || String(err)),
                           );
+                        } finally {
+                          setAddClientSaving(false);
                         }
                       }}
-                      className="bg-black text-white px-10 py-3 rounded-2xl font-black shadow-lg active:scale-95 transition-all"
+                      className="bg-black text-white px-10 py-3 rounded-2xl font-black shadow-lg active:scale-95 transition-all disabled:opacity-50"
                     >
-                      Submit
+                      {addClientSaving ? 'Saving…' : 'Submit'}
                     </button>
                   </div>
                 </div>
@@ -7438,17 +7444,26 @@ const AdminDashboard = ({
                       value={a.role || 'billing'}
                       onChange={async (e) => {
                         const nextRole = e.target.value;
-                        await Promise.all(
-                          (a.ids || []).map((id) =>
-                            updateDoc(doc('admins', id), { role: nextRole }).catch(() => {})
-                          )
-                        );
-                        // Ensure canonical email-keyed doc exists/updated for security rules
-                        await setDoc(
-                          doc('admins', String(a.email).toLowerCase()),
-                          { email: a.email, role: nextRole },
-                          { merge: true }
-                        ).catch(() => {});
+                        try {
+                          await Promise.all(
+                            (a.ids || []).map((id) =>
+                              updateDoc(doc('admins', id), { role: nextRole })
+                            )
+                          );
+                          // Ensure canonical email-keyed doc exists/updated for security rules
+                          await setDoc(
+                            doc('admins', String(a.email).toLowerCase()),
+                            { email: a.email, role: nextRole },
+                            { merge: true }
+                          );
+                        } catch (err) {
+                          // Surface failure — the dropdown shows the new role
+                          // optimistically even when the write was rejected.
+                          window.alert(
+                            `Could not change the role for ${a.email}.\n\n` +
+                              (err?.message || String(err)),
+                          );
+                        }
                       }}
                       className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-black text-slate-700 outline-none focus:ring-2 focus:ring-[#fd7414]"
                     >
@@ -7995,7 +8010,9 @@ const AdminDashboard = ({
                     </button>
                     <button
                       type="button"
+                      disabled={!!retainerMoveModal.saving}
                       onClick={async () => {
+                        if (retainerMoveModal.saving) return;
                         const from = retainerMoveModal.from;
                         const to = retainerMoveModal.to;
                         const h = Number(retainerMoveModal.hours);
@@ -8032,6 +8049,9 @@ const AdminDashboard = ({
                           movedAt: Date.now(),
                           movedBy: user?.email || user?.uid || 'unknown',
                         });
+                        setRetainerMoveModal((prevModal) =>
+                          prevModal ? { ...prevModal, saving: true } : prevModal,
+                        );
                         try {
                           await updateDoc(doc('clients', c.id), {
                             retainerHourMovesByCycle: { ...prev, [cycleKey]: list },
@@ -8051,11 +8071,14 @@ const AdminDashboard = ({
                           window.alert(
                             err?.message || 'Could not save hour move.',
                           );
+                          setRetainerMoveModal((prevModal) =>
+                            prevModal ? { ...prevModal, saving: false } : prevModal,
+                          );
                         }
                       }}
-                      className="px-4 py-2 rounded-xl text-xs font-black text-white bg-[#fd7414] hover:brightness-95 uppercase tracking-widest"
+                      className="px-4 py-2 rounded-xl text-xs font-black text-white bg-[#fd7414] hover:brightness-95 uppercase tracking-widest disabled:opacity-50"
                     >
-                      Save move
+                      {retainerMoveModal.saving ? 'Saving…' : 'Save move'}
                     </button>
                   </div>
                 </>
