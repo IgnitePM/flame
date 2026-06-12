@@ -65,6 +65,7 @@ import {
   updateDoc,
   doc,
   deleteDoc,
+  deleteField,
 } from './firebase';
 import ClientPortal from './components/ClientPortal.jsx';
 import EmployeeKiosk from './components/EmployeeKiosk.jsx';
@@ -457,15 +458,58 @@ export default function App() {
     const isDemoStaff = ENABLE_DEMOS && user.uid === 'demo-user-123';
     if (!myAdminDoc && !isDemoStaff) return;
 
-    const unsubTimesheets = onSnapshot(collection(db, 'timesheets'), (snapshot) => setTimesheets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.clockInTime - a.clockInTime)));
+    // Rolling history window: carryover math only needs the previous billing
+    // cycle, so ~18 months covers all billing views while keeping listener
+    // size/cost bounded as data grows. Older docs stay in Firestore.
+    const HISTORY_WINDOW_MS = 548 * 24 * 60 * 60 * 1000; // ~18 months
+    const historyCutoff = Date.now() - HISTORY_WINDOW_MS;
+
+    const unsubTimesheets = onSnapshot(query(collection(db, 'timesheets'), where('clockInTime', '>=', historyCutoff)), (snapshot) => setTimesheets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.clockInTime - a.clockInTime)));
+    // Internal staff notes live in a separate staff-only collection
+    // (clientNotes/{clientId}) so portal users reading their client doc can't
+    // see them. Merge them back onto the client objects for all staff UI.
+    let rawClients = [];
+    let staffNotesById = {};
+    const applyMergedClients = () => {
+      const merged = rawClients.map((c) => {
+        const n = staffNotesById[c.id];
+        // Flag legacy notes still stored on the (portal-readable) client doc
+        // so the one-time migration knows to move and remove them.
+        const legacyNotesOnDoc = !!(
+          c.generalNotes ||
+          (c.cycleNotes && Object.keys(c.cycleNotes).length)
+        );
+        return {
+          ...c,
+          _legacyNotesOnDoc: legacyNotesOnDoc,
+          ...(n
+            ? {
+                generalNotes: n.generalNotes ?? c.generalNotes ?? '',
+                cycleNotes: n.cycleNotes ?? c.cycleNotes ?? {},
+              }
+            : {}),
+        };
+      });
+      clientsRef.current = merged;
+      setClients(merged);
+    };
     const unsubClients = onSnapshot(collection(db, 'clients'), (snapshot) => {
-      const next = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-      clientsRef.current = next;
-      setClients(next);
+      rawClients = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+      applyMergedClients();
     });
-    const unsubTasks = onSnapshot(collection(db, 'taskLogs'), (snapshot) => setTaskLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.clockInTime - a.clockInTime)));
+    const unsubClientNotes = onSnapshot(
+      collection(db, 'clientNotes'),
+      (snapshot) => {
+        staffNotesById = Object.fromEntries(
+          snapshot.docs.map((d) => [d.id, d.data()]),
+        );
+        applyMergedClients();
+      },
+      () => {}, // rules may not be deployed yet; legacy fields still merge
+    );
+    const unsubTasks = onSnapshot(query(collection(db, 'taskLogs'), where('clockInTime', '>=', historyCutoff)), (snapshot) => setTaskLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.clockInTime - a.clockInTime)));
     const unsubTaskTypes = onSnapshot(collection(db, 'taskTypes'), (snapshot) => setTaskTypes(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
-    const unsubExpenses = onSnapshot(collection(db, 'expenses'), (snapshot) => setExpenses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a,b) => b.date - a.date)));
+    const unsubExpenses = onSnapshot(query(collection(db, 'expenses'), where('date', '>=', historyCutoff)), (snapshot) => setExpenses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a,b) => b.date - a.date)));
     const unsubProjects = onSnapshot(collection(db, 'projects'), (snapshot) => setProjects(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a,b) => b.createdAt - a.createdAt)));
     const unsubAddons = onSnapshot(collection(db, 'addons'), (snapshot) => setAddons(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a,b) => b.date - a.date)));
     const unsubUserTodos = onSnapshot(doc(db, 'userTodos', user.uid), (snapshot) => {
@@ -498,6 +542,7 @@ export default function App() {
     return () => {
       unsubTimesheets();
       unsubClients();
+      unsubClientNotes();
       unsubTasks();
       unsubTaskTypes();
       unsubExpenses();
@@ -755,7 +800,7 @@ export default function App() {
   // and expenses (joins were name-based, which breaks on client rename and is
   // required for scoped portal queries), and normalize clientEmails to
   // lowercase so portal logins match regardless of how the email was typed.
-  const dataBackfillDoneRef = useRef({ tasks: false, expenses: false, clients: false });
+  const dataBackfillDoneRef = useRef({ tasks: false, expenses: false, clients: false, notes: false });
   useEffect(() => {
     if (!user?.email || !isUserAdmin || currentUserRole === 'kiosk') return;
     if (!clients?.length) return;
@@ -792,6 +837,34 @@ export default function App() {
           updates.push({ coll: 'clients', id: c.id, patch: { clientEmails: lowered } });
         }
       });
+    }
+    if (!done.notes) {
+      done.notes = true;
+      // Migrate internal notes off the client doc (portal users can read it)
+      // into the staff-only clientNotes collection. Copy first, then remove.
+      (async () => {
+        for (const c of clients) {
+          if (!c._legacyNotesOnDoc) continue;
+          try {
+            await setDoc(
+              doc(db, 'clientNotes', c.id),
+              {
+                ...(c.generalNotes ? { generalNotes: c.generalNotes } : {}),
+                ...(c.cycleNotes && Object.keys(c.cycleNotes).length
+                  ? { cycleNotes: c.cycleNotes }
+                  : {}),
+              },
+              { merge: true },
+            );
+            await updateDoc(doc(db, 'clients', c.id), {
+              generalNotes: deleteField(),
+              cycleNotes: deleteField(),
+            });
+          } catch {
+            // Rules not deployed yet or offline; retried next session.
+          }
+        }
+      })();
     }
 
     if (!updates.length) return;

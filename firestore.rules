@@ -84,6 +84,13 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Internal staff notes (general + per-cycle). Kept out of the client doc
+    // so portal users can never read them.
+    match /clientNotes/{clientId} {
+      allow read, create, update: if isAnyStaff();
+      allow delete: if isAdmin();
+    }
+
     match /projects/{projectId} {
       allow read: if isAnyStaff() ||
         (isSignedIn() && resource.data.clientId is string && clientAllowsEmail(resource.data.clientId));

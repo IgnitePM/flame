@@ -4499,10 +4499,16 @@ const AdminDashboard = ({
                                       [c.id]: true,
                                     }));
                                     try {
-                                      await updateDoc(doc('clients', c.id), {
-                                        generalNotes:
-                                          clientNotesDraft[c.id] ?? '',
-                                      });
+                                      // Staff-only collection; never on the
+                                      // portal-readable client doc.
+                                      await setDoc(
+                                        doc('clientNotes', c.id),
+                                        {
+                                          generalNotes:
+                                            clientNotesDraft[c.id] ?? '',
+                                        },
+                                        { merge: true },
+                                      );
                                       logAudit?.({
                                         type: 'client_notes_saved',
                                         entityType: 'client',
@@ -6887,12 +6893,16 @@ const AdminDashboard = ({
                                                       [noteKey]: true,
                                                     }));
                                                     try {
-                                                      await updateDoc(
-                                                        doc('clients', c.id),
+                                                      await setDoc(
+                                                        doc('clientNotes', c.id),
                                                         {
-                                                          [`cycleNotes.${cycleStart}.${catKey}`]:
-                                                            value,
+                                                          cycleNotes: {
+                                                            [String(cycleStart)]: {
+                                                              [catKey]: value,
+                                                            },
+                                                          },
                                                         },
+                                                        { merge: true },
                                                       );
                                                       logAudit?.({
                                                         type: 'retainer_cycle_note_saved',

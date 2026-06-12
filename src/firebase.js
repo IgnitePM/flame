@@ -20,6 +20,7 @@ import {
   updateDoc,
   doc,
   deleteDoc,
+  deleteField,
   writeBatch,
 } from 'firebase/firestore';
 import {
@@ -72,6 +73,7 @@ export {
   updateDoc,
   doc,
   deleteDoc,
+  deleteField,
   writeBatch,
 };
 
