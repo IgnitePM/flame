@@ -488,6 +488,70 @@ export function markPrimaryTodoDoneAcrossCycles(
   return { cycles: next, touched };
 }
 
+/**
+ * End a recurring series: remove every open instance across all cycles and
+ * strip the recurring flag from completed instances so they remain as history
+ * but stop acting as templates for future occurrences.
+ */
+export function removeRecurringSeriesFromAllCycles(cycles, categoryKey, seriesId) {
+  const rid = String(seriesId || '').trim();
+  if (!rid) return { cycles: cycles || {}, touched: false };
+
+  const next = { ...(cycles || {}) };
+  let touched = false;
+
+  for (const [cycleKey, cycleData] of Object.entries(next)) {
+    if (!cycleData || typeof cycleData !== 'object') continue;
+    const cat = cycleData[categoryKey];
+    if (!cat || !Array.isArray(cat.items)) continue;
+
+    let catTouched = false;
+    const items = [];
+    for (const it of cat.items) {
+      const matches = it?.recurring && stableRecurringSeriesId(it) === rid;
+      if (!matches) {
+        items.push(it);
+        continue;
+      }
+      catTouched = true;
+      if (it.done) {
+        // Keep completed history, but stop it from templating new occurrences.
+        items.push({ ...it, recurring: false, seriesEnded: true });
+      }
+      // Open instances are dropped entirely.
+    }
+
+    if (catTouched) {
+      touched = true;
+      next[cycleKey] = {
+        ...cycleData,
+        [categoryKey]: { ...cat, items },
+      };
+    }
+  }
+
+  return { cycles: next, touched };
+}
+
+/**
+ * Next occurrence of an item's recurrence after `afterMs`, cloned and ready to
+ * insert. Used when deleting the only live instance of a series "occurrence
+ * only" — without re-seeding, the series would silently end.
+ */
+export function seedNextRecurringOccurrence(item, afterMs, newTodoId) {
+  if (!item?.recurring) return null;
+  const rec = effectiveRecurrence(item);
+  if (!rec?.type) return null;
+  const base = Number(afterMs || item.dueDate || Date.now());
+  const anchors = listRecurringAnchorsInWindow(
+    rec,
+    base + 86400000,
+    base + 400 * 86400000,
+  );
+  if (!anchors.length) return null;
+  return cloneRecurringInstanceFromTemplate(item, anchors[0], newTodoId);
+}
+
 /** Remove a primary task id from one category across every stored billing cycle. */
 export function removeTodoItemFromAllCycles(
   cycles,

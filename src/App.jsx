@@ -91,7 +91,9 @@ import {
   projectSubtasksForNewRecurringPrimaryCycle,
   reconcileRecurringTodoInstances,
   recurringAnchorKey,
+  removeRecurringSeriesFromAllCycles,
   removeTodoItemFromAllCycles,
+  seedNextRecurringOccurrence,
   subtasksForCarryover,
 } from './utils/recurringTodoMaterialize.js';
 import { canMarkParentTodoDone } from './utils/todoSubtasks.js';
@@ -2039,7 +2041,13 @@ export default function App() {
 
   /** Delete a client task (or sub-task) in one Firestore write; removes primary tasks from all cycles. */
   const deleteClientTodoItem = useCallback(
-    async (clientId, cycleStart, categoryKey, itemId, { subtaskId } = {}) => {
+    async (
+      clientId,
+      cycleStart,
+      categoryKey,
+      itemId,
+      { subtaskId, scope = 'occurrence' } = {},
+    ) => {
       const client = resolveClient(clientId);
       if (!client?.id) return false;
 
@@ -2062,6 +2070,28 @@ export default function App() {
       const item = (catTodo.items || []).find((i) => i?.id === itemId);
       if (!item) return false;
 
+      let cycles = ensureCurrentCycleTodoData(client, cycleStart);
+
+      // Recurring + "delete all future": end the whole series everywhere.
+      if (item.recurring && scope === 'series') {
+        const rid = String(item.recurringId || item.id || '');
+        const { cycles: endedCycles, touched } = removeRecurringSeriesFromAllCycles(
+          cycles,
+          categoryKey,
+          rid,
+        );
+        if (!touched) return false;
+        const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(
+          client,
+          endedCycles,
+        );
+        await updateDoc(doc(db, 'clients', client.id), {
+          todoCycles: endedCycles,
+          ...teamAccessPatch,
+        });
+        return true;
+      }
+
       let recurringSkipKey = '';
       if (item.recurring) {
         recurringSkipKey = recurringAnchorKey(
@@ -2070,7 +2100,6 @@ export default function App() {
         );
       }
 
-      let cycles = ensureCurrentCycleTodoData(client, cycleStart);
       const { cycles: strippedCycles, removed } = removeTodoItemFromAllCycles(
         cycles,
         categoryKey,
@@ -2087,6 +2116,38 @@ export default function App() {
           categoryKey,
           recurringSkipKey,
         );
+      }
+
+      // Occurrence-only delete of a recurring task: if this was the last live
+      // instance of the series anywhere, re-seed the next occurrence so the
+      // series keeps going (otherwise it would silently end).
+      if (item.recurring && scope === 'occurrence') {
+        const rid = String(item.recurringId || item.id || '');
+        const seriesStillAlive = Object.values(cycles).some((cycleData) => {
+          const cat = cycleData?.[categoryKey];
+          return (cat?.items || []).some(
+            (row) =>
+              row?.recurring && String(row.recurringId || row.id || '') === rid,
+          );
+        });
+        if (!seriesStillAlive) {
+          const fresh = seedNextRecurringOccurrence(
+            item,
+            Number(item.dueDate || Date.now()),
+            newRecurringTodoRowId,
+          );
+          if (fresh) {
+            const cycleKey = String(cycleStart);
+            const cat = cycles[cycleKey]?.[categoryKey] || {
+              closed: false,
+              items: [],
+            };
+            cycles[cycleKey] = {
+              ...(cycles[cycleKey] || {}),
+              [categoryKey]: { ...cat, items: [...(cat.items || []), fresh] },
+            };
+          }
+        }
       }
 
       const period = getBillingPeriod(client.billingDay || 1, 0);

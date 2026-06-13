@@ -1653,6 +1653,25 @@ const AdminDashboard = ({
     );
     if (!ok) return;
 
+    // Recurring task: deleting one occurrence keeps the series going, so ask
+    // whether they meant to end the whole series.
+    let deleteScope = 'occurrence';
+    if (!subtaskId && getTodoStateForCycle) {
+      const todoStateNow = getTodoStateForCycle(client, cycleStart);
+      const itemNow = (todoStateNow[categoryKey]?.items || []).find(
+        (i) => i?.id === itemId,
+      );
+      if (itemNow?.recurring) {
+        deleteScope = window.confirm(
+          'This is a recurring task.\n\n' +
+            'OK — Delete this occurrence AND all future occurrences (ends the series).\n' +
+            'Cancel — Delete only this occurrence; future ones still appear.',
+        )
+          ? 'series'
+          : 'occurrence';
+      }
+    }
+
     setTodoSaving(true);
     try {
       if (deleteClientTodoItem) {
@@ -1661,7 +1680,7 @@ const AdminDashboard = ({
           cycleStart,
           categoryKey,
           itemId,
-          { subtaskId },
+          { subtaskId, scope: deleteScope },
         );
         if (deleted) setTodoEditOptionsTarget(null);
         return;
