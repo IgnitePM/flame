@@ -82,6 +82,7 @@ import TaskLogSessionDetail from './TaskLogSessionDetail.jsx';
 import TodoItemAttachments from './TodoItemAttachments.jsx';
 import PayrollView from './PayrollView.jsx';
 import SlackNotificationsCard from './SlackNotificationsCard.jsx';
+import TodoDeleteConfirmModal from './TodoDeleteConfirmModal.jsx';
 import {
   exportClientCyclePDF,
   exportClientInvoicePDF,
@@ -1212,6 +1213,7 @@ const AdminDashboard = ({
   const [todoAddOptionsModalCatKey, setTodoAddOptionsModalCatKey] = useState(null);
   /** Existing to-do row: which item's due/recurrence is being edited in the Options modal. */
   const [todoEditOptionsTarget, setTodoEditOptionsTarget] = useState(null);
+  const [todoDeletePrompt, setTodoDeletePrompt] = useState(null);
   const [todoEditOptionsTitle, setTodoEditOptionsTitle] = useState('');
   const [todoEditOptionsDue, setTodoEditOptionsDue] = useState('');
   const [todoEditOptionsRecurrence, setTodoEditOptionsRecurrence] = useState('none');
@@ -1627,49 +1629,52 @@ const AdminDashboard = ({
     }
   };
 
-  const deleteTodoEditOptionsTarget = async () => {
+  const openTodoDeleteConfirm = () => {
     if (
       !todoEditOptionsTarget ||
       (!deleteClientTodoItem && !updateClientTodo)
     ) {
-      setTodoEditOptionsTarget(null);
       return;
     }
     const { clientId, cycleStart, categoryKey, itemId, subtaskId } =
       todoEditOptionsTarget;
     const client = clients.find((cl) => cl.id === clientId);
-    if (!client) {
-      setTodoEditOptionsTarget(null);
-      return;
-    }
+    if (!client) return;
     if (isCycleLocked(client, cycleStart)) {
       setTodoEditOptionsTarget(null);
       return;
     }
-    const ok = window.confirm(
-      subtaskId
-        ? 'Delete this sub-task permanently?'
-        : 'Delete this task permanently?',
-    );
-    if (!ok) return;
 
-    // Recurring task: deleting one occurrence keeps the series going, so ask
-    // whether they meant to end the whole series.
-    let deleteScope = 'occurrence';
+    let isRecurring = false;
+    let taskTitle = todoEditOptionsTitle || '';
     if (!subtaskId && getTodoStateForCycle) {
       const todoStateNow = getTodoStateForCycle(client, cycleStart);
       const itemNow = (todoStateNow[categoryKey]?.items || []).find(
         (i) => i?.id === itemId,
       );
-      if (itemNow?.recurring) {
-        deleteScope = window.confirm(
-          'This is a recurring task.\n\n' +
-            'OK — Delete this occurrence AND all future occurrences (ends the series).\n' +
-            'Cancel — Delete only this occurrence; future ones still appear.',
-        )
-          ? 'series'
-          : 'occurrence';
-      }
+      isRecurring = !!itemNow?.recurring;
+      if (!taskTitle && itemNow?.text) taskTitle = itemNow.text;
+    }
+
+    setTodoDeletePrompt({
+      clientId,
+      cycleStart,
+      categoryKey,
+      itemId,
+      subtaskId,
+      isRecurring,
+      taskTitle,
+    });
+  };
+
+  const confirmTodoDelete = async (scope = 'occurrence') => {
+    if (!todoDeletePrompt) return;
+    const { clientId, cycleStart, categoryKey, itemId, subtaskId } =
+      todoDeletePrompt;
+    const client = clients.find((cl) => cl.id === clientId);
+    if (!client) {
+      setTodoDeletePrompt(null);
+      return;
     }
 
     setTodoSaving(true);
@@ -1680,13 +1685,17 @@ const AdminDashboard = ({
           cycleStart,
           categoryKey,
           itemId,
-          { subtaskId, scope: deleteScope },
+          { subtaskId, scope },
         );
-        if (deleted) setTodoEditOptionsTarget(null);
+        if (deleted) {
+          setTodoDeletePrompt(null);
+          setTodoEditOptionsTarget(null);
+        }
         return;
       }
 
       if (!getTodoStateForCycle) {
+        setTodoDeletePrompt(null);
         setTodoEditOptionsTarget(null);
         return;
       }
@@ -1695,6 +1704,7 @@ const AdminDashboard = ({
       const list = catTodo.items || [];
       const item = list.find((i) => i.id === itemId);
       if (!item) {
+        setTodoDeletePrompt(null);
         setTodoEditOptionsTarget(null);
         return;
       }
@@ -1723,11 +1733,14 @@ const AdminDashboard = ({
         items: nextList,
         skippedRecurringAnchors: nextSkippedAnchors,
       });
+      setTodoDeletePrompt(null);
       setTodoEditOptionsTarget(null);
     } finally {
       setTodoSaving(false);
     }
   };
+
+  const deleteTodoEditOptionsTarget = openTodoDeleteConfirm;
 
   const normalizeTodoAssignees = (item) =>
     collectEffectiveAssigneesForTodoTree(item, user?.email);
@@ -7491,6 +7504,16 @@ const AdminDashboard = ({
           </div>
         </div>
       )}
+
+      <TodoDeleteConfirmModal
+        open={!!todoDeletePrompt}
+        onClose={() => setTodoDeletePrompt(null)}
+        onConfirm={confirmTodoDelete}
+        isRecurring={!!todoDeletePrompt?.isRecurring}
+        isSubtask={!!todoDeletePrompt?.subtaskId}
+        taskTitle={todoDeletePrompt?.taskTitle || ''}
+        saving={todoSaving}
+      />
 
       {todoAddOptionsModalCatKey && (
         <div className="fixed inset-0 z-[150] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">

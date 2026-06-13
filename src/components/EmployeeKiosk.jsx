@@ -40,6 +40,7 @@ import {
 } from '../utils/todoFilters.js';
 import { safeDisplayForReact } from '../utils/safeReactText.js';
 import RetainerCategoryStats from './RetainerCategoryStats.jsx';
+import TodoDeleteConfirmModal from './TodoDeleteConfirmModal.jsx';
 import {
   filterClientsForTeamMember,
   teamMemberCanViewClient,
@@ -179,6 +180,7 @@ const EmployeeKiosk = ({
   const [personalOptionsRecurrence, setPersonalOptionsRecurrence] =
     React.useState('none');
   const [clientTodoEditTarget, setClientTodoEditTarget] = React.useState(null);
+  const [clientTodoDeletePrompt, setClientTodoDeletePrompt] = React.useState(null);
   const [clientTodoEditTitle, setClientTodoEditTitle] = React.useState('');
   const [clientTodoEditDue, setClientTodoEditDue] = React.useState('');
   const [clientTodoEditRecurrence, setClientTodoEditRecurrence] =
@@ -474,50 +476,53 @@ const EmployeeKiosk = ({
     }
   };
 
-  const deleteClientTodoEditTarget = async () => {
+  const openClientTodoDeleteConfirm = () => {
     if (
       !clientTodoEditTarget ||
       (!deleteClientTodoItem && !updateClientTodo)
     ) {
-      setClientTodoEditTarget(null);
       return;
     }
     const { clientId, cycleStart, categoryKey, itemId, subtaskId } =
       clientTodoEditTarget;
     const client = (clientsFull || []).find((cl) => cl.id === clientId);
-    if (!client) {
-      setClientTodoEditTarget(null);
-      return;
-    }
+    if (!client) return;
     if (isCycleLocked(client, cycleStart)) {
       window.alert('This billing cycle is locked.');
       setClientTodoEditTarget(null);
       return;
     }
-    const ok = window.confirm(
-      subtaskId
-        ? 'Delete this sub-task permanently?'
-        : 'Delete this task permanently?',
-    );
-    if (!ok) return;
 
-    // Recurring task: deleting one occurrence keeps the series going, so ask
-    // whether they meant to end the whole series.
-    let deleteScope = 'occurrence';
+    let isRecurring = false;
+    let taskTitle = clientTodoEditTitle || '';
     if (!subtaskId && getTodoStateForCycle) {
       const todoStateNow = getTodoStateForCycle(client, cycleStart);
       const itemNow = (todoStateNow[categoryKey]?.items || []).find(
         (i) => i?.id === itemId,
       );
-      if (itemNow?.recurring) {
-        deleteScope = window.confirm(
-          'This is a recurring task.\n\n' +
-            'OK — Delete this occurrence AND all future occurrences (ends the series).\n' +
-            'Cancel — Delete only this occurrence; future ones still appear.',
-        )
-          ? 'series'
-          : 'occurrence';
-      }
+      isRecurring = !!itemNow?.recurring;
+      if (!taskTitle && itemNow?.text) taskTitle = itemNow.text;
+    }
+
+    setClientTodoDeletePrompt({
+      clientId,
+      cycleStart,
+      categoryKey,
+      itemId,
+      subtaskId,
+      isRecurring,
+      taskTitle,
+    });
+  };
+
+  const confirmClientTodoDelete = async (scope = 'occurrence') => {
+    if (!clientTodoDeletePrompt) return;
+    const { clientId, cycleStart, categoryKey, itemId, subtaskId } =
+      clientTodoDeletePrompt;
+    const client = (clientsFull || []).find((cl) => cl.id === clientId);
+    if (!client) {
+      setClientTodoDeletePrompt(null);
+      return;
     }
 
     setTodoSaving(true);
@@ -528,13 +533,17 @@ const EmployeeKiosk = ({
           cycleStart,
           categoryKey,
           itemId,
-          { subtaskId, scope: deleteScope },
+          { subtaskId, scope },
         );
-        if (deleted) setClientTodoEditTarget(null);
+        if (deleted) {
+          setClientTodoDeletePrompt(null);
+          setClientTodoEditTarget(null);
+        }
         return;
       }
 
       if (!getTodoStateForCycle) {
+        setClientTodoDeletePrompt(null);
         setClientTodoEditTarget(null);
         return;
       }
@@ -543,6 +552,7 @@ const EmployeeKiosk = ({
       const list = catTodo.items || [];
       const item = list.find((i) => i.id === itemId);
       if (!item) {
+        setClientTodoDeletePrompt(null);
         setClientTodoEditTarget(null);
         return;
       }
@@ -571,11 +581,14 @@ const EmployeeKiosk = ({
         items: nextList,
         skippedRecurringAnchors: nextSkippedAnchors,
       });
+      setClientTodoDeletePrompt(null);
       setClientTodoEditTarget(null);
     } finally {
       setTodoSaving(false);
     }
   };
+
+  const deleteClientTodoEditTarget = openClientTodoDeleteConfirm;
 
   const updateClientTodoAssignees = async (
     client,
@@ -3670,6 +3683,16 @@ const EmployeeKiosk = ({
           </div>
         </div>
       )}
+
+      <TodoDeleteConfirmModal
+        open={!!clientTodoDeletePrompt}
+        onClose={() => setClientTodoDeletePrompt(null)}
+        onConfirm={confirmClientTodoDelete}
+        isRecurring={!!clientTodoDeletePrompt?.isRecurring}
+        isSubtask={!!clientTodoDeletePrompt?.subtaskId}
+        taskTitle={clientTodoDeletePrompt?.taskTitle || ''}
+        saving={todoSaving}
+      />
 
       {idleFailsafeOpen && activeShift && (
         <div className="fixed inset-0 z-[200] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
