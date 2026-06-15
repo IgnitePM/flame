@@ -76,6 +76,8 @@ import {
 import ClientPortal from './components/ClientPortal.jsx';
 import EmployeeKiosk from './components/EmployeeKiosk.jsx';
 import AdminDashboard from './components/AdminDashboard.jsx';
+import DurationSlider from './components/DurationSlider.jsx';
+import { getTaskDurationHours, getTaskEmployeeName } from './utils/taskLogDisplay.js';
 import { buildTeamAccessMergeForTodoAssignees } from './utils/teamClientAccess.js';
 import { isClientActiveForWork } from './utils/clientActiveForWork.js';
 import {
@@ -2354,16 +2356,34 @@ export default function App() {
       ? formatMsForDatetimeLocal(item.clockOutTime)
       : '';
     if (type === 'shift') {
-      setEditValues({ ...item, clockInDate, clockOutDate });
+      const rawHours = getShiftDuration(item) / 3600000;
+      const steppedHours = Math.min(12, Math.max(0, Math.round(rawHours * 4) / 4));
+      const origIn = Number(item.clockInTime || 0);
+      const origOut = Number(item.clockOutTime || 0);
+      const origDuration = Number(item.duration ?? item.totalSavedDuration ?? 0);
+      const breakMs =
+        origIn && origOut && origOut > origIn && origDuration > 0
+          ? Math.max(0, origOut - origIn - origDuration)
+          : 0;
+      setEditValues({
+        ...item,
+        clockInDate,
+        clockOutDate,
+        editDurationHours: steppedHours || (rawHours > 0 ? 0.25 : 0),
+        editBreakMs: breakMs,
+      });
       return;
     }
     const billingTarget = item.projectId
       ? `project_${item.projectId}`
       : `retainer_${item.projectName || ''}`;
+    const rawHours = getTaskDurationHours(item, getTaskDuration);
+    const steppedHours = Math.min(12, Math.max(0, Math.round(rawHours * 4) / 4));
     setEditValues({
       ...item,
       clockInDate,
       clockOutDate,
+      editDurationHours: steppedHours || (rawHours > 0 ? 0.25 : 0),
       billingTarget,
       clientName: item.clientName || '',
     });
@@ -2383,32 +2403,21 @@ export default function App() {
     }
     updates.clockInTime = clockInMs;
 
-    if (editValues.clockOutDate) {
-      const clockOutMs = parseDatetimeLocalToMs(editValues.clockOutDate);
-      if (!Number.isFinite(clockOutMs)) {
-        window.alert('Clock out time is invalid. Use the date and time picker.');
-        return;
-      }
-      if (clockOutMs <= clockInMs) {
-        window.alert('Clock out must be after clock in.');
-        return;
-      }
-      updates.clockOutTime = clockOutMs;
-      // Recorded duration excludes breaks. Keep the original break time
-      // instead of flattening it back into billable time when the window
-      // is edited.
-      const original = (editingItem.type === 'shift' ? timesheets : taskLogs).find(
-        (r) => r.id === editingItem.id,
-      );
-      const origIn = Number(original?.clockInTime || 0);
-      const origOut = Number(original?.clockOutTime || 0);
-      const origDuration = Number(original?.duration ?? original?.totalSavedDuration ?? 0);
-      const breakMs =
-        origIn && origOut && origOut > origIn && origDuration > 0
-          ? Math.max(0, origOut - origIn - origDuration)
-          : 0;
-      updates.duration = Math.max(0, clockOutMs - clockInMs - breakMs);
-      updates.totalSavedDuration = updates.duration;
+    const durationHours = Number(editValues.editDurationHours || 0);
+    if (durationHours <= 0) {
+      window.alert('Please set a duration greater than zero.');
+      return;
+    }
+    const durationMs = durationHours * 3600000;
+    if (editingItem.type === 'task') {
+      updates.clockOutTime = clockInMs + durationMs;
+      updates.duration = durationMs;
+      updates.totalSavedDuration = durationMs;
+    } else {
+      const breakMs = Number(editValues.editBreakMs || 0);
+      updates.duration = durationMs;
+      updates.totalSavedDuration = durationMs;
+      updates.clockOutTime = clockInMs + durationMs + breakMs;
     }
 
     if (editingItem.type === 'task') {
@@ -2429,6 +2438,8 @@ export default function App() {
 
     delete updates.clockInDate;
     delete updates.clockOutDate;
+    delete updates.editDurationHours;
+    delete updates.editBreakMs;
     delete updates.billingTarget;
     delete updates.id;
 
@@ -3254,19 +3265,44 @@ export default function App() {
             </div>
             
             <div className="p-8 space-y-6">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 text-left">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Clock In Time</label>
-                  <input type="datetime-local" value={editValues.clockInDate} onChange={e => setEditValues({...editValues, clockInDate: e.target.value})} className="w-full bg-slate-50 border-slate-200 border p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]" />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Clock Out Time</label>
-                  <input type="datetime-local" value={editValues.clockOutDate} onChange={e => setEditValues({...editValues, clockOutDate: e.target.value})} className="w-full bg-slate-50 border-slate-200 border p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]" />
-                </div>
+              <div className="space-y-2 text-left">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Clock In Time</label>
+                <input type="datetime-local" value={editValues.clockInDate} onChange={e => setEditValues({...editValues, clockInDate: e.target.value})} className="w-full bg-slate-50 border-slate-200 border p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]" />
               </div>
+
+              <div className="space-y-2 text-left rounded-2xl border border-slate-100 bg-slate-50/80 p-5">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 block mb-1">
+                  Duration (adjust hours logged)
+                </label>
+                <DurationSlider
+                  valueHours={editValues.editDurationHours ?? 0}
+                  onChange={(hours) => setEditValues({ ...editValues, editDurationHours: hours })}
+                  startTimeMs={parseDatetimeLocalToMs(editValues.clockInDate)}
+                  extraEndMs={editingItem.type === 'shift' ? Number(editValues.editBreakMs || 0) : 0}
+                  maxHours={12}
+                />
+                {editingItem.type === 'shift' && Number(editValues.editBreakMs || 0) > 0 && (
+                  <p className="text-[10px] font-bold text-slate-400 mt-2">
+                    Break time from the original shift is preserved and added to the end time shown above.
+                  </p>
+                )}
+              </div>
+
+              {editingItem.type === 'shift' && (
+                <p className="text-xs font-bold text-slate-500 text-left">
+                  Employee{' '}
+                  <span className="text-slate-800">{editValues.employeeName || '—'}</span>
+                </p>
+              )}
 
               {editingItem.type === 'task' && (
                 <div className="space-y-4 text-left">
+                  <p className="text-xs font-bold text-slate-500">
+                    Logged by{' '}
+                    <span className="text-slate-800">
+                      {getTaskEmployeeName(editValues, timesheets)}
+                    </span>
+                  </p>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Client</label>
                     <select

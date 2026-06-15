@@ -8,7 +8,7 @@ import {
 import { getEnabledRetainerCategoryNames } from '../utils/retainerCategories.js';
 import { safeDisplayForReact } from '../utils/safeReactText.js';
 import RetainerCategoryStats from './RetainerCategoryStats.jsx';
-import TaskLogSessionDetail from './TaskLogSessionDetail.jsx';
+import TaskLogTimesheetRow from './TaskLogTimesheetRow.jsx';
 
 function Section({ title, children, empty }) {
   return (
@@ -40,6 +40,10 @@ export default function ClientCycleActivityPanel({
   projects = [],
   formatTime,
   getTaskDuration,
+  timesheets = [],
+  startEditing,
+  onDeleteTask,
+  isRestrictedStaff = false,
   canGoPrev,
   canGoNext,
   onPrevCycle,
@@ -189,35 +193,26 @@ export default function ClientCycleActivityPanel({
         >
           <ul className="space-y-2 max-h-72 overflow-y-auto pr-1">
             {loggedTasks.map((task) => (
-              <li
-                key={task.id}
-                className="rounded-xl bg-white border border-slate-100 px-3 py-2"
-              >
-                <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
-                    <div className="text-xs font-black text-slate-800 break-words">
-                      {task.projectName || '—'}
-                      {task.projectId ? ' · Project' : ''}
-                    </div>
-                    <div className="text-[10px] font-bold text-slate-400">
-                      {new Date(task.clockInTime).toLocaleString(undefined, {
-                        dateStyle: 'medium',
-                        timeStyle: 'short',
-                      })}
-                    </div>
-                    <TaskLogSessionDetail
-                      task={task}
-                      client={client}
-                      getTodoStateForCycle={getTodoStateForCycle}
-                      getBillingPeriod={getBillingPeriod}
-                      todoCategoryKey={todoCategoryKey}
-                      compact
-                    />
-                  </div>
-                  <span className="text-sm font-black text-[#fd7414] font-mono shrink-0">
-                    {formatTime(getTaskDuration(task))}
-                  </span>
-                </div>
+              <li key={task.id}>
+                <TaskLogTimesheetRow
+                  task={task}
+                  client={client}
+                  timesheets={timesheets}
+                  getTodoStateForCycle={getTodoStateForCycle}
+                  getBillingPeriod={getBillingPeriod}
+                  todoCategoryKey={todoCategoryKey}
+                  formatTime={formatTime}
+                  getTaskDuration={getTaskDuration}
+                  headerLine={`${task.projectName || '—'}${task.projectId ? ' · Project' : ''}`}
+                  canEdit={!isRestrictedStaff && !!startEditing}
+                  canDelete={!isRestrictedStaff && !!onDeleteTask}
+                  onEdit={
+                    !isRestrictedStaff && startEditing
+                      ? (t) => startEditing('task', t)
+                      : undefined
+                  }
+                  onDelete={!isRestrictedStaff ? onDeleteTask : undefined}
+                />
               </li>
             ))}
           </ul>

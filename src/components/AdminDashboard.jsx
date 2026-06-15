@@ -79,6 +79,7 @@ import ClientFilesPanel from './ClientFilesPanel.jsx';
 import ClientCycleActivityPanel from './ClientCycleActivityPanel.jsx';
 import RetainerCategoryStats from './RetainerCategoryStats.jsx';
 import TaskLogSessionDetail from './TaskLogSessionDetail.jsx';
+import TaskLogTimesheetRow from './TaskLogTimesheetRow.jsx';
 import TodoItemAttachments from './TodoItemAttachments.jsx';
 import PayrollView from './PayrollView.jsx';
 import SlackNotificationsCard from './SlackNotificationsCard.jsx';
@@ -4356,6 +4357,16 @@ const AdminDashboard = ({
                         projects={projects}
                         formatTime={formatTime}
                         getTaskDuration={getTaskDuration}
+                        timesheets={timesheets}
+                        startEditing={startEditing}
+                        isRestrictedStaff={isRestrictedStaff}
+                        onDeleteTask={(task) =>
+                          setDeleteConfirm({
+                            collection: 'taskLogs',
+                            id: task.id,
+                            title: 'this task record',
+                          })
+                        }
                         canGoPrev={effectiveOffset > minCycleOffset}
                         canGoNext={offset < 0}
                         isCycleLocked={isCycleLocked(c, mStart)}
@@ -4410,47 +4421,34 @@ const AdminDashboard = ({
                                   {[...periodTasks]
                                     .sort((a, b) => a.clockInTime - b.clockInTime)
                                     .map((task) => (
-                                      <div
+                                      <TaskLogTimesheetRow
                                         key={task.id}
-                                        className="bg-white p-3 rounded-xl border border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2"
-                                      >
-                                        <div className="flex-1 min-w-0">
-                                          <span className="text-[10px] text-slate-400 font-bold">
-                                            {new Date(
-                                              task.clockInTime,
-                                            ).toLocaleDateString()}{' '}
-                                            • {task.projectName || '—'}
-                                          </span>
-                                          <TaskLogSessionDetail
-                                            task={task}
-                                            client={c}
-                                            getTodoStateForCycle={getTodoStateForCycle}
-                                            getBillingPeriod={getBillingPeriod}
-                                            todoCategoryKey={todoCategoryKey}
-                                            compact
-                                          />
-                                        </div>
-                                        <div className="flex items-center gap-2 shrink-0">
-                                          <span className="font-black text-sm text-[#fd7414] font-mono">
-                                            {formatTime(getTaskDuration(task))}
-                                          </span>
-                                          {!isRestrictedStaff && (
-                                          <button
-                                            onClick={() =>
-                                              setDeleteConfirm({
-                                                collection: 'taskLogs',
-                                                id: task.id,
-                                                title: 'this task record',
-                                              })
-                                            }
-                                            className="p-1.5 text-slate-300 hover:text-red-500 transition-colors"
-                                            type="button"
-                                          >
-                                            <Trash2 className="w-4 h-4" />
-                                          </button>
-                                          )}
-                                        </div>
-                                      </div>
+                                        task={task}
+                                        client={c}
+                                        timesheets={timesheets}
+                                        getTodoStateForCycle={getTodoStateForCycle}
+                                        getBillingPeriod={getBillingPeriod}
+                                        todoCategoryKey={todoCategoryKey}
+                                        formatTime={formatTime}
+                                        getTaskDuration={getTaskDuration}
+                                        canEdit={!isRestrictedStaff}
+                                        canDelete={!isRestrictedStaff}
+                                        onEdit={
+                                          !isRestrictedStaff
+                                            ? (t) => startEditing('task', t)
+                                            : undefined
+                                        }
+                                        onDelete={
+                                          !isRestrictedStaff
+                                            ? (t) =>
+                                                setDeleteConfirm({
+                                                  collection: 'taskLogs',
+                                                  id: t.id,
+                                                  title: 'this task record',
+                                                })
+                                            : undefined
+                                        }
+                                      />
                                     ))}
                                 </div>
                               </div>
@@ -4518,47 +4516,36 @@ const AdminDashboard = ({
                                           (p) => p.id === task.projectId,
                                         )?.title || 'Project';
                                       return (
-                                        <div
+                                        <TaskLogTimesheetRow
                                           key={task.id}
-                                          className="bg-white p-3 rounded-xl border border-slate-100 border-l-4 border-l-violet-300 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2"
-                                        >
-                                          <div className="flex-1 min-w-0">
-                                            <span className="text-[10px] text-slate-400 font-bold">
-                                              {new Date(
-                                                task.clockInTime,
-                                              ).toLocaleDateString()}{' '}
-                                              • {projTitle}
-                                            </span>
-                                            <TaskLogSessionDetail
-                                              task={task}
-                                              client={c}
-                                              getTodoStateForCycle={getTodoStateForCycle}
-                                              getBillingPeriod={getBillingPeriod}
-                                              todoCategoryKey={todoCategoryKey}
-                                              compact
-                                            />
-                                          </div>
-                                          <div className="flex items-center gap-2 shrink-0">
-                                            <span className="font-black text-sm text-[#fd7414] font-mono">
-                                              {formatTime(getTaskDuration(task))}
-                                            </span>
-                                            {!isRestrictedStaff && (
-                                            <button
-                                              onClick={() =>
-                                                setDeleteConfirm({
-                                                  collection: 'taskLogs',
-                                                  id: task.id,
-                                                  title: 'this task record',
-                                                })
-                                              }
-                                              className="p-1.5 text-slate-300 hover:text-red-500 transition-colors"
-                                              type="button"
-                                            >
-                                              <Trash2 className="w-4 h-4" />
-                                            </button>
-                                            )}
-                                          </div>
-                                        </div>
+                                          task={task}
+                                          client={c}
+                                          timesheets={timesheets}
+                                          getTodoStateForCycle={getTodoStateForCycle}
+                                          getBillingPeriod={getBillingPeriod}
+                                          todoCategoryKey={todoCategoryKey}
+                                          formatTime={formatTime}
+                                          getTaskDuration={getTaskDuration}
+                                          headerLine={`${new Date(task.clockInTime).toLocaleDateString()} • ${projTitle}`}
+                                          borderAccent="border-l-4 border-l-violet-300"
+                                          canEdit={!isRestrictedStaff}
+                                          canDelete={!isRestrictedStaff}
+                                          onEdit={
+                                            !isRestrictedStaff
+                                              ? (t) => startEditing('task', t)
+                                              : undefined
+                                          }
+                                          onDelete={
+                                            !isRestrictedStaff
+                                              ? (t) =>
+                                                  setDeleteConfirm({
+                                                    collection: 'taskLogs',
+                                                    id: t.id,
+                                                    title: 'this task record',
+                                                  })
+                                              : undefined
+                                          }
+                                        />
                                       );
                                     })}
                                 </div>
@@ -5516,41 +5503,35 @@ const AdminDashboard = ({
                                               ) : (
                                                 <div className="space-y-2">
                                                   {categoryTasks.map((task) => (
-                                                    <div
+                                                    <TaskLogTimesheetRow
                                                       key={task.id}
-                                                      className="bg-white p-3 rounded-xl border border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2"
-                                                    >
-                                                      <div className="flex-1 min-w-0">
-                                                        <span className="text-[10px] text-slate-400 font-bold">
-                                                          {new Date(task.clockInTime).toLocaleDateString()}
-                                                        </span>
-                                                        <TaskLogSessionDetail
-                                                          task={task}
-                                                          client={c}
-                                                          getTodoStateForCycle={getTodoStateForCycle}
-                                                          getBillingPeriod={getBillingPeriod}
-                                                          todoCategoryKey={todoCategoryKey}
-                                                          compact
-                                                        />
-                                                      </div>
-                                                      <div className="flex items-center gap-2 shrink-0">
-                                                        <span className="font-black text-sm text-[#fd7414] font-mono">
-                                                          {formatTime(getTaskDuration(task))}
-                                                        </span>
-                                                        <button
-                                                          onClick={() =>
-                                                            setDeleteConfirm({
-                                                              collection: 'taskLogs',
-                                                              id: task.id,
-                                                              title: 'this task record',
-                                                            })
-                                                          }
-                                                          className="p-1.5 text-slate-300 hover:text-red-500 transition-colors"
-                                                        >
-                                                          <Trash2 className="w-4 h-4" />
-                                                        </button>
-                                                      </div>
-                                                    </div>
+                                                      task={task}
+                                                      client={c}
+                                                      timesheets={timesheets}
+                                                      getTodoStateForCycle={getTodoStateForCycle}
+                                                      getBillingPeriod={getBillingPeriod}
+                                                      todoCategoryKey={todoCategoryKey}
+                                                      formatTime={formatTime}
+                                                      getTaskDuration={getTaskDuration}
+                                                      headerLine={new Date(task.clockInTime).toLocaleDateString()}
+                                                      canEdit={!isRestrictedStaff}
+                                                      canDelete={!isRestrictedStaff}
+                                                      onEdit={
+                                                        !isRestrictedStaff
+                                                          ? (t) => startEditing('task', t)
+                                                          : undefined
+                                                      }
+                                                      onDelete={
+                                                        !isRestrictedStaff
+                                                          ? (t) =>
+                                                              setDeleteConfirm({
+                                                                collection: 'taskLogs',
+                                                                id: t.id,
+                                                                title: 'this task record',
+                                                              })
+                                                          : undefined
+                                                      }
+                                                    />
                                                   ))}
                                                 </div>
                                               )}
