@@ -1766,7 +1766,9 @@ const AdminDashboard = ({
     onChange,
     disabled,
     className = '',
+    tone = 'dark',
   }) => {
+    const isLight = tone === 'light';
     const cleaned = Array.isArray(value)
       ? value
           .map((e) => String(e || '').trim().toLowerCase())
@@ -1779,7 +1781,8 @@ const AdminDashboard = ({
           ? cleaned[0]
           : `${cleaned.length} assignees`;
     const isOpen = assigneePickerOpenKey === openKey;
-    const preferDropUp = String(openKey).includes('todo_add__');
+    const preferDropUp =
+      String(openKey).includes('todo_add__') || String(openKey).includes('ai_todo__');
     return (
       <div className={`relative ${className}`}>
         <button
@@ -1788,19 +1791,29 @@ const AdminDashboard = ({
           onClick={() =>
             setAssigneePickerOpenKey((prev) => (prev === openKey ? null : openKey))
           }
-          className="min-w-[160px] max-w-[240px] rounded-xl border border-white/20 bg-zinc-950/95 px-3 py-2 text-xs font-black text-white outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px] flex items-center justify-between gap-2 disabled:opacity-40"
+          className={
+            isLight
+              ? 'w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px] flex items-center justify-between gap-2 disabled:opacity-40'
+              : 'min-w-[160px] max-w-[240px] rounded-xl border border-white/20 bg-zinc-950/95 px-3 py-2 text-xs font-black text-white outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px] flex items-center justify-between gap-2 disabled:opacity-40'
+          }
           title="Assign to users"
         >
           <span className="truncate">{summary}</span>
-          <ChevronDown className="w-4 h-4 shrink-0 text-zinc-400" />
+          <ChevronDown className={`w-4 h-4 shrink-0 ${isLight ? 'text-slate-400' : 'text-zinc-400'}`} />
         </button>
         {isOpen && (
           <div
-            className={`absolute right-0 z-[120] w-[320px] max-w-[min(92vw,320px)] rounded-2xl border border-white/20 bg-zinc-950 p-3 shadow-xl ${
-              preferDropUp ? 'bottom-full mb-2' : 'top-full mt-2'
-            }`}
+            className={`absolute right-0 z-[120] w-[320px] max-w-[min(92vw,320px)] rounded-2xl border p-3 shadow-xl ${
+              isLight
+                ? 'border-slate-200 bg-white'
+                : 'border-white/20 bg-zinc-950'
+            } ${preferDropUp ? 'bottom-full mb-2' : 'top-full mt-2'}`}
           >
-            <div className="mb-2 text-[10px] font-black uppercase tracking-widest text-zinc-400">
+            <div
+              className={`mb-2 text-[10px] font-black uppercase tracking-widest ${
+                isLight ? 'text-slate-400' : 'text-zinc-400'
+              }`}
+            >
               Assign to
             </div>
             <div className="max-h-[240px] space-y-1 overflow-y-auto pr-1">
@@ -1809,7 +1822,9 @@ const AdminDashboard = ({
                 return (
                   <label
                     key={email}
-                    className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-2 hover:bg-white/10"
+                    className={`flex cursor-pointer items-center gap-2 rounded-xl px-2 py-2 ${
+                      isLight ? 'hover:bg-slate-50' : 'hover:bg-white/10'
+                    }`}
                   >
                     <input
                       type="checkbox"
@@ -1824,7 +1839,11 @@ const AdminDashboard = ({
                         onChange(sorted);
                       }}
                     />
-                    <span className="truncate text-xs font-bold text-zinc-100">
+                    <span
+                      className={`truncate text-xs font-bold ${
+                        isLight ? 'text-slate-800' : 'text-zinc-100'
+                      }`}
+                    >
                       {email}
                     </span>
                   </label>
@@ -1834,7 +1853,11 @@ const AdminDashboard = ({
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
-                className="rounded-xl bg-zinc-800 px-3 py-2 text-xs font-black uppercase tracking-widest text-zinc-200 hover:bg-zinc-700"
+                className={
+                  isLight
+                    ? 'rounded-xl bg-slate-100 px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-600 hover:bg-slate-200'
+                    : 'rounded-xl bg-zinc-800 px-3 py-2 text-xs font-black uppercase tracking-widest text-zinc-200 hover:bg-zinc-700'
+                }
                 onClick={() => onChange([])}
               >
                 Clear
@@ -5131,6 +5154,10 @@ const AdminDashboard = ({
                                       category: String(
                                         t.category || 'General / Unclassified',
                                       ),
+                                      assigneeEmails: [
+                                        String(user?.email || '').trim().toLowerCase(),
+                                      ].filter(Boolean),
+                                      dueDateInput: '',
                                     })).filter((t) => t.text);
 
                                     setAiTodoCandidates(normalized);
@@ -5183,11 +5210,11 @@ const AdminDashboard = ({
                                   </button>
                                 </div>
 
-                                <div className="max-h-[280px] overflow-y-auto space-y-2 pr-2">
+                                <div className="max-h-[360px] overflow-y-auto space-y-2 pr-2">
                                   {aiTodoCandidates.map((t) => (
-                                    <label
+                                    <div
                                       key={t.id}
-                                      className="flex items-start gap-3 bg-slate-50 border border-slate-200 rounded-2xl p-3 hover:bg-slate-100 transition-colors cursor-pointer"
+                                      className="flex items-start gap-3 bg-slate-50 border border-slate-200 rounded-2xl p-3 hover:bg-slate-100 transition-colors"
                                     >
                                       <input
                                         type="checkbox"
@@ -5198,17 +5225,59 @@ const AdminDashboard = ({
                                             [t.id]: !prev[t.id],
                                           }))
                                         }
-                                        className="mt-1"
+                                        className="mt-1 shrink-0"
                                       />
-                                      <div className="flex-1 min-w-0">
-                                        <div className="text-sm font-black text-slate-900 line-clamp-3">
+                                      <div className="flex-1 min-w-0 space-y-2">
+                                        <div className="text-sm font-black text-slate-900">
                                           {t.text}
                                         </div>
-                                        <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1">
+                                        <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
                                           Category: {t.category}
                                         </div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                                          <div className="space-y-1">
+                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                              Due date
+                                            </label>
+                                            <input
+                                              type="date"
+                                              value={t.dueDateInput || ''}
+                                              onChange={(e) =>
+                                                setAiTodoCandidates((prev) =>
+                                                  prev.map((row) =>
+                                                    row.id === t.id
+                                                      ? {
+                                                          ...row,
+                                                          dueDateInput: e.target.value,
+                                                        }
+                                                      : row,
+                                                  ),
+                                                )
+                                              }
+                                              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                            />
+                                          </div>
+                                          <div className="space-y-1">
+                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                              Assign to
+                                            </label>
+                                            {renderAssigneeMultiSelect({
+                                              openKey: `ai_todo__${t.id}`,
+                                              value: t.assigneeEmails || [],
+                                              tone: 'light',
+                                              onChange: (emails) =>
+                                                setAiTodoCandidates((prev) =>
+                                                  prev.map((row) =>
+                                                    row.id === t.id
+                                                      ? { ...row, assigneeEmails: emails }
+                                                      : row,
+                                                  ),
+                                                ),
+                                            })}
+                                          </div>
+                                        </div>
                                       </div>
-                                    </label>
+                                    </div>
                                   ))}
                                 </div>
                               </div>
@@ -5280,8 +5349,14 @@ const AdminDashboard = ({
                                             pinned: false,
                                             recurring: false,
                                             recurringId: null,
-                                            dueDate: null,
-                                            assigneeEmails: [String(user?.email || '').toLowerCase()].filter(Boolean),
+                                            dueDate: parseDateInputToMs(p.dueDateInput),
+                                            assigneeEmails: Array.isArray(p.assigneeEmails)
+                                              ? p.assigneeEmails
+                                                  .map((e) =>
+                                                    String(e || '').trim().toLowerCase(),
+                                                  )
+                                                  .filter(Boolean)
+                                              : [],
                                             recurrence: null,
                                           };
                                         })

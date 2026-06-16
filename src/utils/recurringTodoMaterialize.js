@@ -113,6 +113,168 @@ function shouldSubtaskPersistIntoNextCycle(sub) {
   return !!sub?.recurring || !sub?.done;
 }
 
+/** Best recurring template per series — prefer open instances, then latest due date. */
+export function collectRecurringSeriesTemplates(items) {
+  const map = new Map();
+  for (const it of items || []) {
+    if (!it?.recurring) continue;
+    const rid = stableRecurringSeriesId(it);
+    if (!rid) continue;
+    const prev = map.get(rid);
+    if (!prev) {
+      map.set(rid, it);
+      continue;
+    }
+    const prevOpen = !prev.done;
+    const itOpen = !it.done;
+    if (itOpen && !prevOpen) {
+      map.set(rid, it);
+      continue;
+    }
+    if (!itOpen && prevOpen) continue;
+    if (Number(it.dueDate || 0) > Number(prev.dueDate || 0)) {
+      map.set(rid, it);
+    }
+  }
+  return [...map.values()];
+}
+
+/** True when a recurring row already represents this series on the anchor day. */
+export function recurringInstanceExistsForAnchor(items, recurringId, anchorMs) {
+  const rid = String(recurringId || '').trim();
+  if (!rid) return false;
+  const anchor = Number(anchorMs || 0);
+  return (items || []).some((it) => {
+    if (!it?.recurring) return false;
+    if (stableRecurringSeriesId(it) !== rid) return false;
+    if (anchor && it.dueDate) return sameCalendarDay(it.dueDate, anchor);
+  });
+}
+
+function buildRecurringSeedRow(template, cycleStartMs, newTodoId) {
+  const effectiveRecurrence =
+    template.recurrence ||
+    (template.dueDate
+      ? {
+          type: 'monthly_fixed_day',
+          dayOfMonth: new Date(template.dueDate).getDate(),
+        }
+      : null);
+  const newParentDue = computeRecurringDueDate(effectiveRecurrence, cycleStartMs);
+  return {
+    id: newTodoId(),
+    text: template.text,
+    done: false,
+    doneAt: null,
+    pinned: false,
+    recurring: true,
+    recurringId: template.recurringId || template.id,
+    assigneeEmails: Array.isArray(template.assigneeEmails)
+      ? template.assigneeEmails.filter(Boolean)
+      : [],
+    recurrence: template.recurrence || effectiveRecurrence,
+    dueDate: newParentDue,
+    subtasks: projectSubtasksForNewRecurringPrimaryCycle(
+      template,
+      newParentDue,
+      cycleStartMs,
+    ),
+  };
+}
+
+/** One fresh recurring occurrence per series for the target billing cycle. */
+export function buildRecurringSeedsForCycle(templates, cycleStartMs, newTodoId) {
+  return (templates || [])
+    .map((template) => buildRecurringSeedRow(template, cycleStartMs, newTodoId))
+    .filter((seed) => !!seed.dueDate || !!seed.recurrence?.type);
+}
+
+/**
+ * Merge carry-forward open tasks and missing recurring seeds into one category.
+ * Safe to call when the cycle bucket already exists (backfills gaps).
+ */
+export function materializeCategoryTodoFromPrev(
+  prevCat,
+  existingCat,
+  cycleStartMs,
+  newTodoId,
+) {
+  const prevItems = prevCat?.items || [];
+  const existing = existingCat || { closed: false, items: [] };
+  let items = [...(existing.items || [])];
+  let changed = false;
+
+  const existingIds = new Set(items.map((item) => item?.id).filter(Boolean));
+  for (const item of prevItems.filter((row) => row && !row.done)) {
+    if (!item.id || existingIds.has(item.id)) continue;
+    items.push(carryPrimaryTodoItemFromPrevCycle(item));
+    existingIds.add(item.id);
+    changed = true;
+  }
+
+  const templates = collectRecurringSeriesTemplates(prevItems);
+  const seeds = buildRecurringSeedsForCycle(templates, cycleStartMs, newTodoId);
+  const dedupedSeeds = dedupeRecurringSeedsAgainstCarried(
+    items.filter((row) => row && !row.done),
+    seeds,
+  );
+  const seedsToAdd = dedupedSeeds.filter((seed) => {
+    const rid = stableRecurringSeriesId(seed);
+    const anchor = Number(seed.dueDate || 0);
+    if (!rid || !anchor) return true;
+    return !recurringInstanceExistsForAnchor(items, rid, anchor);
+  });
+
+  if (seedsToAdd.length) {
+    items = [...items, ...seedsToAdd];
+    changed = true;
+  }
+
+  if (!changed) {
+    return { category: existing, changed: false };
+  }
+  return {
+    category: { ...existing, closed: false, items },
+    changed: true,
+  };
+}
+
+/**
+ * Carry open tasks and seed recurring occurrences for every category in a cycle.
+ */
+export function materializeCycleTodoFromPrev(
+  existingCycleData,
+  prevCycleData,
+  cycleStartMs,
+  newTodoId,
+  categoryKeys = [],
+) {
+  const prev = prevCycleData || {};
+  const existing = existingCycleData || {};
+  const keys = new Set([
+    ...Object.keys(existing),
+    ...Object.keys(prev),
+    ...categoryKeys,
+  ]);
+  const next = { ...existing };
+  let changed = false;
+
+  for (const catKey of keys) {
+    const { category, changed: catChanged } = materializeCategoryTodoFromPrev(
+      prev[catKey],
+      next[catKey],
+      cycleStartMs,
+      newTodoId,
+    );
+    if (catChanged) {
+      next[catKey] = category;
+      changed = true;
+    }
+  }
+
+  return { cycleData: changed ? next : existing, changed };
+}
+
 /** Keep incomplete and recurring sub-tasks when carrying a primary row forward. */
 export function subtasksForCarryover(parentItem) {
   return getSubtasks(parentItem)
@@ -327,14 +489,9 @@ export function reconcileRecurringTodoInstances(
     );
 
     const templatesByRid = new Map();
-    for (const it of items) {
-      if (!it || !it.recurring) continue;
+    for (const it of collectRecurringSeriesTemplates(items)) {
       const rid = stableRecurringSeriesId(it);
-      if (!rid) continue;
-      const prev = templatesByRid.get(rid);
-      if (!prev || Number(it.dueDate || 0) > Number(prev.dueDate || 0)) {
-        templatesByRid.set(rid, it);
-      }
+      if (rid) templatesByRid.set(rid, it);
     }
 
     let itemsMut = items;
@@ -349,12 +506,10 @@ export function reconcileRecurringTodoInstances(
         // An instance on the anchor day counts, and so does an open undated
         // instance of the same series — spawning next to it would just look
         // like a duplicate the user "can't get rid of".
-        const exists = itemsMut.some(
-          (it) =>
-            it &&
-            it.recurring &&
-            stableRecurringSeriesId(it) === stableRecurringSeriesId(template) &&
-            (sameCalendarDay(it.dueDate, anchorMs) || (!it.dueDate && !it.done)),
+        const exists = recurringInstanceExistsForAnchor(
+          itemsMut,
+          stableRecurringSeriesId(template),
+          anchorMs,
         );
         if (exists) continue;
         const fresh = cloneRecurringInstanceFromTemplate(template, anchorMs, newTodoId);
@@ -392,7 +547,12 @@ export function dedupeRecurringSeedsAgainstCarried(carriedItems, seedItems) {
     const rid = stableRecurringSeriesId(seed);
     const dues = rid ? carriedDuesByRid.get(rid) : null;
     if (!dues || !dues.length) return true;
-    if (dues.some((d) => !d)) return false; // open undated copy already carried
+    if (dues.some((d) => !d)) {
+      const seedDue = Number(seed.dueDate || 0);
+      // An undated open carry-over should not block a dated next occurrence.
+      if (!seedDue) return false;
+      return true;
+    }
     const seedDue = Number(seed.dueDate || 0);
     if (!seedDue) return false; // no computable occurrence; carried copy suffices
     return !dues.some((d) => sameCalendarDay(d, seedDue));

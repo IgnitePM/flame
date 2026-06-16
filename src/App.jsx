@@ -90,17 +90,14 @@ import {
 } from './utils/teamClientAccess.js';
 import {
   ensureRecurringSkipOnCategory,
-  computeRecurringDueDate,
-  dedupeRecurringSeedsAgainstCarried,
   markPrimaryTodoDoneAcrossCycles,
+  materializeCycleTodoFromPrev,
   mergeOpenItemsFromPrevCycle,
-  projectSubtasksForNewRecurringPrimaryCycle,
   reconcileRecurringTodoInstances,
   recurringAnchorKey,
   removeRecurringSeriesFromAllCycles,
   removeTodoItemFromAllCycles,
   seedNextRecurringOccurrence,
-  subtasksForCarryover,
 } from './utils/recurringTodoMaterialize.js';
 import { canMarkParentTodoDone } from './utils/todoSubtasks.js';
 import {
@@ -1802,6 +1799,22 @@ export default function App() {
   const carryoverCategoryKey = (cat) =>
     String(cat ?? '').replace(/[~*[\]/]/g, '_').replace(/\./g, '_');
 
+  const buildVirtualCycleTodoData = (client, cycleStart, prevData) => {
+    const categoryKeys = new Set([
+      ...getEnabledRetainerCategoryNames(client).map((cat) => todoCategoryKey(cat)),
+      todoCategoryKey(GENERAL_LABEL),
+      ...Object.keys(prevData),
+    ]);
+    const { cycleData } = materializeCycleTodoFromPrev(
+      {},
+      prevData,
+      cycleStart,
+      () => `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      Array.from(categoryKeys),
+    );
+    return cycleData;
+  };
+
   const getTodoStateForCycle = (client, cycleStart) => {
     const cycles = client.todoCycles || {};
     const currentCycleStart = getBillingPeriod(client.billingDay || 1, 0).start;
@@ -1810,165 +1823,44 @@ export default function App() {
       if (cycleStart !== currentCycleStart) return existing;
       const prevStart = getBillingPeriod(client.billingDay || 1, -1).start;
       const prevData = cycles[String(prevStart)] || {};
-      return mergeOpenItemsFromPrevCycle(existing, prevData);
+      const merged = mergeOpenItemsFromPrevCycle(existing, prevData);
+      const { cycleData } = materializeCycleTodoFromPrev(
+        merged,
+        prevData,
+        cycleStart,
+        () => `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      );
+      return cycleData;
     }
     if (cycleStart !== currentCycleStart) return {};
     const prevStart = getBillingPeriod(client.billingDay || 1, -1).start;
     const prevData = cycles[String(prevStart)] || {};
-    // Carry over *all* previously-existing category keys (including custom project
-    // task categories), not just retainer categories + General.
-    const categoryKeys = new Set([
-      ...getEnabledRetainerCategoryNames(client).map((cat) => todoCategoryKey(cat)),
-      todoCategoryKey(GENERAL_LABEL),
-      ...Object.keys(prevData),
-    ]);
-    const result = {};
-    Array.from(categoryKeys).forEach((ck) => {
-      const prevCat = prevData[ck];
-      const prevItems = prevCat?.items || [];
-      const carried = prevItems
-        // Carry forward all unfinished items, including unfinished recurring
-        // iterations, so overdue recurring instances remain visible.
-        .filter((i) => !i.done)
-        .map((i) => ({
-          ...i,
-          done: false,
-          pinned: false,
-          assigneeEmails: Array.isArray(i.assigneeEmails)
-            ? i.assigneeEmails.filter(Boolean)
-            : [],
-          subtasks: subtasksForCarryover(i),
-        }));
-      // Create exactly one new iteration per recurring series (recurringId).
-      // If multiple old unfinished recurring items exist, we still add only one
-      // new item for the next cycle while preserving all unfinished carryovers.
-      const recurringSeeds = Array.from(
-        prevItems
-          .filter((i) => !!i.recurring)
-          .reduce((acc, i) => {
-            const rid = String(i.recurringId || i.id || '');
-            if (!rid) return acc;
-            if (!acc.has(rid)) acc.set(rid, i);
-            return acc;
-          }, new Map())
-          .values(),
-      );
-      const recurring = recurringSeeds.map((i) => {
-          const effectiveRecurrence =
-            i.recurrence ||
-            (i.dueDate
-              ? {
-                  type: 'monthly_fixed_day',
-                  dayOfMonth: new Date(i.dueDate).getDate(),
-                }
-              : null);
-          const newParentDue = computeRecurringDueDate(effectiveRecurrence, cycleStart);
-          return {
-            id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-            text: i.text,
-            done: false,
-            doneAt: null,
-            pinned: false,
-            recurring: true,
-            recurringId: i.recurringId || i.id,
-            assigneeEmails: Array.isArray(i.assigneeEmails)
-              ? i.assigneeEmails.filter(Boolean)
-              : [],
-            recurrence: i.recurrence || effectiveRecurrence,
-            dueDate: newParentDue,
-            subtasks: projectSubtasksForNewRecurringPrimaryCycle(
-              i,
-              newParentDue,
-              cycleStart,
-            ),
-          };
-        });
-      // Don't seed a fresh instance when the carried-over open copy already
-      // represents the same occurrence (identical-looking duplicates).
-      const dedupedRecurring = dedupeRecurringSeedsAgainstCarried(carried, recurring);
-      result[ck] = { closed: false, items: [...carried, ...dedupedRecurring] };
-    });
-    return result;
+    return buildVirtualCycleTodoData(client, cycleStart, prevData);
   };
 
   const ensureCurrentCycleTodoData = (client, cycleStart) => {
     const cycles = { ...(client.todoCycles || {}) };
     const currentCycleStart = getBillingPeriod(client.billingDay || 1, 0).start;
     if (cycleStart !== currentCycleStart) return cycles;
-    if (cycles[String(cycleStart)]) return cycles;
+
     const prevStart = getBillingPeriod(client.billingDay || 1, -1).start;
     const prevData = cycles[String(prevStart)] || {};
-    // Ensure we create the current-cycle objects for any category keys that
-    // existed in the previous cycle (again, includes custom project to-dos).
-    const categoryKeys = new Set([
+    const categoryKeys = [
       ...getEnabledRetainerCategoryNames(client).map((cat) => todoCategoryKey(cat)),
       todoCategoryKey(GENERAL_LABEL),
       ...Object.keys(prevData),
-    ]);
-    cycles[String(cycleStart)] = {};
-    Array.from(categoryKeys).forEach((ck) => {
-      const prevCat = prevData[ck];
-      const prevItems = prevCat?.items || [];
-      const carried = prevItems
-        // Carry forward all unfinished items, including unfinished recurring
-        // iterations, so overdue recurring instances remain visible.
-        .filter((i) => !i.done)
-        .map((i) => ({
-          ...i,
-          done: false,
-          pinned: false,
-          assigneeEmails: Array.isArray(i.assigneeEmails)
-            ? i.assigneeEmails.filter(Boolean)
-            : [],
-          subtasks: subtasksForCarryover(i),
-        }));
-      // Create exactly one new iteration per recurring series (recurringId).
-      const recurringSeeds = Array.from(
-        prevItems
-          .filter((i) => !!i.recurring)
-          .reduce((acc, i) => {
-            const rid = String(i.recurringId || i.id || '');
-            if (!rid) return acc;
-            if (!acc.has(rid)) acc.set(rid, i);
-            return acc;
-          }, new Map())
-          .values(),
-      );
-      const recurring = recurringSeeds.map((i) => {
-          const effectiveRecurrence =
-            i.recurrence ||
-            (i.dueDate
-              ? {
-                  type: 'monthly_fixed_day',
-                  dayOfMonth: new Date(i.dueDate).getDate(),
-                }
-              : null);
-          const newParentDue = computeRecurringDueDate(effectiveRecurrence, cycleStart);
-          return {
-            id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-            text: i.text,
-            done: false,
-            doneAt: null,
-            pinned: false,
-            recurring: true,
-            recurringId: i.recurringId || i.id,
-            assigneeEmails: Array.isArray(i.assigneeEmails)
-              ? i.assigneeEmails.filter(Boolean)
-              : [],
-            recurrence: i.recurrence || effectiveRecurrence,
-            dueDate: newParentDue,
-            subtasks: projectSubtasksForNewRecurringPrimaryCycle(
-              i,
-              newParentDue,
-              cycleStart,
-            ),
-          };
-        });
-      // Same dedupe as getTodoStateForCycle: never persist a seed that
-      // duplicates a carried-over open instance of the series.
-      const dedupedRecurring = dedupeRecurringSeedsAgainstCarried(carried, recurring);
-      cycles[String(cycleStart)][ck] = { closed: false, items: [...carried, ...dedupedRecurring] };
-    });
+    ];
+    const existing = cycles[String(cycleStart)] || {};
+    const { cycleData, changed } = materializeCycleTodoFromPrev(
+      existing,
+      prevData,
+      cycleStart,
+      () => `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      categoryKeys,
+    );
+    if (changed || !cycles[String(cycleStart)]) {
+      cycles[String(cycleStart)] = cycleData;
+    }
     return cycles;
   };
 
@@ -2355,16 +2247,31 @@ export default function App() {
           const bd = client.billingDay || 1;
           const period = getBillingPeriod(bd, 0);
           const key = String(period.start);
-          const existing = (client.todoCycles || {})[key];
-          if (!existing || typeof existing !== 'object') continue;
+          const prevStart = getBillingPeriod(bd, -1).start;
+          const prevData = (client.todoCycles || {})[String(prevStart)] || {};
+          const categoryKeys = [
+            ...getEnabledRetainerCategoryNames(client).map((cat) => todoCategoryKey(cat)),
+            todoCategoryKey(GENERAL_LABEL),
+            ...Object.keys(prevData),
+            ...Object.keys((client.todoCycles || {})[key] || {}),
+          ];
 
-          const { cycleDataByCategory, changed } = reconcileRecurringTodoInstances(
+          const existing = (client.todoCycles || {})[key] || {};
+          const { cycleData, changed: materializeChanged } = materializeCycleTodoFromPrev(
             existing,
+            prevData,
             period.start,
-            period.end,
             newRecurringTodoRowId,
+            categoryKeys,
           );
-          if (!changed) continue;
+          const { cycleDataByCategory, changed: reconcileChanged } =
+            reconcileRecurringTodoInstances(
+              cycleData,
+              period.start,
+              period.end,
+              newRecurringTodoRowId,
+            );
+          if (!materializeChanged && !reconcileChanged) continue;
 
           const cycles = { ...(client.todoCycles || {}), [key]: cycleDataByCategory };
           const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(client, cycles);
