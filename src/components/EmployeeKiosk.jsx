@@ -26,6 +26,7 @@ import KioskClientTodoItem from './KioskClientTodoItem.jsx';
 import ClientProfileSummary from './ClientProfileSummary.jsx';
 import { buildGlobalTodoRows } from '../utils/todoGlobalRows.js';
 import { isClientActiveForWork } from '../utils/clientActiveForWork.js';
+import { computePerplexityExpenseAmounts } from '../utils/perplexityCredits.js';
 import {
   clientHasEnabledRetainers,
   getEnabledRetainerCategoryNames,
@@ -162,6 +163,8 @@ const EmployeeKiosk = ({
   const [todoRecurrenceMode, setTodoRecurrenceMode] = React.useState('none');
   const [todoOptionsOpen, setTodoOptionsOpen] = React.useState(false);
   const [kioskExpenseAmount, setKioskExpenseAmount] = React.useState('');
+  const [kioskExpenseCredits, setKioskExpenseCredits] = React.useState('');
+  const [kioskExpenseInputMode, setKioskExpenseInputMode] = React.useState('amount');
   const [kioskExpenseDescription, setKioskExpenseDescription] = React.useState('');
   const [kioskExpenseCurrency, setKioskExpenseCurrency] = React.useState('CAD');
   const [kioskExpenseApplyMarkup, setKioskExpenseApplyMarkup] = React.useState(true);
@@ -2438,33 +2441,102 @@ const EmployeeKiosk = ({
                             Log Client Expense
                           </div>
                           <div className="space-y-3">
-                            <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px] gap-2">
-                              <input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={kioskExpenseAmount}
-                                onChange={(e) => setKioskExpenseAmount(e.target.value)}
-                                placeholder="Amount"
-                                className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
-                              />
-                              <select
-                                value={kioskExpenseCurrency}
-                                onChange={(e) => setKioskExpenseCurrency(e.target.value)}
-                                className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
-                              >
-                                <option value="CAD">CAD</option>
-                                <option value="USD">USD</option>
-                                <option value="EUR">EUR</option>
-                                <option value="GBP">GBP</option>
-                              </select>
-                            </div>
+                            <select
+                              value={kioskExpenseInputMode}
+                              onChange={(e) => {
+                                setKioskExpenseInputMode(e.target.value);
+                                setKioskExpenseAmount('');
+                                setKioskExpenseCredits('');
+                              }}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                            >
+                              <option value="amount">Dollar amount</option>
+                              <option value="perplexity_credits">Perplexity Computer Credits</option>
+                            </select>
+                            {kioskExpenseInputMode === 'perplexity_credits' ? (
+                              <div className="space-y-1">
+                                <input
+                                  type="number"
+                                  min="1"
+                                  step="1"
+                                  value={kioskExpenseCredits}
+                                  onChange={(e) => setKioskExpenseCredits(e.target.value)}
+                                  placeholder="Credits used"
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                />
+                                <p className="text-[10px] font-bold text-slate-500">
+                                  1 credit = $0.01 CAD before markup
+                                </p>
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px] gap-2">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={kioskExpenseAmount}
+                                  onChange={(e) => setKioskExpenseAmount(e.target.value)}
+                                  placeholder="Amount"
+                                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                />
+                                <select
+                                  value={kioskExpenseCurrency}
+                                  onChange={(e) => setKioskExpenseCurrency(e.target.value)}
+                                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                >
+                                  <option value="CAD">CAD</option>
+                                  <option value="USD">USD</option>
+                                  <option value="EUR">EUR</option>
+                                  <option value="GBP">GBP</option>
+                                </select>
+                              </div>
+                            )}
                             <textarea
                               value={kioskExpenseDescription}
                               onChange={(e) => setKioskExpenseDescription(e.target.value)}
-                              placeholder="Expense description"
+                              placeholder={
+                                kioskExpenseInputMode === 'perplexity_credits'
+                                  ? 'Optional note'
+                                  : 'Expense description'
+                              }
                               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[72px]"
                             />
+                            {kioskExpenseInputMode === 'perplexity_credits' &&
+                              kioskExpenseCredits &&
+                              Number(kioskExpenseCredits) > 0 && (
+                                <div className="rounded-xl bg-slate-50 border border-slate-100 p-3 text-xs font-bold text-slate-600 space-y-1">
+                                  {(() => {
+                                    const computed = computePerplexityExpenseAmounts(
+                                      kioskExpenseCredits,
+                                      {
+                                        applyMarkup: kioskExpenseApplyMarkup,
+                                        hourlyRate: selectedClientObj?.hourlyRate,
+                                        isDollar: kioskRetainerExpenseIsDollar,
+                                      },
+                                    );
+                                    return (
+                                      <>
+                                        <div className="flex justify-between">
+                                          <span>Cost (CAD):</span>
+                                          <span>${computed.rawAmount.toFixed(2)}</span>
+                                        </div>
+                                        {computed.applyMarkup && (
+                                          <div className="flex justify-between text-emerald-600">
+                                            <span>With 30% markup:</span>
+                                            <span>${computed.finalCost.toFixed(2)}</span>
+                                          </div>
+                                        )}
+                                        {!kioskRetainerExpenseIsDollar && (
+                                          <div className="flex justify-between text-[#fd7414]">
+                                            <span>Retainer deduction:</span>
+                                            <span>{computed.equivalentHours.toFixed(2)}h</span>
+                                          </div>
+                                        )}
+                                      </>
+                                    );
+                                  })()}
+                                </div>
+                              )}
                             <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600">
                               <input
                                 type="checkbox"
@@ -2480,8 +2552,15 @@ const EmployeeKiosk = ({
                             <button
                               type="button"
                               onClick={async () => {
+                                const isCredits = kioskExpenseInputMode === 'perplexity_credits';
+                                const credits = Number(kioskExpenseCredits);
                                 const amt = Number(kioskExpenseAmount);
-                                if (!Number.isFinite(amt) || amt <= 0) {
+                                if (isCredits) {
+                                  if (!Number.isFinite(credits) || credits <= 0) {
+                                    window.alert('Enter a valid number of credits.');
+                                    return;
+                                  }
+                                } else if (!Number.isFinite(amt) || amt <= 0) {
                                   window.alert('Enter a valid expense amount.');
                                   return;
                                 }
@@ -2492,12 +2571,17 @@ const EmployeeKiosk = ({
                                     clientName: selectedClientObj.name,
                                     category: selectedRetainerCategory,
                                     projectId: null,
-                                    amount: amt,
+                                    ...(isCredits
+                                      ? { perplexityCredits: credits }
+                                      : {
+                                          amount: amt,
+                                          currency: kioskExpenseCurrency,
+                                        }),
                                     description: kioskExpenseDescription.trim(),
-                                    currency: kioskExpenseCurrency,
                                     applyMarkup: kioskExpenseApplyMarkup,
                                   });
                                   setKioskExpenseAmount('');
+                                  setKioskExpenseCredits('');
                                   setKioskExpenseDescription('');
                                 } catch (err) {
                                   window.alert(err?.message || 'Failed to log expense.');
@@ -2507,8 +2591,9 @@ const EmployeeKiosk = ({
                               }}
                               disabled={
                                 kioskExpenseSubmitting ||
-                                !kioskExpenseAmount ||
-                                Number(kioskExpenseAmount) <= 0
+                                (kioskExpenseInputMode === 'perplexity_credits'
+                                  ? !kioskExpenseCredits || Number(kioskExpenseCredits) <= 0
+                                  : !kioskExpenseAmount || Number(kioskExpenseAmount) <= 0)
                               }
                               className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white p-3 rounded-xl font-black text-sm uppercase tracking-widest transition-all"
                             >

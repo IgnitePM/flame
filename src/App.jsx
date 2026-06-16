@@ -78,6 +78,10 @@ import EmployeeKiosk from './components/EmployeeKiosk.jsx';
 import AdminDashboard from './components/AdminDashboard.jsx';
 import DurationSlider from './components/DurationSlider.jsx';
 import { getTaskDurationHours, getTaskEmployeeName } from './utils/taskLogDisplay.js';
+import {
+  buildPerplexityExpenseDescription,
+  computePerplexityExpenseAmounts,
+} from './utils/perplexityCredits.js';
 import { buildTeamAccessMergeForTodoAssignees } from './utils/teamClientAccess.js';
 import { isClientActiveForWork } from './utils/clientActiveForWork.js';
 import {
@@ -332,6 +336,8 @@ export default function App() {
     billingTarget: '',
     description: '',
     amount: '',
+    perplexityCredits: '',
+    inputMode: 'amount',
     date: '',
     currency: 'CAD',
     applyMarkup: true,
@@ -1471,23 +1477,53 @@ export default function App() {
   };
 
   const saveExpense = async () => {
-    if (!expenseValues.amount || !expenseValues.billingTarget) return;
+    if (!expenseValues.billingTarget) return;
 
     const isProject = expenseValues.billingTarget.startsWith('project_');
     const targetId = isProject ? expenseValues.billingTarget.replace('project_', '') : null;
     const catName = isProject ? 'Custom Project' : expenseValues.billingTarget.replace('retainer_', '');
 
-    const currency = expenseValues.currency || 'CAD';
-    const rateToCad = FX_TO_CAD[currency] ?? 1;
-    const amountInOriginalCurrency = Number(expenseValues.amount);
-    const amountCad = amountInOriginalCurrency * rateToCad;
-
+    const isPerplexity = expenseValues.inputMode === 'perplexity_credits';
     const isDollar = isDollarCategory(expenseModal, catName);
-    const applyMarkup = expenseValues.applyMarkup !== false && !isDollar;
-    const rawAmount = amountCad;
-    const finalCost = applyMarkup ? amountCad * 1.30 : amountCad;
     const clientRate = expenseModal.hourlyRate || 0;
-    const equivalentHours = isDollar ? 0 : clientRate > 0 ? (finalCost / clientRate) : 0;
+    const applyMarkup = expenseValues.applyMarkup !== false && !isDollar;
+
+    let rawAmount;
+    let finalCost;
+    let equivalentHours;
+    let originalCurrency;
+    let originalAmount;
+    let perplexityCredits;
+    let description = expenseValues.description;
+
+    if (isPerplexity) {
+      const credits = Number(expenseValues.perplexityCredits);
+      if (!Number.isFinite(credits) || credits <= 0) return;
+      const computed = computePerplexityExpenseAmounts(credits, {
+        applyMarkup: expenseValues.applyMarkup !== false,
+        hourlyRate: clientRate,
+        isDollar,
+      });
+      rawAmount = computed.rawAmount;
+      finalCost = computed.finalCost;
+      equivalentHours = computed.equivalentHours;
+      originalCurrency = 'PERPLEXITY_CREDITS';
+      originalAmount = credits;
+      perplexityCredits = credits;
+      description = buildPerplexityExpenseDescription(credits, expenseValues.description);
+    } else {
+      if (!expenseValues.amount) return;
+      const currency = expenseValues.currency || 'CAD';
+      const rateToCad = FX_TO_CAD[currency] ?? 1;
+      const amountInOriginalCurrency = Number(expenseValues.amount);
+      const amountCad = amountInOriginalCurrency * rateToCad;
+      rawAmount = amountCad;
+      finalCost = applyMarkup ? amountCad * 1.30 : amountCad;
+      equivalentHours = isDollar ? 0 : clientRate > 0 ? (finalCost / clientRate) : 0;
+      originalCurrency = currency;
+      originalAmount = amountInOriginalCurrency;
+    }
+
     const expenseDate = expenseValues.date
       ? (() => {
           const [y, m, d] = expenseValues.date.split('-').map(Number);
@@ -1516,13 +1552,14 @@ export default function App() {
       clientName: expenseModal.name,
       category: catName,
       projectId: targetId,
-      description: expenseValues.description,
+      description,
       rawAmount,
       finalCost,
       equivalentHours,
       date: expenseDate,
-      originalCurrency: currency,
-      originalAmount: amountInOriginalCurrency,
+      originalCurrency,
+      originalAmount,
+      ...(perplexityCredits != null ? { perplexityCredits } : {}),
       recurring,
       recurringId,
       recurrence,
@@ -1532,6 +1569,8 @@ export default function App() {
       billingTarget: '',
       description: '',
       amount: '',
+      perplexityCredits: '',
+      inputMode: 'amount',
       date: '',
       currency: 'CAD',
       applyMarkup: true,
@@ -1566,30 +1605,61 @@ export default function App() {
     description,
     currency = 'CAD',
     applyMarkup = true,
+    perplexityCredits: perplexityCreditsInput,
   }) => {
-    const amt = Number(amount);
-    if (!clientId || !clientName || !category || !Number.isFinite(amt) || amt <= 0) return;
-    const fx = FX_TO_CAD[currency] ?? 1;
-    const rawAmount = amt * fx;
     const clientObj = clients.find((c) => String(c.id) === String(clientId));
     const isDollar = isDollarCategory(clientObj, category);
-    const shouldMarkup = applyMarkup && !isDollar;
-    const finalCost = shouldMarkup ? rawAmount * 1.3 : rawAmount;
     const hourlyRate = Number(clientObj?.hourlyRate || 0);
-    const equivalentHours = isDollar ? 0 : hourlyRate > 0 ? finalCost / hourlyRate : 0;
+
+    let rawAmount;
+    let finalCost;
+    let equivalentHours;
+    let originalCurrency;
+    let originalAmount;
+    let perplexityCredits;
+    let expenseDescription = description;
+
+    if (perplexityCreditsInput != null && perplexityCreditsInput !== '') {
+      const credits = Number(perplexityCreditsInput);
+      if (!clientId || !clientName || !category || !Number.isFinite(credits) || credits <= 0) return;
+      const computed = computePerplexityExpenseAmounts(credits, {
+        applyMarkup,
+        hourlyRate,
+        isDollar,
+      });
+      rawAmount = computed.rawAmount;
+      finalCost = computed.finalCost;
+      equivalentHours = computed.equivalentHours;
+      originalCurrency = 'PERPLEXITY_CREDITS';
+      originalAmount = credits;
+      perplexityCredits = credits;
+      expenseDescription = buildPerplexityExpenseDescription(credits, description);
+    } else {
+      const amt = Number(amount);
+      if (!clientId || !clientName || !category || !Number.isFinite(amt) || amt <= 0) return;
+      const fx = FX_TO_CAD[currency] ?? 1;
+      rawAmount = amt * fx;
+      const shouldMarkup = applyMarkup && !isDollar;
+      finalCost = shouldMarkup ? rawAmount * 1.3 : rawAmount;
+      equivalentHours = isDollar ? 0 : hourlyRate > 0 ? finalCost / hourlyRate : 0;
+      originalCurrency = currency;
+      originalAmount = amt;
+      expenseDescription = description || 'Logged from kiosk';
+    }
 
     await addDoc(collection(db, 'expenses'), {
       clientId,
       clientName,
       category,
       projectId: projectId || null,
-      description: description || 'Logged from kiosk',
+      description: expenseDescription,
       rawAmount,
       finalCost,
       equivalentHours,
       date: Date.now(),
-      originalCurrency: currency,
-      originalAmount: amt,
+      originalCurrency,
+      originalAmount,
+      ...(perplexityCredits != null ? { perplexityCredits } : {}),
     });
   };
 
@@ -3158,31 +3228,74 @@ export default function App() {
                     </select>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Expense Description</label>
-                    <input type="text" value={expenseValues.description} onChange={e => setExpenseValues({...expenseValues, description: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-medium text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g., Backlinks, Software..." />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Currency</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Expense Type</label>
                     <select
-                      value={expenseValues.currency || 'CAD'}
-                      onChange={e => setExpenseValues({ ...expenseValues, currency: e.target.value })}
+                      value={expenseValues.inputMode || 'amount'}
+                      onChange={(e) =>
+                        setExpenseValues({
+                          ...expenseValues,
+                          inputMode: e.target.value,
+                          amount: '',
+                          perplexityCredits: '',
+                        })
+                      }
                       className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-blue-500"
                     >
-                      <option value="CAD">CAD (Canadian Dollar)</option>
-                      <option value="USD">USD (US Dollar)</option>
-                      <option value="EUR">EUR (Euro)</option>
-                      <option value="GBP">GBP (British Pound)</option>
+                      <option value="amount">Dollar amount</option>
+                      <option value="perplexity_credits">Perplexity Computer Credits</option>
                     </select>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Amount ({expenseValues.currency || 'CAD'})</label>
-                    <div className="flex items-center bg-slate-50 border border-slate-200 rounded-2xl px-4 focus-within:ring-2 focus-within:ring-blue-500 transition-all">
-                      <span className="font-black text-slate-400 text-xl">
-                        {expenseValues.currency === 'GBP' ? '£' : expenseValues.currency === 'EUR' ? '€' : '$'}
-                      </span>
-                      <input type="number" min="0" step="0.01" placeholder="0.00" value={expenseValues.amount} onChange={e => setExpenseValues({ ...expenseValues, amount: e.target.value })} className="w-full bg-transparent p-4 pl-2 font-black text-2xl outline-none text-slate-900" />
-                    </div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Expense Description</label>
+                    <input type="text" value={expenseValues.description} onChange={e => setExpenseValues({...expenseValues, description: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-medium text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder={expenseValues.inputMode === 'perplexity_credits' ? 'Optional note (credits are logged automatically)' : 'e.g., Backlinks, Software...'} />
                   </div>
+                  {expenseValues.inputMode === 'perplexity_credits' ? (
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Credits used</label>
+                      <div className="flex items-center bg-slate-50 border border-slate-200 rounded-2xl px-4 focus-within:ring-2 focus-within:ring-blue-500 transition-all">
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          placeholder="0"
+                          value={expenseValues.perplexityCredits}
+                          onChange={(e) => setExpenseValues({ ...expenseValues, perplexityCredits: e.target.value })}
+                          className="w-full bg-transparent p-4 font-black text-2xl outline-none text-slate-900"
+                        />
+                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 shrink-0">
+                          credits
+                        </span>
+                      </div>
+                      <p className="text-[10px] font-bold text-slate-500">
+                        1 credit = $0.01 CAD before markup
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Currency</label>
+                        <select
+                          value={expenseValues.currency || 'CAD'}
+                          onChange={e => setExpenseValues({ ...expenseValues, currency: e.target.value })}
+                          className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="CAD">CAD (Canadian Dollar)</option>
+                          <option value="USD">USD (US Dollar)</option>
+                          <option value="EUR">EUR (Euro)</option>
+                          <option value="GBP">GBP (British Pound)</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Amount ({expenseValues.currency || 'CAD'})</label>
+                        <div className="flex items-center bg-slate-50 border border-slate-200 rounded-2xl px-4 focus-within:ring-2 focus-within:ring-blue-500 transition-all">
+                          <span className="font-black text-slate-400 text-xl">
+                            {expenseValues.currency === 'GBP' ? '£' : expenseValues.currency === 'EUR' ? '€' : '$'}
+                          </span>
+                          <input type="number" min="0" step="0.01" placeholder="0.00" value={expenseValues.amount} onChange={e => setExpenseValues({ ...expenseValues, amount: e.target.value })} className="w-full bg-transparent p-4 pl-2 font-black text-2xl outline-none text-slate-900" />
+                        </div>
+                      </div>
+                    </>
+                  )}
                   <label className="flex items-center gap-3 cursor-pointer">
                     <input
                       type="checkbox"
@@ -3209,7 +3322,7 @@ export default function App() {
                       </p>
                     )}
                   </div>
-                  {expenseValues.amount && (
+                  {expenseValues.amount && expenseValues.inputMode !== 'perplexity_credits' && (
                     (() => {
                       const currency = expenseValues.currency || 'CAD';
                       const rateToCad = FX_TO_CAD[currency] ?? 1;
@@ -3246,8 +3359,67 @@ export default function App() {
                       );
                     })()
                   )}
+                  {expenseValues.perplexityCredits && expenseValues.inputMode === 'perplexity_credits' && (
+                    (() => {
+                      const credits = Number(expenseValues.perplexityCredits);
+                      const retainerCat = expenseValues.billingTarget?.startsWith('retainer_')
+                        ? expenseValues.billingTarget.replace('retainer_', '')
+                        : null;
+                      const isDollar = retainerCat && isDollarCategory(expenseModal, retainerCat);
+                      const computed = computePerplexityExpenseAmounts(credits, {
+                        applyMarkup: expenseValues.applyMarkup !== false,
+                        hourlyRate: expenseModal.hourlyRate,
+                        isDollar,
+                      });
+                      return (
+                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-2 mt-4">
+                          <div className="flex justify-between text-xs font-bold text-slate-500">
+                            <span>Credits × $0.01:</span>
+                            <span>${computed.rawAmount.toFixed(2)} CAD</span>
+                          </div>
+                          {computed.applyMarkup && (
+                            <>
+                              <div className="flex justify-between text-xs font-bold text-slate-500">
+                                <span>Markup (30%):</span>
+                                <span className="text-emerald-500">
+                                  +${(computed.rawAmount * 0.3).toFixed(2)}
+                                </span>
+                              </div>
+                              <div className="h-px bg-slate-200 my-1" />
+                            </>
+                          )}
+                          <div className="flex justify-between font-black text-slate-800">
+                            <span>Final Cost (CAD):</span>
+                            <span>${computed.finalCost.toFixed(2)}</span>
+                          </div>
+                          {isDollar ? (
+                            <div className="flex justify-between text-[10px] font-black uppercase text-slate-500 pt-2">
+                              <span>Dollar category</span>
+                              <span>No hours deduction</span>
+                            </div>
+                          ) : (
+                            <div className="flex justify-between text-[10px] font-black uppercase text-[#fd7414] pt-2">
+                              <span>Retainer Deduction:</span>
+                              <span>{computed.equivalentHours.toFixed(2)} hrs</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()
+                  )}
 
-                  <button onClick={saveExpense} disabled={!expenseValues.amount || !expenseValues.billingTarget} className="w-full bg-blue-600 text-white p-5 rounded-2xl font-black text-lg shadow-xl shadow-blue-500/20 active:scale-95 transition-all disabled:opacity-30 mt-4">Log Expense</button>
+                  <button
+                    onClick={saveExpense}
+                    disabled={
+                      !expenseValues.billingTarget ||
+                      (expenseValues.inputMode === 'perplexity_credits'
+                        ? !expenseValues.perplexityCredits || Number(expenseValues.perplexityCredits) <= 0
+                        : !expenseValues.amount)
+                    }
+                    className="w-full bg-blue-600 text-white p-5 rounded-2xl font-black text-lg shadow-xl shadow-blue-500/20 active:scale-95 transition-all disabled:opacity-30 mt-4"
+                  >
+                    Log Expense
+                  </button>
                 </>
               )}
             </div>
