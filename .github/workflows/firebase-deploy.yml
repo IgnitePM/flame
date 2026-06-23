@@ -22,22 +22,33 @@ jobs:
         with:
           node-version: 22
 
-      - name: Validate Firebase service account secret
+      - name: Resolve Firebase CI credentials
+        id: auth
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
         run: |
-          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
-            echo "::error::GitHub secret FIREBASE_SERVICE_ACCOUNT is not set."
-            echo "Add it under Repo → Settings → Secrets and variables → Actions."
-            echo "Value = full JSON from Firebase Console → Project settings → Service accounts → Generate new private key."
-            exit 1
+          if [ -n "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            node -e "JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)" || {
+              echo "::error::FIREBASE_SERVICE_ACCOUNT is not valid JSON."
+              exit 1
+            }
+            echo "method=service_account" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
-          node -e "JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)" || {
-            echo "::error::FIREBASE_SERVICE_ACCOUNT is not valid JSON."
-            exit 1
-          }
+          if [ -n "$FIREBASE_TOKEN" ]; then
+            echo "method=token" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::error::No Firebase deploy credentials configured."
+          echo ""
+          echo "Option A (blocked by some org policies): GitHub secret FIREBASE_SERVICE_ACCOUNT = service account JSON."
+          echo "Option B (works when key creation is disabled): GitHub secret FIREBASE_TOKEN from 'firebase login:ci'."
+          echo "Option C: deploy manually — firebase login && firebase deploy --only firestore:rules,storage --project time-tracker-1f2af"
+          exit 1
 
       - name: Write service account credentials
+        if: steps.auth.outputs.method == 'service_account'
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-sa.json"
@@ -48,17 +59,35 @@ jobs:
       - name: Deploy Firestore + Storage rules
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
-        run: >
-          npx firebase-tools deploy
-          --only firestore:rules,storage
-          --project time-tracker-1f2af
-          --non-interactive --force
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          if [ "${{ steps.auth.outputs.method }}" = "token" ]; then
+            npx firebase-tools deploy \
+              --only firestore:rules,storage \
+              --project time-tracker-1f2af \
+              --non-interactive --force \
+              --token "$FIREBASE_TOKEN"
+          else
+            npx firebase-tools deploy \
+              --only firestore:rules,storage \
+              --project time-tracker-1f2af \
+              --non-interactive --force
+          fi
 
       - name: Deploy Cloud Functions
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
-        run: >
-          npx firebase-tools deploy
-          --only functions
-          --project time-tracker-1f2af
-          --non-interactive --force
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          if [ "${{ steps.auth.outputs.method }}" = "token" ]; then
+            npx firebase-tools deploy \
+              --only functions \
+              --project time-tracker-1f2af \
+              --non-interactive --force \
+              --token "$FIREBASE_TOKEN"
+          else
+            npx firebase-tools deploy \
+              --only functions \
+              --project time-tracker-1f2af \
+              --non-interactive --force
+          fi
