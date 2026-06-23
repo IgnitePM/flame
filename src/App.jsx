@@ -112,6 +112,7 @@ import {
   normalizePrimaryContact,
   removeDocumentFromTodoCycles,
   validateClientUploadFile,
+  ensureStaffAdminDocForStorage,
 } from './utils/clientDocuments.js';
 import {
   getEnabledRetainerCategoryNames,
@@ -2141,6 +2142,8 @@ export default function App() {
       if (!client?.id || !file) throw new Error('Missing client or file.');
       const validationError = validateClientUploadFile(file);
       if (validationError) throw new Error(validationError);
+
+      await ensureStaffAdminDocForStorage(db, user?.email || myAdminDoc?.email);
 
       const {
         linkedTodoId = null,

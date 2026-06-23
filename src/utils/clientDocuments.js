@@ -1,3 +1,5 @@
+import { doc, getDoc, setDoc } from '../firebase.js';
+
 export const MAX_CLIENT_FILE_BYTES = 25 * 1024 * 1024;
 export const MAX_TODO_ATTACHMENTS = 10;
 
@@ -134,6 +136,29 @@ export function validateClientUploadFile(file) {
     return `File is too large (max ${formatFileSize(MAX_CLIENT_FILE_BYTES)}).`;
   }
   return null;
+}
+
+/**
+ * Storage rules require admins/{emailLower}. Ensure the doc exists before upload
+ * so kiosk staff and new @ignitepm.com sign-ins are not blocked by a race.
+ */
+export async function ensureStaffAdminDocForStorage(db, userEmail) {
+  const emailKey = String(userEmail || '').trim().toLowerCase();
+  if (!emailKey) {
+    throw new Error('You must be signed in to upload files.');
+  }
+  const adminRef = doc(db, 'admins', emailKey);
+  const snap = await getDoc(adminRef);
+  if (snap.exists()) return;
+
+  if (emailKey.endsWith('@ignitepm.com')) {
+    await setDoc(adminRef, { email: emailKey, role: 'kiosk' }, { merge: true });
+    return;
+  }
+
+  throw new Error(
+    'Your account is not registered as staff (missing admins profile). Ask an admin to grant access under Users, then sign out and back in.',
+  );
 }
 
 export function normalizeExternalUrl(value) {

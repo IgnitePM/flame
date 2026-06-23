@@ -1,14 +1,38 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    function isStaff() {
-      return request.auth != null &&
-        firestore.exists(/databases/(default)/documents/admins/$(request.auth.token.email.lower()));
+    function emailLower() {
+      return request.auth != null && request.auth.token.email != null
+        ? request.auth.token.email.lower()
+        : '';
     }
+
+    function adminExists() {
+      return emailLower() != '' &&
+        firestore.exists(/databases/(default)/documents/admins/$(emailLower()));
+    }
+
+    function isStaff() {
+      return request.auth != null && adminExists();
+    }
+
+    function clientDocData(clientId) {
+      return firestore.get(/databases/(default)/documents/clients/$(clientId)).data;
+    }
+
     function clientAllowsEmail(clientId) {
       return request.auth != null &&
-        firestore.get(/databases/(default)/documents/clients/$(clientId)).data.clientEmails
-          .hasAny([request.auth.token.email, request.auth.token.email.lower()]);
+        clientDocData(clientId).clientEmails is list &&
+        clientDocData(clientId).clientEmails.hasAny([
+          request.auth.token.email,
+          emailLower(),
+        ]);
+    }
+
+    function validClientFileUpload() {
+      return request.resource != null &&
+        request.resource.size > 0 &&
+        request.resource.size < 25 * 1024 * 1024;
     }
 
     match /client-logos/{clientId}/{fileName} {
@@ -19,11 +43,11 @@ service firebase.storage {
         && request.resource.contentType.matches('image/.*');
       allow delete: if isStaff();
     }
+
     match /client-files/{clientId}/{allPaths=**} {
       // Staff, or portal users authorized on that specific client.
       allow read: if isStaff() || clientAllowsEmail(clientId);
-      allow write: if isStaff()
-        && request.resource.size < 25 * 1024 * 1024;
+      allow write: if isStaff() && validClientFileUpload();
       allow delete: if isStaff();
     }
   }
