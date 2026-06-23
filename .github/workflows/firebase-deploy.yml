@@ -20,21 +20,45 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
-      - name: Install function dependencies
-        run: npm ci --prefix functions || npm install --prefix functions
+      - name: Validate Firebase service account secret
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::error::GitHub secret FIREBASE_SERVICE_ACCOUNT is not set."
+            echo "Add it under Repo → Settings → Secrets and variables → Actions."
+            echo "Value = full JSON from Firebase Console → Project settings → Service accounts → Generate new private key."
+            exit 1
+          fi
+          node -e "JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)" || {
+            echo "::error::FIREBASE_SERVICE_ACCOUNT is not valid JSON."
+            exit 1
+          }
 
       - name: Write service account credentials
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-sa.json"
 
-      - name: Deploy functions and rules
+      - name: Install function dependencies
+        run: npm ci --prefix functions || npm install --prefix functions
+
+      - name: Deploy Firestore + Storage rules
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
         run: >
           npx firebase-tools deploy
-          --only functions,firestore:rules,storage
+          --only firestore:rules,storage
+          --project time-tracker-1f2af
+          --non-interactive --force
+
+      - name: Deploy Cloud Functions
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
+        run: >
+          npx firebase-tools deploy
+          --only functions
           --project time-tracker-1f2af
           --non-interactive --force
