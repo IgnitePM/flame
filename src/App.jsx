@@ -71,6 +71,7 @@ import {
   computeGlobalRetainerStats,
   getBillingPeriod,
   getTaskDuration,
+  getLiveShiftIdSet,
   formatTime,
 } from './utils/billingEngine.js';
 import ClientPortal from './components/ClientPortal.jsx';
@@ -367,6 +368,7 @@ export default function App() {
   const [kioskAutostartPending, setKioskAutostartPending] = useState(false);
   const kioskAutostartSearchProcessedRef = useRef('');
   const kioskAutostartClockInAttemptedRef = useRef(false);
+  const taskStartInFlightRef = useRef(false);
   const recurringExpenseSyncInProgressRef = useRef(false);
   const recurringTodoReconcileInFlightRef = useRef(false);
   const policyWritePendingRef = useRef({});
@@ -1028,16 +1030,67 @@ export default function App() {
   };
 
   // Tracking Logic
+  const closeOrphanedActiveTasksForUser = useCallback(async () => {
+    if (!user?.uid) return;
+    const liveShiftIds = new Set(
+      timesheets
+        .filter(
+          (s) =>
+            s.userId === user.uid &&
+            (s.status === 'active' || s.status === 'break'),
+        )
+        .map((s) => s.id),
+    );
+    const orphans = taskLogs.filter(
+      (t) =>
+        t.userId === user.uid &&
+        t.status === 'active' &&
+        t.shiftId &&
+        !liveShiftIds.has(t.shiftId),
+    );
+    if (!orphans.length) return;
+    const endTime = Date.now();
+    const tag = '[Auto clock-out: task left running after shift ended]';
+    for (const task of orphans) {
+      const segment = Math.max(
+        0,
+        endTime - (task.lastResumeTime || task.clockInTime),
+      );
+      const newTotal = (task.totalSavedDuration || 0) + segment;
+      const notes = [String(task.notes || '').trim(), tag].filter(Boolean).join('\n\n');
+      await updateDoc(doc(db, 'taskLogs', task.id), {
+        clockOutTime: endTime,
+        status: 'completed',
+        totalSavedDuration: newTotal,
+        duration: newTotal,
+        notes,
+      });
+    }
+  }, [user?.uid, timesheets, taskLogs]);
+
   const handleClockIn = async () => {
-    // Guard against duplicate active shifts (second tab/device, stale shift
-    // left over after a crash). Tasks attach to one shift id, so a duplicate
-    // makes the admin Active Shifts panel show "No active task".
     const existing = timesheets.find(
       (t) =>
         t.userId === user?.uid &&
         (t.status === 'active' || t.status === 'break'),
     );
-    if (existing) return;
+    if (existing) {
+      const started = new Date(existing.clockInTime || 0);
+      const isPriorDay =
+        Number.isFinite(started.getTime()) &&
+        started.toDateString() !== new Date().toDateString();
+      if (!isPriorDay) return;
+      const result = await forceClockOutShift(existing, {
+        adminNote: '[Auto closed — new day clock-in]',
+      });
+      if (!result?.ok) {
+        window.alert(
+          result?.error ||
+            'Could not close your previous open shift. Ask an admin to clock you out, then try again.',
+        );
+        return;
+      }
+    }
     // Clock-in is a user gesture, so this is the best moment to ask for
     // notification permission (used by the idle "Still working?" failsafe).
     try {
@@ -1047,6 +1100,7 @@ export default function App() {
     } catch {
       // Notifications unsupported; failsafe still works via the modal.
     }
+    await closeOrphanedActiveTasksForUser();
     await addDoc(collection(db, 'timesheets'), {
       employeeName: user.displayName || user.email,
       clockInTime: Date.now(),
@@ -1107,6 +1161,7 @@ export default function App() {
     await updateDoc(doc(db, 'taskLogs', task.id), {
       status: 'active',
       lastResumeTime: Date.now(),
+      clockOutTime: deleteField(),
       shiftId: activeShift?.id || task.shiftId,
       userId: user?.uid || task.userId,
     });
@@ -1114,7 +1169,10 @@ export default function App() {
   };
 
   const handleStartTask = async () => {
+    if (taskStartInFlightRef.current) return;
     if (!selectedClient || !selectedBillingTarget || !activeShift?.id) return;
+    taskStartInFlightRef.current = true;
+    try {
 
     const isProject = selectedBillingTarget.startsWith('project_');
     const isGeneral = selectedBillingTarget === 'retainer_GENERAL_UNCLASSIFIED';
@@ -1140,6 +1198,10 @@ export default function App() {
       return;
     }
 
+    if (activeTask) {
+      await handleStopTask();
+    }
+
     const startClient = clients.find((x) => x.name === selectedClient);
     if (!isClientActiveForWork(startClient)) return;
 
@@ -1157,6 +1219,9 @@ export default function App() {
       notes: '',
     });
     setActiveTaskNotes('');
+    } finally {
+      taskStartInFlightRef.current = false;
+    }
   };
 
   useEffect(() => {
@@ -1215,6 +1280,7 @@ export default function App() {
     let newTotal = activeShift.totalSavedDuration || 0;
     if (activeShift.status === 'active') newTotal += endTime - (activeShift.lastResumeTime || activeShift.clockInTime);
     await updateDoc(doc(db, 'timesheets', activeShift.id), { clockOutTime: endTime, status: 'completed', totalSavedDuration: newTotal, duration: newTotal });
+    await closeOrphanedActiveTasksForUser();
   };
 
   const forceClockOutShift = useCallback(
@@ -1789,9 +1855,25 @@ export default function App() {
 
   // Helpers
   const getShiftDuration = (shift) => {
-    if (shift.status === 'completed') return shift.duration || 0;
+    if (shift.status === 'active') {
+      return (
+        (shift.totalSavedDuration || 0) +
+        (Date.now() - (shift.lastResumeTime || shift.clockInTime))
+      );
+    }
     if (shift.status === 'break') return shift.totalSavedDuration || 0;
-    return (shift.totalSavedDuration || 0) + (Date.now() - (shift.lastResumeTime || shift.clockInTime));
+    if (shift.status === 'completed') {
+      return Number(shift.duration ?? shift.totalSavedDuration ?? 0);
+    }
+    const cin = Number(shift.clockInTime || 0);
+    const out = Number(shift.clockOutTime || 0);
+    if (out > cin) {
+      return Number(shift.duration ?? shift.totalSavedDuration ?? 0);
+    }
+    return (
+      (shift.totalSavedDuration || 0) +
+      (Date.now() - (shift.lastResumeTime || shift.clockInTime))
+    );
   };
 
   const todoCategoryKey = (cat) =>
@@ -2298,8 +2380,18 @@ export default function App() {
   }, [clients, user, newRecurringTodoRowId]);
 
   // Extracted to utils/billingEngine.js; bind the live collections here.
+  const liveShiftIds = useMemo(() => getLiveShiftIdSet(timesheets), [timesheets]);
+  const getTaskDurationForBilling = useCallback(
+    (task) => getTaskDuration(task, { liveShiftIds }),
+    [liveShiftIds],
+  );
   const getGlobalRetainerStats = (client, mStart, mEnd) =>
-    computeGlobalRetainerStats(client, mStart, mEnd, { taskLogs, expenses, addons });
+    computeGlobalRetainerStats(client, mStart, mEnd, {
+      taskLogs,
+      expenses,
+      addons,
+      timesheets,
+    });
 
   // Export Logic & Filtering
   const getDateRange = () => {
@@ -2357,7 +2449,7 @@ export default function App() {
     const billingTarget = item.projectId
       ? `project_${item.projectId}`
       : `retainer_${item.projectName || ''}`;
-    const rawHours = getTaskDurationHours(item, getTaskDuration);
+    const rawHours = getTaskDurationHours(item, getTaskDurationForBilling);
     const steppedHours = Math.min(12, Math.max(0, Math.round(rawHours * 4) / 4));
     setEditValues({
       ...item,
@@ -2375,13 +2467,11 @@ export default function App() {
       return;
     }
     const coll = editingItem.type === 'shift' ? 'timesheets' : 'taskLogs';
-    const updates = { ...editValues };
     const clockInMs = parseDatetimeLocalToMs(editValues.clockInDate);
     if (!Number.isFinite(clockInMs)) {
       window.alert('Clock in time is invalid. Use the date and time picker.');
       return;
     }
-    updates.clockInTime = clockInMs;
 
     const durationHours = Number(editValues.editDurationHours || 0);
     if (durationHours <= 0) {
@@ -2389,23 +2479,33 @@ export default function App() {
       return;
     }
     const durationMs = durationHours * 3600000;
-    if (editingItem.type === 'task') {
-      updates.clockOutTime = clockInMs + durationMs;
-      updates.duration = durationMs;
-      updates.totalSavedDuration = durationMs;
-    } else {
-      const breakMs = Number(editValues.editBreakMs || 0);
-      updates.duration = durationMs;
-      updates.totalSavedDuration = durationMs;
-      updates.clockOutTime = clockInMs + durationMs + breakMs;
-    }
+    const breakMs = Number(editValues.editBreakMs || 0);
+
+    const updates =
+      editingItem.type === 'shift'
+        ? {
+            clockInTime: clockInMs,
+            clockOutTime: clockInMs + durationMs + breakMs,
+            duration: durationMs,
+            totalSavedDuration: durationMs,
+            status: 'completed',
+            lastResumeTime: deleteField(),
+          }
+        : {
+            clockInTime: clockInMs,
+            clockOutTime: clockInMs + durationMs,
+            duration: durationMs,
+            totalSavedDuration: durationMs,
+            status: 'completed',
+            lastResumeTime: deleteField(),
+          };
 
     if (editingItem.type === 'task') {
-      const clientName = updates.clientName || '';
+      const clientName = editValues.clientName || '';
       const client = clients.find((c) => c.name === clientName);
       updates.clientId = client?.id ?? null;
       updates.clientName = clientName;
-      const bt = updates.billingTarget || '';
+      const bt = editValues.billingTarget || '';
       if (bt.startsWith('project_')) {
         updates.projectId = bt.replace('project_', '');
         const proj = projects.find((p) => p.id === updates.projectId);
@@ -2416,15 +2516,12 @@ export default function App() {
       }
     }
 
-    delete updates.clockInDate;
-    delete updates.clockOutDate;
-    delete updates.editDurationHours;
-    delete updates.editBreakMs;
-    delete updates.billingTarget;
-    delete updates.id;
-
-    await updateDoc(doc(db, coll, editingItem.id), updates);
-    setEditingItem(null);
+    try {
+      await updateDoc(doc(db, coll, editingItem.id), updates);
+      setEditingItem(null);
+    } catch (err) {
+      window.alert(err?.message || 'Could not save changes.');
+    }
   };
 
   const exportCSV = () => {
@@ -2447,7 +2544,7 @@ export default function App() {
             shift.employeeName, shiftDate, t.clientName, t.projectName,
             new Date(t.clockInTime).toLocaleTimeString(),
             t.clockOutTime ? new Date(t.clockOutTime).toLocaleTimeString() : "Active",
-            formatTime(getTaskDuration(t)),
+            formatTime(getTaskDurationForBilling(t)),
             t.notes || ""
           ]);
         });
@@ -2732,7 +2829,7 @@ export default function App() {
     activeTaskTypes,
     getBillingPeriod,
     getShiftDuration,
-    getTaskDuration,
+    getTaskDuration: getTaskDurationForBilling,
     formatTime,
     getGlobalRetainerStats: (client, start, end) =>
       getGlobalRetainerStats(client, start, end),
@@ -2811,7 +2908,7 @@ export default function App() {
           getGlobalRetainerStats(client, start, end)
         }
         formatTime={formatTime}
-        getTaskDuration={getTaskDuration}
+        getTaskDuration={getTaskDurationForBilling}
         getTodoStateForCycle={getTodoStateForCycle}
         todoCategoryKey={todoCategoryKey}
         setAddonModal={setAddonModal}
@@ -2839,7 +2936,7 @@ export default function App() {
           getGlobalRetainerStats(client, start, end)
         }
         formatTime={formatTime}
-        getTaskDuration={getTaskDuration}
+        getTaskDuration={getTaskDurationForBilling}
         getTodoStateForCycle={getTodoStateForCycle}
         todoCategoryKey={todoCategoryKey}
         setAddonModal={setAddonModal}

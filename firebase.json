@@ -5,9 +5,16 @@
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },
-  "storage": {
-    "rules": "storage.rules"
-  },
+  "storage": [
+    {
+      "bucket": "time-tracker-1f2af.firebasestorage.app",
+      "rules": "storage.rules"
+    },
+    {
+      "bucket": "time-tracker-1f2af.appspot.com",
+      "rules": "storage.rules"
+    }
+  ],
   "functions": {
     "source": "functions",
     "runtime": "nodejs20"

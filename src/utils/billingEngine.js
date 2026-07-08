@@ -11,9 +11,44 @@ import {
 
 export const GENERAL_LABEL = 'General / Unclassified';
 
-export const getTaskDuration = (task) => {
+/** Shift ids that are still open (employee clocked in or on break). */
+export function getLiveShiftIdSet(timesheets = []) {
+  return new Set(
+    (timesheets || [])
+      .filter((s) => s && (s.status === 'active' || s.status === 'break'))
+      .map((s) => s.id),
+  );
+}
+
+export const getTaskDuration = (task, options = {}) => {
+  const liveShiftIds = options.liveShiftIds;
+  const shiftIsLive =
+    !liveShiftIds ||
+    liveShiftIds.size === 0 ||
+    (task?.shiftId && liveShiftIds.has(task.shiftId));
+
   if (task == null || typeof task !== 'object') return 0;
-  if (task.status === 'completed') return task.duration || 0;
+  if (task.status === 'active') {
+    if (!shiftIsLive) {
+      return Number(task.totalSavedDuration ?? task.duration ?? 0);
+    }
+    return (
+      (task.totalSavedDuration || 0) +
+      (Date.now() - (task.lastResumeTime || task.clockInTime))
+    );
+  }
+  if (task.status === 'completed') {
+    return Number(task.duration ?? task.totalSavedDuration ?? 0);
+  }
+  // Legacy rows: clocked out but missing status still use stored duration.
+  const cin = Number(task.clockInTime || 0);
+  const out = Number(task.clockOutTime || 0);
+  if (out > cin) {
+    return Number(task.duration ?? task.totalSavedDuration ?? 0);
+  }
+  if (!shiftIsLive) {
+    return Number(task.totalSavedDuration ?? task.duration ?? 0);
+  }
   return (
     (task.totalSavedDuration || 0) +
     (Date.now() - (task.lastResumeTime || task.clockInTime))
@@ -68,7 +103,9 @@ export const getBillingPeriod = (billingDay = 1, offsetMonths = 0) => {
  * `deps` carries the activity collections: { taskLogs, expenses, addons }.
  */
 export const computeGlobalRetainerStats = (client, mStart, mEnd, deps) => {
-  const { taskLogs = [], expenses = [], addons = [] } = deps || {};
+  const { taskLogs = [], expenses = [], addons = [], timesheets = [] } = deps || {};
+  const liveShiftIds = getLiveShiftIdSet(timesheets);
+  const durationOf = (t) => getTaskDuration(t, { liveShiftIds });
   const isDollarCategory = isRetainerCategoryDollar;
 
   /** Split add-on hours across hour retainer lines; matched category gets full amount, else even split. */
@@ -248,7 +285,7 @@ export const computeGlobalRetainerStats = (client, mStart, mEnd, deps) => {
 
     const prevTaskHours =
       !catIsDollar
-        ? prevTasks.reduce((acc, t) => acc + getTaskDuration(t), 0) / 3600000
+        ? prevTasks.reduce((acc, t) => acc + durationOf(t), 0) / 3600000
         : 0;
     const prevExpUsed = catIsDollar
       ? prevExps.reduce((acc, e) => acc + Number(e.finalCost || 0), 0)
@@ -266,11 +303,19 @@ export const computeGlobalRetainerStats = (client, mStart, mEnd, deps) => {
   const prevAddonByCat = allocateAddonHoursByCategory(previousCycleAddons);
 
   const timelineEndMs = (t) => {
-    if (t.status === 'active') return Date.now();
+    if (t.status === 'active') {
+      const shiftLive =
+        liveShiftIds.size === 0 || (t.shiftId && liveShiftIds.has(t.shiftId));
+      if (!shiftLive) {
+        const cin = Number(t.clockInTime || 0);
+        return cin + durationOf(t);
+      }
+      return Date.now();
+    }
     const cin = Number(t.clockInTime || 0);
     const out = Number(t.clockOutTime || 0);
     if (out >= cin) return out;
-    return cin + getTaskDuration(t);
+    return cin + durationOf(t);
   };
 
   const taskOverlapsBillingWindow = (t) => {
@@ -280,9 +325,9 @@ export const computeGlobalRetainerStats = (client, mStart, mEnd, deps) => {
     return start <= mEnd && end >= mStart;
   };
 
-  /** Hours attributed to [mStart, mEnd] (prorates tasks that cross cycle boundaries; includes active tasks via getTaskDuration). */
+  /** Hours attributed to [mStart, mEnd] (prorates tasks that cross cycle boundaries; includes active tasks via durationOf). */
   const hoursInBillingWindow = (t) => {
-    const totalMs = getTaskDuration(t);
+    const totalMs = durationOf(t);
     if (!totalMs || totalMs <= 0) return 0;
     const start = Number(t.clockInTime || 0);
     if (!start) return 0;

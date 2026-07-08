@@ -7,13 +7,21 @@ service firebase.storage {
         : '';
     }
 
+    // @ignitepm.com staff — does not require Firestore cross-service lookup.
+    function isIgniteStaffEmail() {
+      return emailLower().matches('.*@ignitepm\\.com$');
+    }
+
     function adminExists() {
       return emailLower() != '' &&
         firestore.exists(/databases/(default)/documents/admins/$(emailLower()));
     }
 
     function isStaff() {
-      return request.auth != null && adminExists();
+      return request.auth != null && (
+        isIgniteStaffEmail() ||
+        adminExists()
+      );
     }
 
     function clientDocData(clientId) {
@@ -36,7 +44,6 @@ service firebase.storage {
     }
 
     match /client-logos/{clientId}/{fileName} {
-      // Logos render in the portal and admin UI; any signed-in user may view.
       allow read: if request.auth != null;
       allow write: if isStaff()
         && request.resource.size < 3 * 1024 * 1024
@@ -45,7 +52,6 @@ service firebase.storage {
     }
 
     match /client-files/{clientId}/{allPaths=**} {
-      // Staff, or portal users authorized on that specific client.
       allow read: if isStaff() || clientAllowsEmail(clientId);
       allow write: if isStaff() && validClientFileUpload();
       allow delete: if isStaff();

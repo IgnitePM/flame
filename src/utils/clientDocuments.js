@@ -44,6 +44,7 @@ export function normalizeClientContacts(raw) {
 export function sanitizeFileName(name) {
   return String(name || 'file')
     .replace(/[^\w.\-()+ ]/g, '_')
+    .replace(/\s+/g, '_')
     .slice(0, 120);
 }
 
