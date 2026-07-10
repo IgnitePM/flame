@@ -119,6 +119,8 @@ import {
   getEnabledRetainerCategoryNames,
   isRetainerCategoryEnabled,
   normalizeRetainerCategoryEnabled,
+  carryoverCategoryKey,
+  buildRetainerCategoryStartDates,
 } from './utils/retainerCategories.js';
 import {
   removeSubtaskFromItems,
@@ -1877,9 +1879,6 @@ export default function App() {
   };
 
   const todoCategoryKey = (cat) =>
-    String(cat ?? '').replace(/[~*[\]/]/g, '_').replace(/\./g, '_');
-
-  const carryoverCategoryKey = (cat) =>
     String(cat ?? '').replace(/[~*[\]/]/g, '_').replace(/\./g, '_');
 
   const buildVirtualCycleTodoData = (client, cycleStart, prevData) => {
@@ -4155,6 +4154,11 @@ export default function App() {
             <div className="p-8 border-t border-slate-100 bg-white shrink-0">
               <button 
                 onClick={async () => {
+                  const prevClient = clients.find((c) => c.id === editingClient.id);
+                  const retainerCategoryStartDates = buildRetainerCategoryStartDates(
+                    editingClient,
+                    prevClient,
+                  );
                   await updateDoc(doc(db, 'clients', editingClient.id), {
                     retainers: editingClient.retainers,
                     retainerUnits: editingClient.retainerUnits || {},
@@ -4170,6 +4174,7 @@ export default function App() {
                         : editingClient.teamMemberAccessEmails,
                     lastCarryoverResetDate: editingClient.lastCarryoverResetDate || null,
                     carryoverResetByCategory: editingClient.carryoverResetByCategory || {},
+                    retainerCategoryStartDates,
                     clientStartDate: editingClient.clientStartDate || null,
                     retainerHourMovesByCycle: editingClient.retainerHourMovesByCycle || {},
                     logoUrl: editingClient.logoUrl || null,

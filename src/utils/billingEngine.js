@@ -2,6 +2,8 @@ import {
   getEnabledRetainerCategoryNames,
   isRetainerCategoryEnabled,
   isRetainerCategoryDollar,
+  carryoverCategoryKey,
+  getRetainerCategoryConfiguredMs,
 } from './retainerCategories.js';
 
 /**
@@ -60,9 +62,6 @@ export const formatTime = (ms) => {
   const totalMins = Math.floor(ms / 60000);
   return `${Math.floor(totalMins / 60)}h ${totalMins % 60}m`;
 };
-
-const carryoverCategoryKey = (cat) =>
-  String(cat ?? '').replace(/[~*[\]/]/g, '_').replace(/\./g, '_');
 
 // Dynamic Billing Period & Global Carryover Logic.
 // billingDay 29-31 is clamped to the last day of short months so cycle
@@ -188,10 +187,10 @@ export const computeGlobalRetainerStats = (client, mStart, mEnd, deps) => {
   const perCategory = {};
 
   const getEffectiveStartMs = (effectiveResetMs, firstActivityMs) => {
-    // Prefer clientStartDate so allocations accrue even if nothing was logged yet.
-    // Fall back to first activity date for legacy clients with no start date.
-    const base = clientStartMs || firstActivityMs || 0;
-    return Math.max(Number(effectiveResetMs || 0), Number(base || 0)) || 0;
+    // Per-category only: never inherit the client's global start date when this
+    // category has no logged activity (avoids false carryover on newly added lines).
+    if (!effectiveResetMs && !firstActivityMs) return 0;
+    return Math.max(Number(effectiveResetMs || 0), Number(firstActivityMs || 0)) || 0;
   };
 
   const isPaused = client.status === 'paused';
@@ -201,7 +200,8 @@ export const computeGlobalRetainerStats = (client, mStart, mEnd, deps) => {
   retainerCategories.forEach((cat) => {
     const base = Number(client.retainers?.[cat] || 0);
     const catResetMs = Number(perCategoryReset[carryoverCategoryKey(cat)] || 0);
-    const effectiveResetMs = Math.max(globalResetMs, catResetMs);
+    const catConfiguredMs = getRetainerCategoryConfiguredMs(client, cat);
+    const effectiveResetMs = Math.max(globalResetMs, catResetMs, catConfiguredMs);
 
     const catIsDollar = isDollarCategory(client, cat);
 

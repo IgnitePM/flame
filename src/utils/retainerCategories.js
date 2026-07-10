@@ -4,6 +4,34 @@
  * enabled when allocation > 0 (legacy clients keep active categories visible).
  */
 
+export function carryoverCategoryKey(cat) {
+  return String(cat ?? '').replace(/[~*[\]/]/g, '_').replace(/\./g, '_');
+}
+
+export function getRetainerCategoryConfiguredMs(client, category) {
+  const key = carryoverCategoryKey(category);
+  const raw =
+    client?.retainerCategoryStartDates?.[key] ??
+    client?.retainerCategoryStartDates?.[category];
+  const n = Number(raw || 0);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/** Stamp when a category first receives a positive allocation on an existing client. */
+export function buildRetainerCategoryStartDates(client, prevClient, now = Date.now()) {
+  const out = { ...(prevClient?.retainerCategoryStartDates || {}) };
+  for (const cat of getConfiguredRetainerCategoryNames(client)) {
+    const key = carryoverCategoryKey(cat);
+    if (out[key] || out[cat]) continue;
+    const amt = Number(client?.retainers?.[cat] ?? 0);
+    if (amt <= 0 || !isRetainerCategoryEnabled(client, cat)) continue;
+    const prevAmt = Number(prevClient?.retainers?.[cat] ?? 0);
+    if (prevAmt > 0 && isRetainerCategoryEnabled(prevClient, cat)) continue;
+    out[key] = now;
+  }
+  return out;
+}
+
 export function isRetainerCategoryEnabled(client, category) {
   if (!category) return false;
   const flags = client?.retainerCategoryEnabled;
