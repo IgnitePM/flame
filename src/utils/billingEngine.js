@@ -13,6 +13,37 @@ import {
 
 export const GENERAL_LABEL = 'General / Unclassified';
 
+/** Whether tasks/expenses should count toward this retainer line. */
+export function isRetainerLineForUsage(client, categoryName) {
+  return !!categoryName && isRetainerCategoryEnabled(client, categoryName);
+}
+
+/**
+ * Hour deduction for a retainer expense. Uses stored equivalentHours when present;
+ * otherwise derives from finalCost ÷ client hourly rate (fixes legacy rows and
+ * expenses saved before a rate was set).
+ */
+export function resolveExpenseEquivalentHours(client, expense, categoryName) {
+  const cat = categoryName || expense?.category;
+  if (!client || !expense || !cat || isRetainerCategoryDollar(client, cat)) return 0;
+  const stored = Number(expense.equivalentHours ?? 0);
+  if (Number.isFinite(stored) && stored > 0) return stored;
+  const finalCost = Number(expense.finalCost ?? expense.rawAmount ?? 0);
+  const rate = Number(client.hourlyRate ?? 0);
+  if (finalCost > 0 && rate > 0) return finalCost / rate;
+  return 0;
+}
+
+/** Hours or dollars to add to category usage for one expense row. */
+export function expenseUsageAmount(client, expense, categoryName) {
+  const cat = categoryName || expense?.category;
+  if (!client || !expense || !cat) return 0;
+  if (isRetainerCategoryDollar(client, cat)) {
+    return Number(expense.finalCost ?? 0);
+  }
+  return resolveExpenseEquivalentHours(client, expense, cat);
+}
+
 /** Shift ids that are still open (employee clocked in or on break). */
 export function getLiveShiftIdSet(timesheets = []) {
   return new Set(
@@ -289,7 +320,10 @@ export const computeGlobalRetainerStats = (client, mStart, mEnd, deps) => {
         : 0;
     const prevExpUsed = catIsDollar
       ? prevExps.reduce((acc, e) => acc + Number(e.finalCost || 0), 0)
-      : prevExps.reduce((acc, e) => acc + Number(e.equivalentHours || 0), 0);
+      : prevExps.reduce(
+          (acc, e) => acc + resolveExpenseEquivalentHours(client, e, cat),
+          0,
+        );
 
     const carryover = allottedPrev - (prevTaskHours + prevExpUsed);
 
@@ -372,19 +406,16 @@ export const computeGlobalRetainerStats = (client, mStart, mEnd, deps) => {
   currentTasks.forEach((t) => {
     if (t.projectName === GENERAL_LABEL) return;
     const cat = canonicalCategory(t.projectName);
-    if (!client.retainers?.[cat] || !isRetainerCategoryEnabled(client, cat)) return;
+    if (!isRetainerLineForUsage(client, cat)) return;
     categoryBreakdown[cat] = (categoryBreakdown[cat] || 0) + hoursInBillingWindow(t);
   });
 
   // Dollar categories use finalCost; hour categories use equivalentHours.
   currentExps.forEach((e) => {
     const cat = canonicalCategory(e.category);
-    if (!cat || !client.retainers?.[cat] || !isRetainerCategoryEnabled(client, cat)) return;
-    if (isDollarCategory(client, cat)) {
-      categoryBreakdown[cat] = (categoryBreakdown[cat] || 0) + (Number(e.finalCost) || 0);
-    } else {
-      categoryBreakdown[cat] = (categoryBreakdown[cat] || 0) + (Number(e.equivalentHours) || 0);
-    }
+    if (!isRetainerLineForUsage(client, cat)) return;
+    categoryBreakdown[cat] =
+      (categoryBreakdown[cat] || 0) + expenseUsageAmount(client, e, cat);
   });
 
   // Finalize per-category totals: base + carryover + prior-cycle add-ons + this cycle add-ons + hour moves.

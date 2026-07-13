@@ -74,6 +74,7 @@ import {
   isRetainerCategoryDollar,
 } from '../utils/retainerCategories.js';
 import { computeRetainerDaysLeft } from '../utils/retainerCategoryStats.js';
+import { resolveExpenseEquivalentHours } from '../utils/billingEngine.js';
 import ClientProfileSummary from './ClientProfileSummary.jsx';
 import ClientFilesPanel from './ClientFilesPanel.jsx';
 import ClientCycleActivityPanel from './ClientCycleActivityPanel.jsx';
@@ -5643,7 +5644,7 @@ const AdminDashboard = ({
                                                         </span>
                                                         {!catIsDollar && (
                                                           <span className="text-[10px] text-slate-400">
-                                                            {(exp.equivalentHours || 0).toFixed(2)}h
+                                                            {resolveExpenseEquivalentHours(c, exp, cat).toFixed(2)}h
                                                           </span>
                                                         )}
                                                         <button

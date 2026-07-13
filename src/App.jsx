@@ -1545,13 +1545,14 @@ export default function App() {
   const saveExpense = async () => {
     if (!expenseValues.billingTarget) return;
 
+    const freshClient = clients.find((c) => c.id === expenseModal.id) || expenseModal;
     const isProject = expenseValues.billingTarget.startsWith('project_');
     const targetId = isProject ? expenseValues.billingTarget.replace('project_', '') : null;
     const catName = isProject ? 'Custom Project' : expenseValues.billingTarget.replace('retainer_', '');
 
     const isPerplexity = expenseValues.inputMode === 'perplexity_credits';
-    const isDollar = isDollarCategory(expenseModal, catName);
-    const clientRate = expenseModal.hourlyRate || 0;
+    const isDollar = isDollarCategory(freshClient, catName);
+    const clientRate = Number(freshClient.hourlyRate || 0);
     const applyMarkup = expenseValues.applyMarkup !== false && !isDollar;
 
     let rawAmount;
@@ -1614,8 +1615,8 @@ export default function App() {
       : null;
 
     await addDoc(collection(db, 'expenses'), {
-      clientId: expenseModal.id,
-      clientName: expenseModal.name,
+      clientId: freshClient.id,
+      clientName: freshClient.name,
       category: catName,
       projectId: targetId,
       description,

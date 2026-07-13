@@ -2440,6 +2440,12 @@ const EmployeeKiosk = ({
                           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
                             Log Client Expense
                           </div>
+                          {!Number(selectedClientObj?.hourlyRate) && !kioskRetainerExpenseIsDollar && (
+                            <p className="text-xs font-bold text-red-600 bg-red-50 border border-red-100 rounded-xl p-3 mb-3">
+                              Set this client&apos;s hourly rate in Admin → Client settings so expenses
+                              convert to retainer hours and deduct from the balance.
+                            </p>
+                          )}
                           <div className="space-y-3">
                             <select
                               value={kioskExpenseInputMode}

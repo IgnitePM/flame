@@ -6,6 +6,7 @@ import {
   getEnabledRetainerCategoryNames,
 } from '../utils/retainerCategories.js';
 import { computeRetainerDaysLeft } from '../utils/retainerCategoryStats.js';
+import { resolveExpenseEquivalentHours } from '../utils/billingEngine.js';
 import RetainerCategoryStats from './RetainerCategoryStats.jsx';
 import {
   ChevronLeft,
@@ -620,7 +621,7 @@ const ClientPortal = ({
                       ${Number(e.finalCost || 0).toFixed(2)}
                     </div>
                     <div className="text-[10px] text-slate-400 font-bold uppercase mt-0.5">
-                      {(e.equivalentHours ?? 0).toFixed(2)} hrs deducted
+                      {resolveExpenseEquivalentHours(clientProfile, e).toFixed(2)} hrs deducted
                     </div>
                   </div>
                 </div>
@@ -699,7 +700,7 @@ const ClientPortal = ({
                         ${Number(e.finalCost || 0).toFixed(2)}
                       </div>
                       <div className="text-[10px] text-slate-400 font-bold uppercase mt-0.5">
-                        {(e.equivalentHours ?? 0).toFixed(2)} hrs deducted
+                        {resolveExpenseEquivalentHours(clientProfile, e).toFixed(2)} hrs deducted
                       </div>
                     </div>
                   </div>
