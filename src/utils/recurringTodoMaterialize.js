@@ -147,8 +147,22 @@ export function recurringInstanceExistsForAnchor(items, recurringId, anchorMs) {
   return (items || []).some((it) => {
     if (!it?.recurring) return false;
     if (stableRecurringSeriesId(it) !== rid) return false;
-    if (anchor && it.dueDate) return sameCalendarDay(it.dueDate, anchor);
+    if (!anchor) return true;
+    if (!it.dueDate) return true; // undated open/carried copy of the series
+    return sameCalendarDay(it.dueDate, anchor);
   });
+}
+
+/** True when any incomplete instance of this recurring series is already present. */
+export function openRecurringInstanceExists(items, recurringId) {
+  const rid = String(recurringId || '').trim();
+  if (!rid) return false;
+  return (items || []).some(
+    (it) =>
+      it?.recurring &&
+      !it.done &&
+      stableRecurringSeriesId(it) === rid,
+  );
 }
 
 function buildRecurringSeedRow(template, cycleStartMs, newTodoId) {
@@ -189,6 +203,39 @@ export function buildRecurringSeedsForCycle(templates, cycleStartMs, newTodoId) 
     .filter((seed) => !!seed.dueDate || !!seed.recurrence?.type);
 }
 
+/** Keep the earliest open occurrence of each recurring series; drop later duplicates. */
+export function pruneDuplicateOpenRecurringInstances(items) {
+  const list = Array.isArray(items) ? items : [];
+  const openByRid = new Map();
+  for (const it of list) {
+    if (!it?.recurring || it.done) continue;
+    const rid = stableRecurringSeriesId(it);
+    if (!rid) continue;
+    if (!openByRid.has(rid)) openByRid.set(rid, []);
+    openByRid.get(rid).push(it);
+  }
+  const dropIds = new Set();
+  for (const [, group] of openByRid) {
+    if (group.length < 2) continue;
+    group.sort((a, b) => {
+      const ad = Number(a.dueDate || 0);
+      const bd = Number(b.dueDate || 0);
+      if (ad && bd && ad !== bd) return ad - bd;
+      if (ad && !bd) return -1;
+      if (!ad && bd) return 1;
+      return String(a.id || '').localeCompare(String(b.id || ''));
+    });
+    for (let i = 1; i < group.length; i++) {
+      if (group[i]?.id) dropIds.add(group[i].id);
+    }
+  }
+  if (!dropIds.size) return { items: list, changed: false };
+  return {
+    items: list.filter((it) => !dropIds.has(it?.id)),
+    changed: true,
+  };
+}
+
 /**
  * Merge carry-forward open tasks and missing recurring seeds into one category.
  * Safe to call when the cycle bucket already exists (backfills gaps).
@@ -220,13 +267,21 @@ export function materializeCategoryTodoFromPrev(
   );
   const seedsToAdd = dedupedSeeds.filter((seed) => {
     const rid = stableRecurringSeriesId(seed);
+    if (!rid) return true;
+    if (openRecurringInstanceExists(items, rid)) return false;
     const anchor = Number(seed.dueDate || 0);
-    if (!rid || !anchor) return true;
+    if (!anchor) return true;
     return !recurringInstanceExistsForAnchor(items, rid, anchor);
   });
 
   if (seedsToAdd.length) {
     items = [...items, ...seedsToAdd];
+    changed = true;
+  }
+
+  const pruned = pruneDuplicateOpenRecurringInstances(items);
+  if (pruned.changed) {
+    items = pruned.items;
     changed = true;
   }
 
@@ -496,19 +551,28 @@ export function reconcileRecurringTodoInstances(
 
     let itemsMut = items;
     let catChanged = false;
+
+    const pruned = pruneDuplicateOpenRecurringInstances(itemsMut);
+    if (pruned.changed) {
+      itemsMut = pruned.items;
+      catChanged = true;
+    }
+
     for (const [, template] of templatesByRid) {
       const rec = effectiveRecurrence(template);
       if (!rec?.type) continue;
       const anchors = listRecurringAnchorsInWindow(rec, cycleStartMs, cycleEndMs);
+      const seriesId = stableRecurringSeriesId(template);
+      // Don't spawn the next occurrence while an earlier one is still open —
+      // that stacks "this month" and "next month" in Due soon lists.
+      if (openRecurringInstanceExists(itemsMut, seriesId)) continue;
+
       for (const anchorMs of anchors) {
-        const skipKey = recurringAnchorKey(stableRecurringSeriesId(template), anchorMs);
+        const skipKey = recurringAnchorKey(seriesId, anchorMs);
         if (skipKey && skippedSet.has(skipKey)) continue;
-        // An instance on the anchor day counts, and so does an open undated
-        // instance of the same series — spawning next to it would just look
-        // like a duplicate the user "can't get rid of".
         const exists = recurringInstanceExistsForAnchor(
           itemsMut,
-          stableRecurringSeriesId(template),
+          seriesId,
           anchorMs,
         );
         if (exists) continue;
@@ -528,34 +592,22 @@ export function reconcileRecurringTodoInstances(
 }
 
 /**
- * Drop newly seeded recurring rows that would duplicate a carried-over open
- * instance of the same series (same due day, or the carried copy is undated).
- * Happens when the prior instance's due date already falls inside the new
- * cycle window — without this, rollover shows two identical tasks.
+ * Drop newly seeded recurring rows when an open instance of the same series
+ * already exists (carried or otherwise). Without this, rollover can show both
+ * this month's unfinished task and next month's freshly seeded occurrence.
  */
 export function dedupeRecurringSeedsAgainstCarried(carriedItems, seedItems) {
-  const carriedDuesByRid = new Map();
+  const openRids = new Set();
   (carriedItems || []).forEach((it) => {
-    if (!it?.recurring) return;
+    if (!it?.recurring || it.done) return;
     const rid = stableRecurringSeriesId(it);
-    if (!rid) return;
-    if (!carriedDuesByRid.has(rid)) carriedDuesByRid.set(rid, []);
-    carriedDuesByRid.get(rid).push(Number(it.dueDate || 0));
+    if (rid) openRids.add(rid);
   });
 
   return (seedItems || []).filter((seed) => {
     const rid = stableRecurringSeriesId(seed);
-    const dues = rid ? carriedDuesByRid.get(rid) : null;
-    if (!dues || !dues.length) return true;
-    if (dues.some((d) => !d)) {
-      const seedDue = Number(seed.dueDate || 0);
-      // An undated open carry-over should not block a dated next occurrence.
-      if (!seedDue) return false;
-      return true;
-    }
-    const seedDue = Number(seed.dueDate || 0);
-    if (!seedDue) return false; // no computable occurrence; carried copy suffices
-    return !dues.some((d) => sameCalendarDay(d, seedDue));
+    if (!rid) return true;
+    return !openRids.has(rid);
   });
 }
 

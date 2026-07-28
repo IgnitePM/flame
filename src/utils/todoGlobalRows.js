@@ -66,7 +66,42 @@ function dedupeTodoRowsAcrossCycles(rows) {
       byKey.set(key, row);
     }
   }
-  return [...byKey.values()];
+  return dedupeOpenRecurringSeriesRows([...byKey.values()]);
+}
+
+/**
+ * Keep only the earliest open occurrence of each recurring series in Due soon /
+ * global task lists. Later-month seeds stay hidden until the earlier one is done.
+ */
+function dedupeOpenRecurringSeriesRows(rows) {
+  const openBySeries = new Map();
+  for (const row of rows || []) {
+    const item = row?.item;
+    if (!item?.recurring || item.done) continue;
+    const rid = String(item.recurringId || item.id || '').trim();
+    if (!rid) continue;
+    const key = `${row.clientId}__${row.categoryKey}__${rid}`;
+    if (!openBySeries.has(key)) openBySeries.set(key, []);
+    openBySeries.get(key).push(row);
+  }
+
+  const drop = new Set();
+  for (const [, group] of openBySeries) {
+    if (group.length < 2) continue;
+    group.sort((a, b) => {
+      const ad = Number(a.item?.dueDate || 0);
+      const bd = Number(b.item?.dueDate || 0);
+      if (ad && bd && ad !== bd) return ad - bd;
+      if (ad && !bd) return -1;
+      if (!ad && bd) return 1;
+      return Number(a.cycleStart || 0) - Number(b.cycleStart || 0);
+    });
+    for (let i = 1; i < group.length; i++) {
+      drop.add(group[i]);
+    }
+  }
+  if (!drop.size) return rows || [];
+  return (rows || []).filter((row) => !drop.has(row));
 }
 
 export function buildGlobalTodoRows(
