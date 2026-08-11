@@ -158,7 +158,7 @@ export default function LeadsPanel({
           <button
             type="button"
             onClick={openCreate}
-            className="bg-black text-white px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider active:scale-95 transition-all"
+            className="bg-[#fd7414] text-white px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider active:scale-95 transition-all hover:brightness-95"
           >
             Add lead
           </button>
@@ -341,7 +341,7 @@ export default function LeadsPanel({
                     <button
                       type="button"
                       onClick={() => onConvertLead?.(lead)}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-bold hover:bg-emerald-100"
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-100 text-emerald-700 text-xs font-bold hover:bg-emerald-100"
                     >
                       <UserPlus className="w-3.5 h-3.5" /> Convert to client
                     </button>

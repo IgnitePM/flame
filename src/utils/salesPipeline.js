@@ -29,10 +29,10 @@ export const DEFAULT_SALES_STAGES = [
     isWon: false,
     isLost: false,
   },
-  { id: 'closed_won', label: 'Closed Won', order: 5, isWon: true, isLost: false },
+  { id: 'closed_won', label: 'Closed (Won)', order: 5, isWon: true, isLost: false },
   {
     id: 'closed_lost',
-    label: 'Closed Lost',
+    label: 'Closed (Lost)',
     order: 6,
     isWon: false,
     isLost: true,

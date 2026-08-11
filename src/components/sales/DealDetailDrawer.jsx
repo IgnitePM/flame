@@ -258,7 +258,7 @@ export default function DealDetailDrawer({
               onClick={() => setAssocType('lead')}
               className={`flex-1 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider ${
                 assocType === 'lead'
-                  ? 'bg-black text-white'
+                  ? 'bg-[#fd7414] text-white'
                   : 'bg-slate-100 text-slate-500'
               }`}
             >
@@ -269,7 +269,7 @@ export default function DealDetailDrawer({
               onClick={() => setAssocType('client')}
               className={`flex-1 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider ${
                 assocType === 'client'
-                  ? 'bg-black text-white'
+                  ? 'bg-[#fd7414] text-white'
                   : 'bg-slate-100 text-slate-500'
               }`}
             >
@@ -317,7 +317,7 @@ export default function DealDetailDrawer({
         {linkedEmail ? (
           <a
             href={`mailto:${encodeURIComponent(linkedEmail)}`}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-sky-50 text-sky-800 text-xs font-bold"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-50 text-blue-600 text-xs font-bold"
           >
             <Mail className="w-3.5 h-3.5" /> Email contact
           </a>
@@ -338,7 +338,7 @@ export default function DealDetailDrawer({
             type="button"
             disabled={saving || !noteBody.trim()}
             onClick={addNote}
-            className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-black uppercase tracking-wider disabled:opacity-40"
+            className="px-4 py-2 rounded-xl bg-[#fd7414] text-white text-xs font-black uppercase tracking-wider disabled:opacity-40 hover:brightness-95"
           >
             Add note
           </button>
@@ -547,7 +547,7 @@ export function NewDealModal({
             type="button"
             onClick={() => setForm((f) => ({ ...f, assocType: 'lead' }))}
             className={`flex-1 px-3 py-2 rounded-xl text-xs font-black uppercase ${
-              form.assocType === 'lead' ? 'bg-black text-white' : 'bg-slate-100'
+              form.assocType === 'lead' ? 'bg-[#fd7414] text-white' : 'bg-slate-100 text-slate-500'
             }`}
           >
             Lead
@@ -556,7 +556,7 @@ export function NewDealModal({
             type="button"
             onClick={() => setForm((f) => ({ ...f, assocType: 'client' }))}
             className={`flex-1 px-3 py-2 rounded-xl text-xs font-black uppercase ${
-              form.assocType === 'client' ? 'bg-black text-white' : 'bg-slate-100'
+              form.assocType === 'client' ? 'bg-[#fd7414] text-white' : 'bg-slate-100 text-slate-500'
             }`}
           >
             Client

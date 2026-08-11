@@ -185,7 +185,7 @@ function ConvertLeadModal({
             type="button"
             disabled={saving}
             onClick={submit}
-            className="bg-emerald-600 text-white px-5 py-2.5 rounded-2xl text-xs font-black uppercase disabled:opacity-50"
+            className="bg-[#fd7414] text-white px-5 py-2.5 rounded-2xl text-xs font-black uppercase disabled:opacity-50 hover:brightness-95"
           >
             {saving ? 'Converting…' : 'Convert'}
           </button>
@@ -210,7 +210,6 @@ export default function SalesFunnelPanel({
 }) {
   const [subTab, setSubTab] = useState('board');
   const [mineOnly, setMineOnly] = useState(false);
-  const [showClosed, setShowClosed] = useState(false);
   const [selectedDealId, setSelectedDealId] = useState(null);
   const [newDealOpen, setNewDealOpen] = useState(false);
   const [newDealDefaults, setNewDealDefaults] = useState({});
@@ -237,7 +236,7 @@ export default function SalesFunnelPanel({
       <div className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
-            <h2 className="font-black text-2xl text-slate-900">Sales</h2>
+            <h2 className="font-black text-2xl text-slate-800">Sales</h2>
             <p className="text-sm text-slate-400 font-medium">
               Track leads and deals. Leads stay out of the kiosk until converted
               to clients.
@@ -286,21 +285,13 @@ export default function SalesFunnelPanel({
                 My deals
               </button>
             </div>
-            <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
-              <input
-                type="checkbox"
-                checked={showClosed}
-                onChange={(e) => setShowClosed(e.target.checked)}
-              />
-              Show closed
-            </label>
             <button
               type="button"
               onClick={() => {
                 setNewDealDefaults({});
                 setNewDealOpen(true);
               }}
-              className="ml-auto bg-black text-white px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider"
+              className="ml-auto bg-[#fd7414] text-white px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider hover:brightness-95"
             >
               Add deal
             </button>
@@ -317,7 +308,6 @@ export default function SalesFunnelPanel({
           adminUsers={adminUsers}
           user={user}
           mineOnly={mineOnly}
-          showClosed={showClosed}
           updateDoc={updateDoc}
           doc={doc}
           onOpenDeal={setSelectedDealId}

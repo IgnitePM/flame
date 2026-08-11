@@ -11,7 +11,6 @@ import {
   formatDealAmount,
   formatDealDate,
   formatRelativeActivity,
-  isClosedStage,
   staffDisplayFromEmail,
 } from '../../utils/salesPipeline.js';
 
@@ -21,6 +20,7 @@ function DealCard({
   clients,
   adminUsers,
   onOpen,
+  closedTone = null,
 }) {
   const assoc = dealAssociationLabel(deal, leads, clients);
   const activity = formatRelativeActivity(deal.lastActivityAt || deal.updatedAt);
@@ -28,6 +28,13 @@ function DealCard({
     Array.isArray(deal.notes) && deal.notes.length
       ? deal.notes[deal.notes.length - 1]
       : null;
+
+  const toneBorder =
+    closedTone === 'won'
+      ? 'border-emerald-200 hover:border-emerald-400/60'
+      : closedTone === 'lost'
+        ? 'border-red-200 hover:border-red-400/60'
+        : 'border-slate-200 hover:border-[#fd7414]/40';
 
   return (
     <div
@@ -37,7 +44,7 @@ function DealCard({
       }}
       onDragEnd={() => clearActiveDealDragPayload()}
       onClick={() => onOpen?.(deal.id)}
-      className="bg-white border border-slate-200 rounded-2xl p-3 shadow-sm cursor-grab active:cursor-grabbing hover:border-[#fd7414]/40 transition-colors text-left w-full"
+      className={`bg-white border rounded-2xl p-3 shadow-sm cursor-grab active:cursor-grabbing transition-colors text-left w-full ${toneBorder}`}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
@@ -73,6 +80,25 @@ function DealCard({
   );
 }
 
+function columnShellClass(stage, isOver) {
+  if (isOver) return 'border-[#fd7414] ring-2 ring-[#fd7414]/20';
+  if (stage.isWon) return 'border-emerald-200';
+  if (stage.isLost) return 'border-red-200';
+  return 'border-slate-200';
+}
+
+function columnHeaderClass(stage) {
+  if (stage.isWon) return 'bg-emerald-100/80 border-emerald-200/80';
+  if (stage.isLost) return 'bg-red-50 border-red-100';
+  return 'bg-slate-50 border-slate-200/80';
+}
+
+function columnTitleClass(stage) {
+  if (stage.isWon) return 'text-emerald-700';
+  if (stage.isLost) return 'text-red-700';
+  return 'text-slate-700';
+}
+
 export default function SalesFunnelBoard({
   deals = [],
   stages = [],
@@ -81,7 +107,6 @@ export default function SalesFunnelBoard({
   adminUsers = [],
   user,
   mineOnly,
-  showClosed,
   updateDoc,
   doc,
   onOpenDeal,
@@ -95,11 +120,9 @@ export default function SalesFunnelBoard({
       if (mineOnly && String(d.ownerEmail || '').toLowerCase() !== me) {
         return false;
       }
-      const stage = stages.find((s) => s.id === d.stageId);
-      if (!showClosed && isClosedStage(stage)) return false;
       return true;
     });
-  }, [deals, mineOnly, me, showClosed, stages]);
+  }, [deals, mineOnly, me]);
 
   const byStage = useMemo(() => {
     const map = Object.fromEntries(stages.map((s) => [s.id, []]));
@@ -133,26 +156,21 @@ export default function SalesFunnelBoard({
     }
   };
 
-  const visibleStages = showClosed
-    ? stages
-    : stages.filter((s) => !isClosedStage(s));
-
   return (
     <div className="overflow-x-auto pb-4 -mx-1 px-1">
       <div className="flex gap-3 min-w-max">
-        {visibleStages.map((stage) => {
+        {stages.map((stage) => {
           const columnDeals = byStage[stage.id] || [];
           const total = columnDeals.reduce(
             (sum, d) => sum + (Number(d.amount) || 0),
             0,
           );
           const isOver = dragOverStageId === stage.id;
+          const closedTone = stage.isWon ? 'won' : stage.isLost ? 'lost' : null;
           return (
             <div
               key={stage.id}
-              className={`w-[260px] flex-shrink-0 rounded-[24px] border bg-slate-50/80 flex flex-col max-h-[70vh] ${
-                isOver ? 'border-[#fd7414] ring-2 ring-[#fd7414]/20' : 'border-slate-200'
-              }`}
+              className={`w-[260px] flex-shrink-0 rounded-[24px] border bg-slate-50/80 flex flex-col max-h-[70vh] ${columnShellClass(stage, isOver)}`}
               onDragOver={(e) => {
                 if (!hasDealDragPayload(e.dataTransfer) && !peekDealDragPayload()) {
                   return;
@@ -174,9 +192,13 @@ export default function SalesFunnelBoard({
                 }
               }}
             >
-              <div className="px-3 py-3 border-b border-slate-200/80 sticky top-0 bg-slate-50/95 rounded-t-[24px] z-10">
+              <div
+                className={`px-3 py-3 border-b sticky top-0 rounded-t-[24px] z-10 ${columnHeaderClass(stage)}`}
+              >
                 <div className="flex items-center justify-between gap-2">
-                  <div className="font-black text-xs text-slate-700 uppercase tracking-wide">
+                  <div
+                    className={`font-black text-xs uppercase tracking-wide ${columnTitleClass(stage)}`}
+                  >
                     {stage.label}
                   </div>
                   <span className="text-[10px] font-black text-slate-400 bg-white px-2 py-0.5 rounded-full border border-slate-200">
@@ -205,11 +227,12 @@ export default function SalesFunnelBoard({
                       clients={clients}
                       adminUsers={adminUsers}
                       onOpen={onOpenDeal}
+                      closedTone={closedTone}
                     />
                   ))
                 )}
               </div>
-              <div className="px-3 py-3 border-t border-slate-200 bg-white/80 rounded-b-[24px] text-[11px] font-bold text-slate-600">
+              <div className="px-3 py-3 border-t border-slate-200 bg-white rounded-b-[24px] text-[11px] font-bold text-slate-600">
                 <div>Total: {formatDealAmount(total)}</div>
               </div>
             </div>

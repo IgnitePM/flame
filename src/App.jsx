@@ -177,15 +177,26 @@ const StaffThemeShell = ({ children }) => (
   </div>
 );
 
-/** Kiosk users must use /workspace URLs; preserve client deep-link. */
-function RedirectKioskAdminClientToWorkspace() {
+/** Legacy client deep-links → canonical /clients/:id */
+function RedirectStaffAdminClientToClients() {
   const { clientId } = useParams();
-  return <Navigate to={`/workspace/clients/${clientId}`} replace />;
+  const [searchParams] = useSearchParams();
+  const qs = searchParams.toString();
+  return (
+    <Navigate
+      to={`/clients/${clientId}${qs ? `?${qs}` : ''}`}
+      replace
+    />
+  );
+}
+
+/** @deprecated Prefer RedirectStaffAdminClientToClients */
+function RedirectKioskAdminClientToWorkspace() {
+  return <RedirectStaffAdminClientToClients />;
 }
 
 function RedirectStaffWorkspaceClientToAdmin() {
-  const { clientId } = useParams();
-  return <Navigate to={`/admin/clients/${clientId}`} replace />;
+  return <RedirectStaffAdminClientToClients />;
 }
 
 // Use `custom_projects` (not `projects`) for ?tab= to avoid clashes with routers/proxies treating "projects" specially.
@@ -216,8 +227,11 @@ function parseDatetimeLocalToMs(s) {
   return d.getTime();
 }
 
-const AdminDashboardRouteView = ({ adminDashboardProps, navigate }) => {
-  const adminBasePath = adminDashboardProps?.adminBasePath || '/admin';
+const AdminDashboardRouteView = ({
+  adminDashboardProps,
+  navigate,
+  lockedTab = null,
+}) => {
   const params = useParams();
   const clientId = params?.clientId || null;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -257,13 +271,14 @@ const AdminDashboardRouteView = ({ adminDashboardProps, navigate }) => {
   return (
     <AdminDashboard
       {...adminDashboardProps}
+      lockedTab={lockedTab}
       clientId={clientId}
       clientPageTab={clientId ? clientPageTab : null}
       setClientPageTab={setClientPageTab}
       clientUrlCycle={clientUrlCycle}
       mergeClientSearchParams={mergeClientSearchParams}
-      navigateToClient={(id) => navigate(`${adminBasePath}/clients/${id}`)}
-      navigateToClientsList={() => navigate(adminBasePath)}
+      navigateToClient={(id) => navigate(`/clients/${id}`)}
+      navigateToClientsList={() => navigate('/clients')}
     />
   );
 };
@@ -314,13 +329,34 @@ export default function App() {
     // Don't fight client portal, which is role-driven and not yet routed.
     if (view === 'client_portal') return;
     const path = location.pathname || '/';
-    if (path.startsWith('/admin') || path.startsWith('/workspace')) {
+    if (
+      path.startsWith('/admin') ||
+      path.startsWith('/workspace') ||
+      path.startsWith('/tasks') ||
+      path.startsWith('/clients') ||
+      path.startsWith('/sales')
+    ) {
       if (view !== 'admin') setView('admin');
-      if (
-        adminTab !== 'clients' &&
-        (path.startsWith('/admin/clients') || path.startsWith('/workspace/clients'))
+      if (path.startsWith('/tasks')) setAdminTab('tasks_global');
+      else if (path.startsWith('/clients')) setAdminTab('clients');
+      else if (path.startsWith('/sales')) setAdminTab('sales');
+      else if (
+        path === '/admin' ||
+        path === '/workspace' ||
+        path.startsWith('/admin/') ||
+        path.startsWith('/workspace/')
       ) {
-        setAdminTab('clients');
+        // Admin/Workspace shell: keep current admin-only tab, or default.
+        setAdminTab((prev) => {
+          const adminOnly = [
+            'timesheets',
+            'billing',
+            'payroll',
+            'tasks',
+            'users',
+          ];
+          return adminOnly.includes(prev) ? prev : 'timesheets';
+        });
       }
       return;
     }
@@ -3056,7 +3092,7 @@ export default function App() {
   const workspaceDashboardRouteProps = {
     ...adminDashboardBaseProps,
     adminBasePath: '/workspace',
-    dashboardTitle: 'Workspace',
+    dashboardTitle: 'Admin',
   };
 
   const portalPreviewClient =
@@ -3149,33 +3185,67 @@ export default function App() {
               </span>
             </div>
 
-          <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 p-1.5">
+          <div className="flex items-center gap-1 sm:gap-2 rounded-2xl border border-white/10 bg-white/5 p-1.5 overflow-x-auto no-scrollbar max-w-[calc(100vw-8rem)]">
               <button
                 onClick={() => navigate('/kiosk')}
-                className={`px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
-                  view === 'employee'
+                className={`px-3 sm:px-5 py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                  location.pathname.startsWith('/kiosk')
                     ? 'bg-[#fd7414] text-white shadow-md shadow-[#fd7414]/25'
                     : 'text-zinc-400 hover:text-white'
                 }`}
               >
                 Kiosk
               </button>
-            {currentUserRole === 'kiosk' ? (
               <button
-                onClick={() => navigate('/workspace')}
-                className={`px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
-                  view === 'admin'
+                onClick={() => navigate('/tasks')}
+                className={`px-3 sm:px-5 py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                  location.pathname.startsWith('/tasks')
                     ? 'bg-[#fd7414] text-white shadow-md shadow-[#fd7414]/25'
                     : 'text-zinc-400 hover:text-white'
                 }`}
               >
-                Workspace
+                Tasks
+              </button>
+              <button
+                onClick={() => navigate('/clients')}
+                className={`px-3 sm:px-5 py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                  location.pathname.startsWith('/clients')
+                    ? 'bg-[#fd7414] text-white shadow-md shadow-[#fd7414]/25'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                Clients
+              </button>
+              {!!myAdminDoc?.features?.salesFunnel && (
+                <button
+                  onClick={() => navigate('/sales')}
+                  className={`px-3 sm:px-5 py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                    location.pathname.startsWith('/sales')
+                      ? 'bg-[#fd7414] text-white shadow-md shadow-[#fd7414]/25'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  Sales
+                </button>
+              )}
+            {currentUserRole === 'kiosk' ? (
+              <button
+                onClick={() => navigate('/workspace')}
+                className={`px-3 sm:px-5 py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                  location.pathname.startsWith('/workspace') ||
+                  location.pathname.startsWith('/admin')
+                    ? 'bg-[#fd7414] text-white shadow-md shadow-[#fd7414]/25'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                Admin
               </button>
             ) : (
               <button
                 onClick={() => navigate('/admin')}
-                className={`px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
-                  view === 'admin'
+                className={`px-3 sm:px-5 py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                  location.pathname.startsWith('/admin') ||
+                  location.pathname.startsWith('/workspace')
                     ? 'bg-[#fd7414] text-white shadow-md shadow-[#fd7414]/25'
                     : 'text-zinc-400 hover:text-white'
                 }`}
@@ -3188,7 +3258,7 @@ export default function App() {
                   setUser(null);
                   signOut(auth);
                 }}
-                className="ml-1 p-2 text-zinc-500 hover:text-white transition-colors"
+                className="ml-1 p-2 text-zinc-500 hover:text-white transition-colors shrink-0"
                 title="Sign out"
               >
                 <LogOut className="w-5 h-5" />
@@ -3209,6 +3279,74 @@ export default function App() {
               }
             />
             <Route
+              path="/tasks"
+              element={
+                <StaffThemeShell>
+                  <AdminDashboardRouteView
+                    adminDashboardProps={
+                      currentUserRole === 'kiosk'
+                        ? workspaceDashboardRouteProps
+                        : adminDashboardRouteProps
+                    }
+                    navigate={navigate}
+                    lockedTab="tasks_global"
+                  />
+                </StaffThemeShell>
+              }
+            />
+            <Route
+              path="/clients"
+              element={
+                <StaffThemeShell>
+                  <AdminDashboardRouteView
+                    adminDashboardProps={
+                      currentUserRole === 'kiosk'
+                        ? workspaceDashboardRouteProps
+                        : adminDashboardRouteProps
+                    }
+                    navigate={navigate}
+                    lockedTab="clients"
+                  />
+                </StaffThemeShell>
+              }
+            />
+            <Route
+              path="/clients/:clientId"
+              element={
+                <StaffThemeShell>
+                  <AdminDashboardRouteView
+                    adminDashboardProps={
+                      currentUserRole === 'kiosk'
+                        ? workspaceDashboardRouteProps
+                        : adminDashboardRouteProps
+                    }
+                    navigate={navigate}
+                    lockedTab="clients"
+                  />
+                </StaffThemeShell>
+              }
+            />
+            <Route
+              path="/sales"
+              element={
+                myAdminDoc?.features?.salesFunnel ? (
+                  <StaffThemeShell>
+                    <AdminDashboardRouteView
+                      adminDashboardProps={
+                        currentUserRole === 'kiosk'
+                          ? workspaceDashboardRouteProps
+                          : adminDashboardRouteProps
+                      }
+                      navigate={navigate}
+                      lockedTab="sales"
+                    />
+                  </StaffThemeShell>
+                ) : (
+                  <Navigate to="/kiosk" replace />
+                )
+              }
+            />
+            <Route
               path="/admin"
               element={
                 currentUserRole === 'kiosk' ? (
@@ -3225,18 +3363,7 @@ export default function App() {
             />
             <Route
               path="/admin/clients/:clientId"
-              element={
-                currentUserRole === 'kiosk' ? (
-                  <RedirectKioskAdminClientToWorkspace />
-                ) : (
-                  <StaffThemeShell>
-                    <AdminDashboardRouteView
-                      adminDashboardProps={adminDashboardRouteProps}
-                      navigate={navigate}
-                    />
-                  </StaffThemeShell>
-                )
-              }
+              element={<RedirectStaffAdminClientToClients />}
             />
             <Route
               path="/workspace"
@@ -3255,18 +3382,7 @@ export default function App() {
             />
             <Route
               path="/workspace/clients/:clientId"
-              element={
-                currentUserRole === 'kiosk' ? (
-                  <StaffThemeShell>
-                    <AdminDashboardRouteView
-                      adminDashboardProps={workspaceDashboardRouteProps}
-                      navigate={navigate}
-                    />
-                  </StaffThemeShell>
-                ) : (
-                  <RedirectStaffWorkspaceClientToAdmin />
-                )
-              }
+              element={<RedirectStaffAdminClientToClients />}
             />
             <Route path="*" element={<Navigate to="/kiosk" replace />} />
           </Routes>

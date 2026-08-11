@@ -29,7 +29,6 @@ import {
   Trash2,
   Users,
   X,
-  Kanban,
 } from 'lucide-react';
 import SalesFunnelPanel from './sales/SalesFunnelPanel.jsx';
 import {
@@ -1040,11 +1039,20 @@ const AdminDashboard = ({
   salesLeads = [],
   salesDeals = [],
   salesPipeline = null,
+  lockedTab = null,
 }) => {
   const canBilling = currentUserRole === 'admin' || currentUserRole === 'billing';
   const isAdmin = currentUserRole === 'admin';
   const isRestrictedStaff = currentUserRole === 'kiosk';
   const hasSalesFunnelAccess = !!canSalesFunnel;
+  const isPrimarySection = !!lockedTab;
+  const sectionTitle = lockedTab === 'tasks_global'
+    ? 'Tasks'
+    : lockedTab === 'clients'
+      ? 'Clients'
+      : lockedTab === 'sales'
+        ? 'Sales'
+        : dashboardTitle;
   const teamAccessibleClients = useMemo(
     () => filterClientsForTeamMember(clients, user?.email),
     [clients, user?.email],
@@ -1262,15 +1270,18 @@ const AdminDashboard = ({
   const [userTodoSaving, setUserTodoSaving] = useState(false);
 
   useEffect(() => {
-    if (!isRestrictedStaff) return;
-    const ok = [
-      'timesheets',
-      'tasks_global',
-      'clients',
-      ...(hasSalesFunnelAccess ? ['sales'] : []),
-    ].includes(adminTab);
-    if (!ok) setAdminTab('timesheets');
-  }, [isRestrictedStaff, adminTab, setAdminTab, hasSalesFunnelAccess]);
+    if (lockedTab) {
+      if (adminTab !== lockedTab) setAdminTab(lockedTab);
+      return;
+    }
+    if (!isRestrictedStaff) {
+      const adminOnly = ['timesheets', 'billing', 'payroll', 'tasks', 'users'];
+      if (!adminOnly.includes(adminTab)) setAdminTab('timesheets');
+      return;
+    }
+    // Kiosk staff in Admin shell: timesheets only.
+    if (adminTab !== 'timesheets') setAdminTab('timesheets');
+  }, [isRestrictedStaff, adminTab, setAdminTab, lockedTab]);
   const [estimateModal, setEstimateModal] = useState(null);
   const [estimateValues, setEstimateValues] = useState({
     hours: '',
@@ -1977,16 +1988,12 @@ const AdminDashboard = ({
       <div className="bg-white p-4 sm:p-6 rounded-[32px] shadow-sm border border-slate-100 flex flex-col lg:flex-row justify-between items-center gap-6">
         <div className="flex flex-col gap-2 w-full lg:w-auto">
           <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">
-            {dashboardTitle}
+            {sectionTitle}
           </div>
+        {!isPrimarySection && (
         <div className="flex bg-slate-100 p-1 rounded-2xl w-full lg:w-auto overflow-x-auto no-scrollbar">
           {[
             { id: 'timesheets', label: 'Timesheets', icon: List },
-            { id: 'tasks_global', label: 'Tasks', icon: CheckSquare },
-            { id: 'clients', label: 'Clients', icon: History },
-            ...(hasSalesFunnelAccess
-              ? [{ id: 'sales', label: 'Sales', icon: Kanban }]
-              : []),
             ...(canBilling && !isRestrictedStaff
               ? [
                   {
@@ -2013,6 +2020,7 @@ const AdminDashboard = ({
             </button>
           ))}
         </div>
+        )}
         </div>
 
         <div className="flex flex-wrap gap-2 w-full md:w-auto">
@@ -4257,7 +4265,7 @@ const AdminDashboard = ({
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   const u = new URL(
-                                    `${window.location.origin}${adminBasePath}/clients/${c.id}`,
+                                    `${window.location.origin}/clients/${c.id}`,
                                   );
                                   u.searchParams.set('tab', 'timesheets');
                                   u.searchParams.set('cycle', String(mStart));
