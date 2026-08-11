@@ -1250,16 +1250,25 @@ const EmployeeKiosk = ({
 
   const categoryKioskTodoRows = React.useMemo(() => {
     if (!selectedClientObj || !selectedTodoCategoryName) return [];
-    let rows = globalTodoRows.filter(
-      (row) =>
-        row.clientId === selectedClientObj.id &&
-        kioskRowMatchesSelectedCategory(
+    const currentStart = Number(cycleStart || 0);
+    let rows = globalTodoRows.filter((row) => {
+      if (row.clientId !== selectedClientObj.id) return false;
+      if (
+        !kioskRowMatchesSelectedCategory(
           row,
           selectedClientObj,
           selectedTodoCategoryName,
-        ) &&
-        !row.item?.done,
-    );
+        )
+      ) {
+        return false;
+      }
+      // Keep open work (including prior-cycle carryovers). Completed items only
+      // stay visible for the current retainer cycle so they can be reopened.
+      if (row.item?.done) {
+        return currentStart > 0 && Number(row.cycleStart) === currentStart;
+      }
+      return true;
+    });
     if (categoryTodoMineOnly) {
       if (canManageClientTodos) {
         rows = rows.filter((row) =>
@@ -1275,9 +1284,16 @@ const EmployeeKiosk = ({
         );
       }
     }
-    return kioskTaskSortMode === 'client'
-      ? sortTodoRowsByClientThenDue(rows)
-      : sortTodoRowsByDueThenClient(rows);
+    const sorted =
+      kioskTaskSortMode === 'client'
+        ? sortTodoRowsByClientThenDue(rows)
+        : sortTodoRowsByDueThenClient(rows);
+    // Open tasks first, then completed (still crossed off) for this cycle.
+    return [...sorted].sort((a, b) => {
+      const aDone = a.item?.done ? 1 : 0;
+      const bDone = b.item?.done ? 1 : 0;
+      return aDone - bDone;
+    });
   }, [
     globalTodoRows,
     selectedClientObj,
@@ -1287,6 +1303,7 @@ const EmployeeKiosk = ({
     meLower,
     user?.email,
     kioskTaskSortMode,
+    cycleStart,
     kioskRowMatchesSelectedCategory,
   ]);
 
@@ -1858,6 +1875,9 @@ const EmployeeKiosk = ({
                                 </span>
                               )}
                             </div>
+                            <p className="text-[11px] text-slate-600 mb-2 rounded-xl bg-sky-50 border border-sky-100 px-3 py-2">
+                              Please record notes on progress and mark completed tasks as done as they are completed.
+                            </p>
                             {categoryTodoShowsPriorCycle && (
                               <p className="text-[10px] text-amber-800/90 mb-2">
                                 Tasks marked &quot;Prior cycle&quot; are from an earlier billing period. Complete their sub-tasks here, then check off the primary task.
@@ -1886,7 +1906,7 @@ const EmployeeKiosk = ({
                               <p className="text-xs italic text-slate-400 mb-2">
                                 {categoryTodoMineOnly
                                   ? 'No tasks assigned to you here. Uncheck "Show only tasks assigned to me" to see the full team list.'
-                                  : 'No open tasks for this category.'}
+                                  : 'No tasks for this category in the current cycle.'}
                               </p>
                             ) : (
                               <ul className="space-y-3 mb-3 overflow-visible">
@@ -2248,6 +2268,9 @@ const EmployeeKiosk = ({
                                 </span>
                               )}
                             </div>
+                            <p className="text-[11px] text-slate-600 mb-2 rounded-xl bg-sky-50 border border-sky-100 px-3 py-2">
+                              Please record notes on progress and mark completed tasks as done as they are completed.
+                            </p>
                             {categoryTodoShowsPriorCycle && (
                               <p className="text-[10px] text-amber-800/90 mb-2">
                                 Tasks marked &quot;Prior cycle&quot; are from an earlier billing period. Complete their sub-tasks here, then check off the primary task.
@@ -2276,7 +2299,7 @@ const EmployeeKiosk = ({
                               <p className="text-xs italic text-slate-400 mb-2">
                                 {categoryTodoMineOnly
                                   ? 'No tasks assigned to you here. Uncheck "Show only tasks assigned to me" to see the full team list.'
-                                  : 'No open tasks for this category.'}
+                                  : 'No tasks for this category in the current cycle.'}
                               </p>
                             ) : (
                               <ul className="space-y-3 mb-3 overflow-visible">
