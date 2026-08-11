@@ -74,6 +74,13 @@ import {
   getLiveShiftIdSet,
   formatTime,
 } from './utils/billingEngine.js';
+import {
+  buildNotificationDoc,
+  collectTodoChangeNotifications,
+  NOTIFICATION_TYPES,
+} from './utils/notifications.js';
+import { buildAiSummaryPayload } from './utils/aiSummaryPayload.js';
+import { staffDisplayName } from './utils/staffDirectory.js';
 import ClientPortal from './components/ClientPortal.jsx';
 import EmployeeKiosk from './components/EmployeeKiosk.jsx';
 import AdminDashboard from './components/AdminDashboard.jsx';
@@ -284,6 +291,7 @@ export default function App() {
   const [myAdminDoc, setMyAdminDoc] = useState(null);
   const [adminDocReady, setAdminDocReady] = useState(false);
   const [adminUsersFromCollection, setAdminUsersFromCollection] = useState([]);
+  const [inboxNotifications, setInboxNotifications] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [projects, setProjects] = useState([]);
   const [addons, setAddons] = useState([]);
@@ -719,8 +727,7 @@ export default function App() {
     setDoc(doc(db, 'admins', emailKey), { email: user.email, role: 'kiosk' }).catch(() => {});
   }, [user?.email, adminDocReady, myAdminDoc]);
 
-  const canListAllAdmins =
-    user?.email === 'chris@ignitepm.com' || myAdminDoc?.role === 'admin';
+  const canListAllAdmins = !!user?.email && (!!myAdminDoc || user.email === 'chris@ignitepm.com');
 
   useEffect(() => {
     if (!user?.email || !canListAllAdmins) {
@@ -736,9 +743,57 @@ export default function App() {
   }, [user?.email, canListAllAdmins]);
 
   const adminUsers = useMemo(() => {
-    if (canListAllAdmins) return adminUsersFromCollection;
+    if (adminUsersFromCollection.length) return adminUsersFromCollection;
     return myAdminDoc ? [myAdminDoc] : [];
-  }, [canListAllAdmins, adminUsersFromCollection, myAdminDoc]);
+  }, [adminUsersFromCollection, myAdminDoc]);
+
+  useEffect(() => {
+    if (!user?.email) {
+      setInboxNotifications([]);
+      return;
+    }
+    const emailKey = String(user.email).trim().toLowerCase();
+    const unsub = onSnapshot(
+      query(collection(db, 'notifications'), where('recipientEmail', '==', emailKey)),
+      (snapshot) => {
+        setInboxNotifications(
+          snapshot.docs
+            .map((d) => ({ id: d.id, ...d.data() }))
+            .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)),
+        );
+      },
+      () => setInboxNotifications([]),
+    );
+    return () => unsub();
+  }, [user?.email]);
+
+  const createInboxNotifications = useCallback(async (docs) => {
+    const list = (docs || []).filter(Boolean);
+    if (!list.length) return;
+    await Promise.all(
+      list.map((payload) => addDoc(collection(db, 'notifications'), payload)),
+    );
+  }, []);
+
+  const dismissInboxNotification = useCallback(async (notification) => {
+    if (!notification?.id) return;
+    await updateDoc(doc(db, 'notifications', notification.id), {
+      dismissed: true,
+      dismissedAt: Date.now(),
+    });
+  }, []);
+
+  const dismissAllInboxNotifications = useCallback(async () => {
+    const open = inboxNotifications.filter((n) => !n.dismissed);
+    await Promise.all(
+      open.map((n) =>
+        updateDoc(doc(db, 'notifications', n.id), {
+          dismissed: true,
+          dismissedAt: Date.now(),
+        }),
+      ),
+    );
+  }, [inboxNotifications]);
 
   const updateUserTodos = async (nextItems) => {
     if (!user?.uid) return;
@@ -1430,6 +1485,27 @@ export default function App() {
             autoStoppedAt: endTime,
             shiftNote: IDLE_TAG,
           });
+          const recipient = String(user?.email || '').trim().toLowerCase();
+          if (recipient) {
+            createInboxNotifications([
+              buildNotificationDoc({
+                recipientEmail: recipient,
+                type: NOTIFICATION_TYPES.FORGOT_CLOCK_OUT,
+                title: 'You were auto clocked out after being idle',
+                body: task?.clientName
+                  ? `Your ${task.projectName || 'task'} on ${task.clientName} was stopped so idle time was not billed.`
+                  : 'Your shift was ended automatically. Check the kiosk next time you step away.',
+                actorEmail: recipient,
+                actorName: staffDisplayName({
+                  email: user?.email,
+                  displayName: user?.displayName,
+                }),
+                clientId: task?.clientId || null,
+                clientName: task?.clientName || null,
+                itemId: task?.id || null,
+              }),
+            ]).catch(() => {});
+          }
         } catch (err) {
           shiftUpdateError = err;
           console.error('Idle auto clock-out: shift update failed:', err);
@@ -1966,6 +2042,7 @@ export default function App() {
     const freshClient = resolveClient(client) || client;
     const cycles = ensureCurrentCycleTodoData(freshClient, cycleStart);
     const cycleData = cycles[String(cycleStart)] || {};
+    const prevCategory = cycleData[categoryKey] || {};
     cycles[String(cycleStart)] = { ...cycleData, [categoryKey]: nextCategoryData };
     const period = getBillingPeriod(freshClient.billingDay || 1, 0);
     if (String(cycleStart) === String(period.start)) {
@@ -1980,6 +2057,19 @@ export default function App() {
     }
     const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(freshClient, cycles);
     await updateDoc(doc(db, 'clients', freshClient.id), { todoCycles: cycles, ...teamAccessPatch });
+    const notifyDocs = collectTodoChangeNotifications({
+      prevItems: prevCategory.items || [],
+      nextItems: nextCategoryData?.items || [],
+      actorEmail: user?.email,
+      actorName: staffDisplayName({
+        email: user?.email,
+        displayName: user?.displayName,
+      }),
+      clientId: freshClient.id,
+      clientName: freshClient.name,
+      categoryKey,
+    });
+    createInboxNotifications(notifyDocs).catch(() => {});
   };
 
   /** Mark a primary client task complete across every stored billing cycle copy. */
@@ -2067,6 +2157,7 @@ export default function App() {
     const freshClient = resolveClient(client) || client;
     const cycles = ensureCurrentCycleTodoData(freshClient, cycleStart);
     const cycleData = cycles[String(cycleStart)] || {};
+    const prevByKey = { ...cycleData };
     cycles[String(cycleStart)] = {
       ...cycleData,
       ...categoryKeyToData,
@@ -2084,9 +2175,24 @@ export default function App() {
     }
     const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(freshClient, cycles);
     await updateDoc(doc(db, 'clients', freshClient.id), { todoCycles: cycles, ...teamAccessPatch });
+    const actorName = staffDisplayName({
+      email: user?.email,
+      displayName: user?.displayName,
+    });
+    const batchDocs = Object.entries(categoryKeyToData || {}).flatMap(
+      ([categoryKey, nextCategoryData]) =>
+        collectTodoChangeNotifications({
+          prevItems: prevByKey[categoryKey]?.items || [],
+          nextItems: nextCategoryData?.items || [],
+          actorEmail: user?.email,
+          actorName,
+          clientId: freshClient.id,
+          clientName: freshClient.name,
+          categoryKey,
+        }),
+    );
+    createInboxNotifications(batchDocs).catch(() => {});
   };
-
-  /** Delete a client task (or sub-task) in one Firestore write; removes primary tasks from all cycles. */
   const deleteClientTodoItem = useCallback(
     async (
       clientId,
@@ -2779,6 +2885,37 @@ export default function App() {
     uploadClientDocument,
     removeClientDocument,
     handleIdleAutoClockOut,
+    notifications: inboxNotifications,
+    dismissNotification: dismissInboxNotification,
+    dismissAllNotifications: dismissAllInboxNotifications,
+    timesheets,
+    getShiftDuration,
+    generateAiSummary: async ({ scope = 'overall', clientId = null } = {}) => {
+      const context = buildAiSummaryPayload({
+        scope,
+        clientId,
+        clients,
+        getTodoStateForCycle,
+        getBillingPeriod,
+        getGlobalRetainerStats,
+        timesheets,
+        taskLogs,
+        getShiftDuration,
+        getTaskDuration: getTaskDurationForBilling,
+        user,
+        role: currentUserRole,
+      });
+      const resp = await fetch('/.netlify/functions/gemini-summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ context }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(data?.error || 'Could not generate AI summary.');
+      }
+      return data;
+    },
   };
 
   const adminDashboardBaseProps = {

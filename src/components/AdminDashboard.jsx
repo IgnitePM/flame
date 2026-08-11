@@ -82,6 +82,7 @@ import RetainerCategoryStats from './RetainerCategoryStats.jsx';
 import TaskLogSessionDetail from './TaskLogSessionDetail.jsx';
 import TaskLogTimesheetRow from './TaskLogTimesheetRow.jsx';
 import TodoItemAttachments from './TodoItemAttachments.jsx';
+import TaskNotesSection from './TaskNotesSection.jsx';
 import PayrollView from './PayrollView.jsx';
 import SlackNotificationsCard from './SlackNotificationsCard.jsx';
 import TodoDeleteConfirmModal from './TodoDeleteConfirmModal.jsx';
@@ -2856,6 +2857,25 @@ const AdminDashboard = ({
                             compact
                           />
                         )}
+                        {rowClient && (
+                          <TaskNotesSection
+                            item={row.item}
+                            allItems={row.catTodo?.items || [row.item]}
+                            onPersistItems={(nextItems) =>
+                              updateClientTodo(rowClient, row.cycleStart, row.categoryKey, {
+                                ...row.catTodo,
+                                items: nextItems,
+                              })
+                            }
+                            user={user}
+                            staffEmails={assignableEmails}
+                            adminUsers={adminUsers}
+                            disabled={
+                              todoSaving || isCycleLocked(rowClient, row.cycleStart)
+                            }
+                            compact
+                          />
+                        )}
                       </div>
                       {isAdmin && rowClient && (
                         <div className="shrink-0 flex flex-col sm:flex-row sm:items-center gap-2">
@@ -4936,6 +4956,23 @@ const AdminDashboard = ({
                                             onRemove={removeClientDocument}
                                           />
                                         )}
+                                        <TaskNotesSection
+                                          item={item}
+                                          allItems={catTodo?.items || [item]}
+                                          onPersistItems={(nextItems) =>
+                                            updateClientTodo(c, cycleStart, catKey, {
+                                              ...catTodo,
+                                              items: nextItems,
+                                            })
+                                          }
+                                          user={user}
+                                          staffEmails={assignableEmails}
+                                          adminUsers={adminUsers}
+                                          disabled={
+                                            todoSaving || isCycleLocked(c, cycleStart)
+                                          }
+                                          compact
+                                        />
                                       </li>
                                     )})}
                                   </ul>
@@ -5975,6 +6012,23 @@ const AdminDashboard = ({
                                                                   onRemove={removeClientDocument}
                                                                 />
                                                               )}
+                                                              <TaskNotesSection
+                                                                item={item}
+                                                                allItems={catTodo?.items || [item]}
+                                                                onPersistItems={(nextItems) =>
+                                                                  updateClientTodo(c, cycleStart, catKey, {
+                                                                    ...catTodo,
+                                                                    items: nextItems,
+                                                                  })
+                                                                }
+                                                                user={user}
+                                                                staffEmails={assignableEmails}
+                                                                adminUsers={adminUsers}
+                                                                disabled={
+                                                                  todoSaving || isCycleLocked(c, cycleStart)
+                                                                }
+                                                                compact
+                                                              />
                                                               {subs.length > 0 && (
                                                                 <ul className="ml-3 border-l border-slate-200 pl-3 space-y-2 w-full min-w-0 max-w-full overflow-x-hidden">
                                                                   {subs.map((sub) => {

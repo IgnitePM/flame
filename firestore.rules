@@ -52,7 +52,8 @@ service cloud.firestore {
     }
 
     match /admins/{adminId} {
-      allow read: if isSignedIn() && (isAdmin() || adminId == emailLower());
+      // Staff directory is needed for @mentions and assignee pickers.
+      allow read: if isAnyStaff();
       // @ignitepm.com staff may self-provision their own kiosk-role doc so a
       // new employee isn't locked out before an admin adds them. The owner
       // account may always (re)create its own admin doc as a bootstrap anchor.
@@ -165,6 +166,20 @@ service cloud.firestore {
     match /userTodos/{uid} {
       allow read: if isSignedIn() && uid == request.auth.uid;
       allow create, update, delete: if isSignedIn() && uid == request.auth.uid;
+    }
+
+    // In-app inbox: assignment, @mentions, clock-out alerts, AI briefs.
+    match /notifications/{notificationId} {
+      allow read: if isAnyStaff() && resource.data.recipientEmail == emailLower();
+      allow create: if isAnyStaff()
+        && request.resource.data.recipientEmail is string
+        && request.resource.data.recipientEmail != '';
+      allow update: if isAnyStaff()
+        && resource.data.recipientEmail == emailLower()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['dismissed', 'dismissedAt']);
+      allow delete: if isAdmin() ||
+        (isAnyStaff() && resource.data.recipientEmail == emailLower());
     }
 
     // Shared app policy (idle failsafe etc.) — staff read; billing/admin write.

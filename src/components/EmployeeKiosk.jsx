@@ -23,6 +23,8 @@ import {
 } from '../utils/todoSubtasks.js';
 import { recurringAnchorKey } from '../utils/recurringTodoMaterialize.js';
 import KioskClientTodoItem from './KioskClientTodoItem.jsx';
+import KioskNotificationsPanel from './KioskNotificationsPanel.jsx';
+import TaskNotesSection from './TaskNotesSection.jsx';
 import ClientProfileSummary from './ClientProfileSummary.jsx';
 import { buildGlobalTodoRows } from '../utils/todoGlobalRows.js';
 import { isClientActiveForWork } from '../utils/clientActiveForWork.js';
@@ -143,6 +145,10 @@ const EmployeeKiosk = ({
   uploadClientDocument,
   removeClientDocument,
   handleIdleAutoClockOut,
+  notifications = [],
+  dismissNotification,
+  dismissAllNotifications,
+  generateAiSummary,
 }) => {
   const canManageClientTodos =
     currentUserRole === 'admin' || currentUserRole === 'billing';
@@ -177,6 +183,9 @@ const EmployeeKiosk = ({
   const [linkPickKind, setLinkPickKind] = React.useState('retainer');
   const [linkPickRetainerName, setLinkPickRetainerName] = React.useState('');
   const [linkPickProjectId, setLinkPickProjectId] = React.useState('');
+  const [aiSummary, setAiSummary] = React.useState(null);
+  const [aiLoading, setAiLoading] = React.useState(false);
+  const [aiError, setAiError] = React.useState('');
   const [personalOptionsItemId, setPersonalOptionsItemId] = React.useState(null);
   const [personalOptionsTitle, setPersonalOptionsTitle] = React.useState('');
   const [personalOptionsDue, setPersonalOptionsDue] = React.useState('');
@@ -1124,6 +1133,34 @@ const EmployeeKiosk = ({
 
   const meLower = String(staffEmail || user?.email || '').trim().toLowerCase();
 
+  const runAiSummary = async (scope, clientId = null) => {
+    if (!generateAiSummary) return;
+    setAiLoading(true);
+    setAiError('');
+    try {
+      const data = await generateAiSummary({ scope, clientId });
+      setAiSummary({
+        text: data.summary || data.text || '',
+        scope: data.scope || scope,
+        generatedAt: data.generatedAt || Date.now(),
+      });
+    } catch (err) {
+      setAiError(err?.message || 'Could not generate summary.');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const persistCategoryItems = async (client, cycleStart, categoryKey, nextItems) => {
+    if (!updateClientTodo || !getTodoStateForCycle || !client) return;
+    const todoState = getTodoStateForCycle(client, cycleStart);
+    const catTodo = todoState[categoryKey] || { closed: false, items: [] };
+    await updateClientTodo(client, cycleStart, categoryKey, {
+      ...catTodo,
+      items: nextItems,
+    });
+  };
+
   const assignableEmails = React.useMemo(
     () =>
       Array.from(
@@ -1903,6 +1940,8 @@ const EmployeeKiosk = ({
                                     itemAssigneeOpenKey={`category__${row.item.id}`}
                                     onAssigneeOpenChange={setClientTodoAssigneeOpenKey}
                                     assignableEmails={assignableEmails}
+                                    staffEmails={assignableEmails}
+                                    adminUsers={adminUsers}
                                     onAssigneesChange={(next) =>
                                       updateClientTodoAssignees(
                                         selectedClientObj,
@@ -2291,6 +2330,8 @@ const EmployeeKiosk = ({
                                     itemAssigneeOpenKey={`category__${row.item.id}`}
                                     onAssigneeOpenChange={setClientTodoAssigneeOpenKey}
                                     assignableEmails={assignableEmails}
+                                    staffEmails={assignableEmails}
+                                    adminUsers={adminUsers}
                                     onAssigneesChange={(next) =>
                                       updateClientTodoAssignees(
                                         selectedClientObj,
@@ -2889,6 +2930,28 @@ const EmployeeKiosk = ({
           </section>
         </div>
         <aside className="order-2 rounded-2xl border border-slate-100 bg-white p-5 shadow-lg min-w-0 w-full flex flex-col gap-3">
+          <KioskNotificationsPanel
+            notifications={notifications}
+            onDismiss={dismissNotification}
+            onDismissAll={dismissAllNotifications}
+            onOpenRelated={(n) => {
+              if (n?.clientName) {
+                setSelectedClient(n.clientName);
+                setKioskSideTab('client');
+              }
+            }}
+            aiSummary={aiSummary}
+            aiLoading={aiLoading}
+            aiError={aiError}
+            onGenerateOverall={() => runAiSummary('overall')}
+            onGenerateClient={() =>
+              selectedClientObj?.id
+                ? runAiSummary('client', selectedClientObj.id)
+                : runAiSummary('overall')
+            }
+            selectedClientName={selectedClientObj?.name || ''}
+            canGenerateAi={typeof generateAiSummary === 'function'}
+          />
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
@@ -3069,6 +3132,29 @@ const EmployeeKiosk = ({
                         <Play className="w-3.5 h-3.5" aria-hidden />
                         Start task
                       </button>
+                    )}
+                    {client && (
+                      <TaskNotesSection
+                        item={row.item}
+                        allItems={
+                          getTodoStateForCycle?.(client, row.cycleStart)?.[
+                            row.categoryKey
+                          ]?.items || [row.item]
+                        }
+                        onPersistItems={(nextItems) =>
+                          persistCategoryItems(
+                            client,
+                            row.cycleStart,
+                            row.categoryKey,
+                            nextItems,
+                          )
+                        }
+                        user={user}
+                        staffEmails={assignableEmails}
+                        adminUsers={adminUsers}
+                        disabled={todoSaving || isCycleLocked(client, row.cycleStart)}
+                        compact
+                      />
                     )}
                   </div>
                 );

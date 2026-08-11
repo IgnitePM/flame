@@ -22,6 +22,7 @@ import {
   setSubtaskDoneInItems,
 } from '../utils/todoSubtasks.js';
 import TodoItemAttachments from './TodoItemAttachments.jsx';
+import TaskNotesSection from './TaskNotesSection.jsx';
 
 function parseDateInputToMs(value) {
   if (!value) return null;
@@ -249,6 +250,8 @@ export default function KioskClientTodoItem({
   removeClientDocument,
   canAttachFiles = false,
   showPriorCycleBadge = false,
+  staffEmails = [],
+  adminUsers = [],
 }) {
   const meLower = String(staffEmail || user?.email || '').trim().toLowerCase();
   const rowRef = React.useRef(null);
@@ -806,6 +809,15 @@ export default function KioskClientTodoItem({
           onRemove={removeClientDocument}
         />
       )}
+      <TaskNotesSection
+        item={item}
+        allItems={allItems}
+        onPersistItems={(nextItems) => persistItems(nextItems)}
+        user={user}
+        staffEmails={staffEmails.length ? staffEmails : assignableEmails}
+        adminUsers={adminUsers}
+        disabled={todoSaving || isCycleLocked}
+      />
     </li>
   );
 }
