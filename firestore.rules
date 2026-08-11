@@ -23,8 +23,9 @@ service cloud.firestore {
     }
     function hasSalesFunnel() {
       return isAnyStaff()
-        && adminDoc().data.get('features', {}) is map
-        && adminDoc().data.get('features', {}).get('salesFunnel', false) == true;
+        && 'features' in adminDoc().data
+        && adminDoc().data.features is map
+        && adminDoc().data.features.salesFunnel == true;
     }
 
     function clientDoc(clientId) {
