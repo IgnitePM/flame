@@ -29,7 +29,9 @@ import {
   Trash2,
   Users,
   X,
+  Kanban,
 } from 'lucide-react';
+import SalesFunnelPanel from './sales/SalesFunnelPanel.jsx';
 import {
   orderTodosForDisplay,
   toggleTodoPinnedById,
@@ -1034,10 +1036,15 @@ const AdminDashboard = ({
   updateUserTodos,
   navigateToKioskWithTask = () => {},
   forceClockOutShift,
+  canSalesFunnel = false,
+  salesLeads = [],
+  salesDeals = [],
+  salesPipeline = null,
 }) => {
   const canBilling = currentUserRole === 'admin' || currentUserRole === 'billing';
   const isAdmin = currentUserRole === 'admin';
   const isRestrictedStaff = currentUserRole === 'kiosk';
+  const hasSalesFunnelAccess = !!canSalesFunnel;
   const teamAccessibleClients = useMemo(
     () => filterClientsForTeamMember(clients, user?.email),
     [clients, user?.email],
@@ -1146,11 +1153,23 @@ const AdminDashboard = ({
   const adminGroups = (adminUsers || []).reduce((acc, a) => {
     const key = adminEmailKey(a?.email);
     if (!key) return acc;
-    if (!acc[key]) acc[key] = { email: a.email, ids: [], role: a.role || 'billing', hasCanonical: false };
+    if (!acc[key]) {
+      acc[key] = {
+        email: a.email,
+        ids: [],
+        role: a.role || 'billing',
+        features: a.features || {},
+        hasCanonical: false,
+      };
+    }
     acc[key].ids.push(a.id);
     if (a.id === key) acc[key].hasCanonical = true;
     // Prefer canonical record's role if present
     if (a.id === key && a.role) acc[key].role = a.role;
+    if (a.id === key && a.features) acc[key].features = a.features;
+    else if (a.features?.salesFunnel && !acc[key].features?.salesFunnel) {
+      acc[key].features = { ...(acc[key].features || {}), ...a.features };
+    }
     return acc;
   }, {});
   const dedupedAdminUsers = Object.entries(adminGroups)
@@ -1159,6 +1178,7 @@ const AdminDashboard = ({
       email,
       ids: g.ids,
       role: g.role || 'billing',
+      features: g.features || {},
       hasCanonical: g.hasCanonical,
     }))
     .sort((a, b) => a.email.localeCompare(b.email));
@@ -1243,9 +1263,14 @@ const AdminDashboard = ({
 
   useEffect(() => {
     if (!isRestrictedStaff) return;
-    const ok = ['timesheets', 'tasks_global', 'clients'].includes(adminTab);
+    const ok = [
+      'timesheets',
+      'tasks_global',
+      'clients',
+      ...(hasSalesFunnelAccess ? ['sales'] : []),
+    ].includes(adminTab);
     if (!ok) setAdminTab('timesheets');
-  }, [isRestrictedStaff, adminTab, setAdminTab]);
+  }, [isRestrictedStaff, adminTab, setAdminTab, hasSalesFunnelAccess]);
   const [estimateModal, setEstimateModal] = useState(null);
   const [estimateValues, setEstimateValues] = useState({
     hours: '',
@@ -1959,6 +1984,9 @@ const AdminDashboard = ({
             { id: 'timesheets', label: 'Timesheets', icon: List },
             { id: 'tasks_global', label: 'Tasks', icon: CheckSquare },
             { id: 'clients', label: 'Clients', icon: History },
+            ...(hasSalesFunnelAccess
+              ? [{ id: 'sales', label: 'Sales', icon: Kanban }]
+              : []),
             ...(canBilling && !isRestrictedStaff
               ? [
                   {
@@ -2023,6 +2051,22 @@ const AdminDashboard = ({
           policy={policy}
           updatePolicy={updatePolicy}
           canEditSettings={isAdmin}
+        />
+      )}
+
+      {adminTab === 'sales' && hasSalesFunnelAccess && (
+        <SalesFunnelPanel
+          leads={salesLeads}
+          deals={salesDeals}
+          salesPipeline={salesPipeline}
+          clients={clients}
+          adminUsers={adminUsers}
+          user={user}
+          addDoc={addDoc}
+          updateDoc={updateDoc}
+          collection={collection}
+          doc={doc}
+          setDeleteConfirm={setDeleteConfirm}
         />
       )}
 
@@ -7211,11 +7255,54 @@ const AdminDashboard = ({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
             <div className="flex justify-between items-center p-6 bg-blue-50 border border-blue-100 rounded-3xl">
-              <div className="flex items-center gap-3">
-                <Users className="w-5 h-5 text-blue-500" />
-                <span className="font-black text-blue-900">
-                  chris@ignitepm.com
-                </span>
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-3">
+                  <Users className="w-5 h-5 text-blue-500" />
+                  <span className="font-black text-blue-900">
+                    chris@ignitepm.com
+                  </span>
+                </div>
+                <label className="flex items-center gap-2 text-[10px] font-black text-blue-700/80 uppercase tracking-wider ml-8">
+                  <input
+                    type="checkbox"
+                    checked={!!(
+                      (adminUsers || []).find(
+                        (u) =>
+                          String(u.email || u.id || '')
+                            .trim()
+                            .toLowerCase() === 'chris@ignitepm.com',
+                      )?.features?.salesFunnel
+                    )}
+                    onChange={async (e) => {
+                      const enabled = e.target.checked;
+                      try {
+                        const existing =
+                          (adminUsers || []).find(
+                            (u) =>
+                              String(u.email || u.id || '')
+                                .trim()
+                                .toLowerCase() === 'chris@ignitepm.com',
+                          )?.features || {};
+                        await setDoc(
+                          doc('admins', 'chris@ignitepm.com'),
+                          {
+                            email: 'chris@ignitepm.com',
+                            role: 'admin',
+                            features: { ...existing, salesFunnel: enabled },
+                          },
+                          { merge: true },
+                        );
+                      } catch (err) {
+                        window.alert(
+                          `Could not update Sales Funnel access.\n\n${
+                            err?.message || String(err)
+                          }`,
+                        );
+                      }
+                    }}
+                  />
+                  Sales Funnel
+                </label>
               </div>
               <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">
                 Super Admin
@@ -7265,6 +7352,42 @@ const AdminDashboard = ({
                       <option value="billing">Billing</option>
                       <option value="kiosk">Kiosk-only</option>
                     </select>
+                    <label className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                      <input
+                        type="checkbox"
+                        checked={!!a.features?.salesFunnel}
+                        onChange={async (e) => {
+                          const enabled = e.target.checked;
+                          const nextFeatures = {
+                            ...(a.features || {}),
+                            salesFunnel: enabled,
+                          };
+                          try {
+                            await Promise.all(
+                              (a.ids || []).map((id) =>
+                                updateDoc(doc('admins', id), {
+                                  features: nextFeatures,
+                                }),
+                              ),
+                            );
+                            await setDoc(
+                              doc('admins', String(a.email).toLowerCase()),
+                              {
+                                email: a.email,
+                                features: nextFeatures,
+                              },
+                              { merge: true },
+                            );
+                          } catch (err) {
+                            window.alert(
+                              `Could not update Sales Funnel access for ${a.email}.\n\n` +
+                                (err?.message || String(err)),
+                            );
+                          }
+                        }}
+                      />
+                      Sales Funnel
+                    </label>
                   </div>
                 </div>
                 <button

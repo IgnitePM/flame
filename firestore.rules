@@ -21,6 +21,11 @@ service cloud.firestore {
       // the app self-provisions a kiosk-role doc on first login instead.
       return isSignedIn() && adminExists();
     }
+    function hasSalesFunnel() {
+      return isAnyStaff()
+        && adminDoc().data.get('features', {}) is map
+        && adminDoc().data.get('features', {}).get('salesFunnel', false) == true;
+    }
 
     function clientDoc(clientId) {
       return get(/databases/$(database)/documents/clients/$(clientId));
@@ -73,7 +78,7 @@ service cloud.firestore {
         (isSignedIn() &&
          resource.data.clientEmails is list &&
          resource.data.clientEmails.hasAny([request.auth.token.email, emailLower()]));
-      allow create: if isAnyStaff() && !isKiosk();
+      allow create: if isAnyStaff() && (!isKiosk() || hasSalesFunnel());
       // Admin/billing (and unknown staff roles) may update anything; kiosk
       // staff only the fields the kiosk UI writes (todos, docs, team access).
       allow update: if isAnyStaff() && (
@@ -183,10 +188,26 @@ service cloud.firestore {
     }
 
     // Shared app policy (idle failsafe etc.) — staff read; billing/admin write.
+    // salesPipeline is gated to Sales Funnel users (admin write).
     match /settings/{settingId} {
-      allow read: if isAnyStaff();
-      allow create, update: if isBilling();
+      allow read: if settingId == 'salesPipeline'
+        ? hasSalesFunnel()
+        : isAnyStaff();
+      allow create, update: if settingId == 'salesPipeline'
+        ? isAdmin()
+        : isBilling();
       allow delete: if isAdmin();
+    }
+
+    // Sales Funnel — leads (prospects; never appear in kiosk client lists).
+    match /leads/{leadId} {
+      allow read, create, update: if hasSalesFunnel();
+      allow delete: if hasSalesFunnel() && isAdmin();
+    }
+
+    // Sales Funnel — deals (pipeline opportunities linked to a lead OR client).
+    match /deals/{dealId} {
+      allow read, create, update, delete: if hasSalesFunnel();
     }
   }
 }

@@ -296,6 +296,9 @@ export default function App() {
   const [projects, setProjects] = useState([]);
   const [addons, setAddons] = useState([]);
   const [userTodos, setUserTodos] = useState([]);
+  const [salesLeads, setSalesLeads] = useState([]);
+  const [salesDeals, setSalesDeals] = useState([]);
+  const [salesPipeline, setSalesPipeline] = useState(null);
   
   const [adminTab, setAdminTab] = useState('timesheets'); 
   const [searchQuery, setSearchQuery] = useState('');
@@ -587,6 +590,46 @@ export default function App() {
       unsubPolicy();
     };
   }, [user, adminDocReady, myAdminDoc?.id]);
+
+  // Sales Funnel data — only when the signed-in staff member has the feature enabled.
+  useEffect(() => {
+    if (!user || !adminDocReady || !myAdminDoc?.features?.salesFunnel) {
+      setSalesLeads([]);
+      setSalesDeals([]);
+      setSalesPipeline(null);
+      return undefined;
+    }
+    const unsubLeads = onSnapshot(
+      collection(db, 'leads'),
+      (snapshot) => {
+        setSalesLeads(
+          snapshot.docs.map((d) => ({ id: d.id, ...d.data() })),
+        );
+      },
+      () => setSalesLeads([]),
+    );
+    const unsubDeals = onSnapshot(
+      collection(db, 'deals'),
+      (snapshot) => {
+        setSalesDeals(
+          snapshot.docs.map((d) => ({ id: d.id, ...d.data() })),
+        );
+      },
+      () => setSalesDeals([]),
+    );
+    const unsubPipeline = onSnapshot(
+      doc(db, 'settings', 'salesPipeline'),
+      (snapshot) => {
+        setSalesPipeline(snapshot.exists() ? snapshot.data() : null);
+      },
+      () => setSalesPipeline(null),
+    );
+    return () => {
+      unsubLeads();
+      unsubDeals();
+      unsubPipeline();
+    };
+  }, [user, adminDocReady, myAdminDoc?.id, myAdminDoc?.features?.salesFunnel]);
 
   // Portal users (no admin doc): only the client docs that list their email.
   useEffect(() => {
@@ -2998,6 +3041,10 @@ export default function App() {
       );
     },
     forceClockOutShift,
+    canSalesFunnel: !!myAdminDoc?.features?.salesFunnel,
+    salesLeads,
+    salesDeals,
+    salesPipeline,
   };
 
   const adminDashboardRouteProps = {
