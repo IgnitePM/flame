@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Kanban, Users } from 'lucide-react';
+import { Kanban, Upload, Users } from 'lucide-react';
+import HubspotImportModal from './HubspotImportModal.jsx';
 import {
   resolvePipelineStages,
   staffDisplayFromEmail,
@@ -206,6 +207,7 @@ export default function SalesFunnelPanel({
   updateDoc,
   collection,
   doc,
+  setDoc,
   setDeleteConfirm,
 }) {
   const [subTab, setSubTab] = useState('board');
@@ -214,6 +216,7 @@ export default function SalesFunnelPanel({
   const [newDealOpen, setNewDealOpen] = useState(false);
   const [newDealDefaults, setNewDealDefaults] = useState({});
   const [convertLead, setConvertLead] = useState(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   const stages = useMemo(
     () => resolvePipelineStages(salesPipeline),
@@ -287,11 +290,18 @@ export default function SalesFunnelPanel({
             </div>
             <button
               type="button"
+              onClick={() => setImportOpen(true)}
+              className="ml-auto inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider bg-slate-100 text-slate-700 hover:bg-slate-200"
+            >
+              <Upload className="w-3.5 h-3.5" /> Import CSV
+            </button>
+            <button
+              type="button"
               onClick={() => {
                 setNewDealDefaults({});
                 setNewDealOpen(true);
               }}
-              className="ml-auto bg-[#fd7414] text-white px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider hover:brightness-95"
+              className="bg-[#fd7414] text-white px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider hover:brightness-95"
             >
               Add deal
             </button>
@@ -328,6 +338,7 @@ export default function SalesFunnelPanel({
             collection={collection}
             doc={doc}
             onConvertLead={setConvertLead}
+            onImport={() => setImportOpen(true)}
             onOpenDeal={(id) => {
               setSubTab('board');
               setSelectedDealId(id);
@@ -364,6 +375,18 @@ export default function SalesFunnelPanel({
         defaultClientId={newDealDefaults.clientId || ''}
         addDoc={addDoc}
         collection={collection}
+      />
+
+      <HubspotImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        stages={stages}
+        deals={deals}
+        clients={clients}
+        adminUsers={adminUsers}
+        user={user}
+        setDoc={setDoc}
+        doc={doc}
       />
 
       {convertLead && (

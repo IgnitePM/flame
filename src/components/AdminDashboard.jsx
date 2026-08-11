@@ -2074,6 +2074,7 @@ const AdminDashboard = ({
           updateDoc={updateDoc}
           collection={collection}
           doc={doc}
+          setDoc={setDoc}
           setDeleteConfirm={setDeleteConfirm}
         />
       )}

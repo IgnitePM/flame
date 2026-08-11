@@ -31,6 +31,7 @@ export default function LeadsPanel({
   doc,
   onConvertLead,
   onOpenDeal,
+  onImport,
 }) {
   const me = String(user?.email || '').trim().toLowerCase();
   const [showConverted, setShowConverted] = useState(false);
@@ -155,6 +156,15 @@ export default function LeadsPanel({
             />
             Show converted
           </label>
+          {onImport ? (
+            <button
+              type="button"
+              onClick={onImport}
+              className="px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider bg-slate-100 text-slate-700 hover:bg-slate-200"
+            >
+              Import CSV
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={openCreate}
