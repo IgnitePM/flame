@@ -39,16 +39,25 @@ exports.handler = async (event) => {
     const scope = String(context.scope || 'overall');
     const viewer = context.viewer || {};
     const superAdmin = !!viewer.superAdmin;
+    const period = String(context.period || '').trim(); // 'daily' | 'weekly' | '' (on-demand kiosk brief)
+    const periodLabel = period === 'weekly' ? 'weekly' : period === 'daily' ? 'daily' : '';
 
     const prompt = `
 You are an operations assistant for Ignite PM's time-tracker.
 
-Write a concise ${scope === 'client' ? 'client-specific' : 'workspace-wide'} briefing for staff.
+Write a concise ${periodLabel ? `${periodLabel} ` : ''}${scope === 'client' ? 'client-specific' : 'workspace-wide'} briefing for staff${periodLabel ? ` email digest` : ''}.
 
 Rules:
 - Use only the JSON context. Do not invent clients, hours, or people.
 - Bullet the most important 4–8 points.
 - Call out: overdue/upcoming tasks, notable task notes or @mentions, retainers ending soon, retainers well over budget.
+${
+  periodLabel === 'daily'
+    ? '- This is a DAILY digest: emphasize what changed or needs attention today/tomorrow (due-soon items, anything urgent). Keep it tight.'
+    : periodLabel === 'weekly'
+      ? '- This is a WEEKLY digest: give a broader overview of the week — retainer burn across clients, patterns in timesheets, and what to plan for next week.'
+      : ''
+}
 - Timesheet guidance:
   ${
     superAdmin

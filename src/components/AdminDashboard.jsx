@@ -86,6 +86,7 @@ import TodoItemAttachments from './TodoItemAttachments.jsx';
 import TaskNotesSection from './TaskNotesSection.jsx';
 import PayrollView from './PayrollView.jsx';
 import SlackNotificationsCard from './SlackNotificationsCard.jsx';
+import EmailDigestCard from './EmailDigestCard.jsx';
 import TodoDeleteConfirmModal from './TodoDeleteConfirmModal.jsx';
 import {
   exportClientCyclePDF,
@@ -7161,6 +7162,11 @@ const AdminDashboard = ({
           </div>
 
           <SlackNotificationsCard
+            notifySettings={notifySettings}
+            updateNotifySettings={updateNotifySettings}
+          />
+
+          <EmailDigestCard
             notifySettings={notifySettings}
             updateNotifySettings={updateNotifySettings}
           />
