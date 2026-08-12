@@ -82,10 +82,10 @@ export async function runWorkspaceDigest(period) {
       fetchCollection(db, 'admins'),
       fetchCollection(db, 'notifications', {
         where: [['createdAt', '>=', notifCutoff]],
-      }),
+      }).catch(() => []),
       fetchCollection(db, 'deals').catch(() => []),
       fetchCollection(db, 'leads').catch(() => []),
-      fetchDoc(db, 'settings/salesPipeline'),
+      fetchDoc(db, 'settings/salesPipeline').catch(() => null),
     ]);
 
   const recipients = resolveRecipients(settings, adminUsers);

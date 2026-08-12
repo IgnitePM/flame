@@ -192,10 +192,11 @@ service cloud.firestore {
     }
 
     // Shared app policy (idle failsafe etc.) — staff read; billing/admin write.
-    // salesPipeline is gated to Sales Funnel users (admin write).
+    // salesPipeline: Sales Funnel users + billing (digest bot needs stage
+    // labels for personal sales sections). Admin write only.
     match /settings/{settingId} {
       allow read: if settingId == 'salesPipeline'
-        ? hasSalesFunnel()
+        ? (hasSalesFunnel() || isBilling())
         : isAnyStaff();
       allow create, update: if settingId == 'salesPipeline'
         ? isAdmin()
