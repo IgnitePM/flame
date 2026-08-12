@@ -36,13 +36,39 @@ exports.handler = async (event) => {
 
     const payload = JSON.parse(event.body || '{}');
     const context = payload.context || payload;
+    const kind = String(context.kind || 'ops');
     const scope = String(context.scope || 'overall');
     const viewer = context.viewer || {};
     const superAdmin = !!viewer.superAdmin;
     const period = String(context.period || '').trim(); // 'daily' | 'weekly' | '' (on-demand kiosk brief)
     const periodLabel = period === 'weekly' ? 'weekly' : period === 'daily' ? 'daily' : '';
 
-    const prompt = `
+    const salesPrompt = `
+You are a sales coach for Ignite PM.
+
+Using only the JSON pipeline context, help the salesperson decide what to do next.
+
+Rules:
+- Do not invent companies, emails, amounts, or conversations that are not in the context.
+- Prefer open deals that are idle, past close date, sitting in Proposal Sent, or missing notes.
+- followUps: 4–8 concrete items. Use the deal id from context when present.
+- communications: 3–6 short outreach drafts (2–5 sentences). If contactEmail is missing, say they should add a contact first instead of faking an address.
+- recommendations: 3–5 pipeline-level tips (stage hygiene, which deals to push or close out).
+- urgency must be "high", "medium", or "low".
+- If the pipeline is empty or healthy, say so and return empty arrays.
+- Respond with JSON only:
+{
+  "summary": "2–4 sentence briefing",
+  "followUps": [{ "dealId": "", "dealName": "", "urgency": "high", "reason": "", "suggestedAction": "" }],
+  "communications": [{ "dealId": "", "dealName": "", "subject": "", "message": "" }],
+  "recommendations": [{ "title": "", "detail": "" }]
+}
+
+Context JSON:
+${JSON.stringify(context).slice(0, 120000)}
+`.trim();
+
+    const opsPrompt = `
 You are an operations assistant for Ignite PM's time-tracker.
 
 Write a concise ${periodLabel ? `${periodLabel} ` : ''}${scope === 'client' ? 'client-specific' : 'workspace-wide'} briefing for staff${periodLabel ? ` email digest` : ''}.
@@ -72,12 +98,14 @@ Context JSON:
 ${JSON.stringify(context).slice(0, 120000)}
 `.trim();
 
+    const prompt = kind === 'sales' ? salesPrompt : opsPrompt;
+
     const requestBody = {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: {
-        temperature: 0.3,
+        temperature: kind === 'sales' ? 0.4 : 0.3,
         topP: 0.9,
-        maxOutputTokens: 900,
+        maxOutputTokens: kind === 'sales' ? 1600 : 900,
         responseMimeType: 'application/json',
       },
     };
@@ -146,6 +174,26 @@ ${JSON.stringify(context).slice(0, 120000)}
         statusCode: 500,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ error: 'Gemini returned an empty summary.' }),
+      };
+    }
+
+    if (kind === 'sales') {
+      return {
+        statusCode: 200,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          summary,
+          scope,
+          kind: 'sales',
+          followUps: Array.isArray(parsed?.followUps) ? parsed.followUps : [],
+          communications: Array.isArray(parsed?.communications)
+            ? parsed.communications
+            : [],
+          recommendations: Array.isArray(parsed?.recommendations)
+            ? parsed.recommendations
+            : [],
+          generatedAt: Date.now(),
+        }),
       };
     }
 

@@ -1040,6 +1040,7 @@ const AdminDashboard = ({
   salesLeads = [],
   salesDeals = [],
   salesPipeline = null,
+  generateSalesCoach,
   lockedTab = null,
 }) => {
   const canBilling = currentUserRole === 'admin' || currentUserRole === 'billing';
@@ -2077,6 +2078,7 @@ const AdminDashboard = ({
           doc={doc}
           setDoc={setDoc}
           setDeleteConfirm={setDeleteConfirm}
+          generateSalesCoach={generateSalesCoach}
         />
       )}
 

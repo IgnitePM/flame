@@ -80,6 +80,7 @@ import {
   NOTIFICATION_TYPES,
 } from './utils/notifications.js';
 import { buildAiSummaryPayload } from './utils/aiSummaryPayload.js';
+import { buildSalesAiPayload } from './utils/salesAiPayload.js';
 import { staffDisplayName } from './utils/staffDirectory.js';
 import ClientPortal from './components/ClientPortal.jsx';
 import EmployeeKiosk from './components/EmployeeKiosk.jsx';
@@ -3081,6 +3082,27 @@ export default function App() {
     salesLeads,
     salesDeals,
     salesPipeline,
+    generateSalesCoach: async ({ mineOnly = false } = {}) => {
+      const context = buildSalesAiPayload({
+        deals: salesDeals,
+        leads: salesLeads,
+        clients,
+        salesPipeline,
+        adminUsers,
+        user,
+        mineOnly,
+      });
+      const resp = await fetch('/.netlify/functions/gemini-summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ context }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(data?.error || 'Could not generate sales coach.');
+      }
+      return data;
+    },
   };
 
   const adminDashboardRouteProps = {

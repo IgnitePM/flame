@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Kanban, Upload, Users } from 'lucide-react';
 import HubspotImportModal from './HubspotImportModal.jsx';
+import SalesAiCoach from './SalesAiCoach.jsx';
 import {
   resolvePipelineStages,
   staffDisplayFromEmail,
@@ -209,6 +210,7 @@ export default function SalesFunnelPanel({
   doc,
   setDoc,
   setDeleteConfirm,
+  generateSalesCoach,
 }) {
   const [subTab, setSubTab] = useState('board');
   const [mineOnly, setMineOnly] = useState(false);
@@ -308,6 +310,20 @@ export default function SalesFunnelPanel({
           </div>
         )}
       </div>
+
+      {subTab === 'board' && (
+        <SalesAiCoach
+          deals={deals}
+          leads={leads}
+          clients={clients}
+          stages={stages}
+          adminUsers={adminUsers}
+          user={user}
+          mineOnly={mineOnly}
+          generateSalesCoach={generateSalesCoach}
+          onOpenDeal={setSelectedDealId}
+        />
+      )}
 
       {subTab === 'board' ? (
         <SalesFunnelBoard
