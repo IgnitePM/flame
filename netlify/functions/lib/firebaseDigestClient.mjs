@@ -26,7 +26,7 @@
 
 import { getApps, initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
-import { collection, doc, getDoc, getDocs, getFirestore, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, getFirestore, query, setDoc, where } from 'firebase/firestore';
 
 function getFirebaseConfig() {
   const config = {
@@ -82,4 +82,9 @@ export async function fetchCollection(db, name, { where: whereClauses = [] } = {
 export async function fetchDoc(db, path) {
   const snap = await getDoc(doc(db, path));
   return snap.exists() ? snap.data() : null;
+}
+
+/** Merge-write a document by full path (e.g. digest cursor). */
+export async function mergeDoc(db, path, data) {
+  await setDoc(doc(db, path), data, { merge: true });
 }

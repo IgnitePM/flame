@@ -2,10 +2,8 @@ import React from 'react';
 import { Mail } from 'lucide-react';
 
 /**
- * Admin Config card for daily/weekly email digests. Saves to
- * settings/notifications (same doc as Slack), which the Netlify scheduled
- * functions (send-daily-digest / send-weekly-digest) read before sending.
- * Sends via Gmail SMTP — see netlify/functions/lib/mailer.mjs.
+ * Admin Config card for personal email digests + assignment alerts.
+ * Saves to settings/notifications; Netlify scheduled functions send mail.
  */
 const parseRecipients = (text) =>
   String(text || '')
@@ -16,7 +14,11 @@ const parseRecipients = (text) =>
 const EmailDigestCard = ({ notifySettings = {}, updateNotifySettings }) => {
   const [recipientsDraft, setRecipientsDraft] = React.useState(null);
   const [saving, setSaving] = React.useState(false);
-  const [testState, setTestState] = React.useState({ daily: '', weekly: '' });
+  const [testState, setTestState] = React.useState({
+    daily: '',
+    weekly: '',
+    assignments: '',
+  });
 
   const recipientsValue =
     recipientsDraft !== null
@@ -26,6 +28,8 @@ const EmailDigestCard = ({ notifySettings = {}, updateNotifySettings }) => {
   const digestEnabled = notifySettings.emailDigestEnabled !== false;
   const dailyEnabled = notifySettings.emailDailyEnabled !== false;
   const weeklyEnabled = notifySettings.emailWeeklyEnabled !== false;
+  const assignmentAlertsEnabled =
+    notifySettings.emailAssignmentAlertsEnabled !== false;
   const hasRecipients = (notifySettings.emailDigestRecipients || []).length > 0;
 
   const saveRecipients = async () => {
@@ -55,14 +59,22 @@ const EmailDigestCard = ({ notifySettings = {}, updateNotifySettings }) => {
       if (!resp.ok || data?.error) {
         throw new Error(data?.error || 'Request failed');
       }
-      setTestState((s) => ({
-        ...s,
-        [period]: data?.skipped ? `Skipped — ${data.reason}` : 'Sent!',
-      }));
+      let okMsg = 'Sent!';
+      if (data?.skipped) okMsg = `Skipped — ${data.reason}`;
+      else if (period === 'assignments') {
+        okMsg = data?.alerted
+          ? `Sent to ${data.alerted} user${data.alerted === 1 ? '' : 's'}`
+          : 'No new assignments to send';
+      } else if (data?.personalized) {
+        okMsg = `Sent ${data.recipientCount || 0} personal email${
+          (data.recipientCount || 0) === 1 ? '' : 's'
+        }`;
+      }
+      setTestState((s) => ({ ...s, [period]: okMsg }));
     } catch (err) {
       setTestState((s) => ({ ...s, [period]: `Failed — ${err.message}` }));
     }
-    setTimeout(() => setTestState((s) => ({ ...s, [period]: '' })), 6000);
+    setTimeout(() => setTestState((s) => ({ ...s, [period]: '' })), 8000);
   };
 
   return (
@@ -72,22 +84,27 @@ const EmailDigestCard = ({ notifySettings = {}, updateNotifySettings }) => {
         Email Digests
       </h3>
       <p className="text-slate-400 text-sm font-medium mb-6">
-        Sends an AI-written workspace briefing by email via Gmail SMTP, on a
-        schedule (daily on weekdays, weekly on Mondays). Requires{' '}
+        Each staff member gets a <strong className="text-slate-600">personal</strong>{' '}
+        email with their new assignments, overdue / due-soon tasks, @mentions, and
+        (if Sales Funnel is enabled for them) sales follow-ups. Daily around 8am
+        Toronto on weekdays; weekly on Mondays. Assignment alerts also check every
+        15 minutes and email only when someone was newly assigned a task. Requires{' '}
         <code className="text-[11px]">GMAIL_USER</code>,{' '}
         <code className="text-[11px]">GMAIL_APP_PASSWORD</code>,{' '}
         <code className="text-[11px]">DIGEST_BOT_EMAIL</code>, and{' '}
-        <code className="text-[11px]">DIGEST_BOT_PASSWORD</code> to be
-        configured in Netlify environment variables. See{' '}
-        <code className="text-[11px]">.env.example</code> for setup steps.
+        <code className="text-[11px]">DIGEST_BOT_PASSWORD</code> in Netlify.
       </p>
       <div className="space-y-4">
         <div className="space-y-2">
           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
             Recipients
-            {hasRecipients && (
+            {hasRecipients ? (
               <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[9px] font-black uppercase tracking-widest">
                 Configured
+              </span>
+            ) : (
+              <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-500 text-[9px] font-black uppercase tracking-widest">
+                All staff if empty
               </span>
             )}
           </label>
@@ -95,7 +112,7 @@ const EmailDigestCard = ({ notifySettings = {}, updateNotifySettings }) => {
             rows={2}
             value={recipientsValue}
             onChange={(e) => setRecipientsDraft(e.target.value)}
-            placeholder="chris@ignitepm.com, julius@ignitepm.com"
+            placeholder="Leave blank to email all staff, or list emails…"
             className="w-full bg-white border border-slate-200 p-4 rounded-2xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
           />
           <button
@@ -113,7 +130,9 @@ const EmailDigestCard = ({ notifySettings = {}, updateNotifySettings }) => {
             <input
               type="checkbox"
               checked={digestEnabled}
-              onChange={(e) => updateNotifySettings?.({ emailDigestEnabled: e.target.checked })}
+              onChange={(e) =>
+                updateNotifySettings?.({ emailDigestEnabled: e.target.checked })
+              }
             />
             Email digests enabled
           </label>
@@ -123,9 +142,11 @@ const EmailDigestCard = ({ notifySettings = {}, updateNotifySettings }) => {
               <input
                 type="checkbox"
                 checked={dailyEnabled}
-                onChange={(e) => updateNotifySettings?.({ emailDailyEnabled: e.target.checked })}
+                onChange={(e) =>
+                  updateNotifySettings?.({ emailDailyEnabled: e.target.checked })
+                }
               />
-              Daily digest (weekdays)
+              Personal daily (weekdays ~8am)
             </label>
             <button
               type="button"
@@ -144,9 +165,11 @@ const EmailDigestCard = ({ notifySettings = {}, updateNotifySettings }) => {
               <input
                 type="checkbox"
                 checked={weeklyEnabled}
-                onChange={(e) => updateNotifySettings?.({ emailWeeklyEnabled: e.target.checked })}
+                onChange={(e) =>
+                  updateNotifySettings?.({ emailWeeklyEnabled: e.target.checked })
+                }
               />
-              Weekly digest (Mondays)
+              Personal weekly (Mondays)
             </label>
             <button
               type="button"
@@ -157,6 +180,31 @@ const EmailDigestCard = ({ notifySettings = {}, updateNotifySettings }) => {
               {testState.weekly === 'sending'
                 ? 'Sending…'
                 : testState.weekly || 'Send test'}
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <label className="flex items-center gap-3 font-bold text-slate-700">
+              <input
+                type="checkbox"
+                checked={assignmentAlertsEnabled}
+                onChange={(e) =>
+                  updateNotifySettings?.({
+                    emailAssignmentAlertsEnabled: e.target.checked,
+                  })
+                }
+              />
+              Assignment alerts (every 15 min)
+            </label>
+            <button
+              type="button"
+              onClick={() => sendTest('assignments')}
+              disabled={testState.assignments === 'sending'}
+              className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-[10px] font-black uppercase tracking-widest disabled:opacity-40 hover:bg-slate-200 transition-all"
+            >
+              {testState.assignments === 'sending'
+                ? 'Sending…'
+                : testState.assignments || 'Send test'}
             </button>
           </div>
         </div>

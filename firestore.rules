@@ -175,8 +175,11 @@ service cloud.firestore {
     }
 
     // In-app inbox: assignment, @mentions, clock-out alerts, AI briefs.
+    // Billing (incl. digest bot) may read all so scheduled emails can fan out.
     match /notifications/{notificationId} {
-      allow read: if isAnyStaff() && resource.data.recipientEmail == emailLower();
+      allow read: if isAnyStaff() && (
+        resource.data.recipientEmail == emailLower() || isBilling()
+      );
       allow create: if isAnyStaff()
         && request.resource.data.recipientEmail is string
         && request.resource.data.recipientEmail != '';
@@ -201,14 +204,17 @@ service cloud.firestore {
     }
 
     // Sales Funnel — leads (prospects; never appear in kiosk client lists).
+    // Billing may read so morning digests can include sales follow-ups.
     match /leads/{leadId} {
-      allow read, create, update: if hasSalesFunnel();
+      allow read: if hasSalesFunnel() || isBilling();
+      allow create, update: if hasSalesFunnel();
       allow delete: if hasSalesFunnel() && isAdmin();
     }
 
     // Sales Funnel — deals (pipeline opportunities linked to a lead OR client).
     match /deals/{dealId} {
-      allow read, create, update, delete: if hasSalesFunnel();
+      allow read: if hasSalesFunnel() || isBilling();
+      allow create, update, delete: if hasSalesFunnel();
     }
   }
 }

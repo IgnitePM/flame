@@ -1,10 +1,8 @@
-import { runWorkspaceDigest } from './lib/runDigest.mjs';
+import { runAssignmentAlerts, runWorkspaceDigest } from './lib/runDigest.mjs';
 
 /**
  * Manual trigger for the Email Digests admin card ("Send test" buttons).
- * POST { period: 'daily' | 'weekly' } → runs the real digest immediately
- * (still respects the enabled/recipients settings, so a disabled digest or
- * empty recipient list will report `skipped` rather than sending).
+ * POST { period: 'daily' | 'weekly' | 'assignments' }
  */
 export default async (req) => {
   if (req.method !== 'POST') {
@@ -18,12 +16,16 @@ export default async (req) => {
   try {
     const body = await req.json();
     if (body?.period === 'weekly') period = 'weekly';
+    if (body?.period === 'assignments') period = 'assignments';
   } catch {
     // No/invalid JSON body — default to 'daily'.
   }
 
   try {
-    const result = await runWorkspaceDigest(period);
+    const result =
+      period === 'assignments'
+        ? await runAssignmentAlerts()
+        : await runWorkspaceDigest(period);
     return new Response(JSON.stringify(result), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
