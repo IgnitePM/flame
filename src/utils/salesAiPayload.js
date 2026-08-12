@@ -195,7 +195,7 @@ export function buildSalesAiPayload({
     followUpHints: buildSalesFollowUpHints(rows),
     deals: rows
       .sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0))
-      .slice(0, 80)
+      .slice(0, 40)
       .map((d) => ({
         id: d.id,
         name: d.name,
@@ -211,7 +211,7 @@ export function buildSalesAiPayload({
         contactEmail: d.contactEmail || null,
         contactName: d.contactName || null,
         noteCount: d.noteCount,
-        recentNotes: d.recentNotes,
+        recentNotes: (d.recentNotes || []).slice(-1),
       })),
   };
 }

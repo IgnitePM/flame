@@ -1,15 +1,99 @@
 /* global process, exports */
 
+const stripCodeFences = (text) =>
+  String(text || '')
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
 const extractFirstJsonObject = (text) => {
   if (typeof text !== 'string') return null;
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start === -1 || end === -1 || end <= start) return null;
+  const cleaned = stripCodeFences(text);
   try {
-    return JSON.parse(text.slice(start, end + 1));
+    return JSON.parse(cleaned);
   } catch {
-    return null;
+    // fall through
   }
+  const start = cleaned.indexOf('{');
+  if (start === -1) return null;
+  // Walk braces so nested objects / truncated tails are less likely to break.
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < cleaned.length; i += 1) {
+    const ch = cleaned[i];
+    if (inString) {
+      if (escape) {
+        escape = false;
+      } else if (ch === '\\') {
+        escape = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '{') depth += 1;
+    if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          return JSON.parse(cleaned.slice(start, i + 1));
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+};
+
+const collectCandidateText = (data) => {
+  const parts = data?.candidates?.[0]?.content?.parts;
+  if (Array.isArray(parts) && parts.length) {
+    return parts
+      .map((p) => {
+        if (typeof p === 'string') return p;
+        if (typeof p?.text === 'string') return p.text;
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+  }
+  const single =
+    data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+    data?.candidates?.[0]?.content?.parts?.[0] ||
+    '';
+  return typeof single === 'string' ? single.trim() : '';
+};
+
+const asArray = (value) => (Array.isArray(value) ? value : []);
+
+const synthesizeSalesSummary = (parsed) => {
+  const followUps = asArray(parsed?.followUps);
+  const communications = asArray(parsed?.communications);
+  const recommendations = asArray(parsed?.recommendations);
+  const bits = [];
+  if (followUps.length) {
+    bits.push(
+      `${followUps.length} deal${followUps.length === 1 ? '' : 's'} need follow-up.`,
+    );
+  }
+  if (communications.length) {
+    bits.push(
+      `${communications.length} outreach draft${communications.length === 1 ? '' : 's'} ready.`,
+    );
+  }
+  if (recommendations.length) {
+    bits.push(
+      `${recommendations.length} pipeline recommendation${recommendations.length === 1 ? '' : 's'}.`,
+    );
+  }
+  return bits.join(' ') || 'Here is a sales coaching pass based on your open pipeline.';
 };
 
 exports.handler = async (event) => {
@@ -41,7 +125,41 @@ exports.handler = async (event) => {
     const viewer = context.viewer || {};
     const superAdmin = !!viewer.superAdmin;
     const period = String(context.period || '').trim(); // 'daily' | 'weekly' | '' (on-demand kiosk brief)
-    const periodLabel = period === 'weekly' ? 'weekly' : period === 'daily' ? 'daily' : '';
+    const periodLabel =
+      period === 'weekly' ? 'weekly' : period === 'daily' ? 'daily' : '';
+
+    // Keep sales prompts smaller so responses are less likely to truncate mid-JSON.
+    const salesContext = {
+      kind: context.kind,
+      scope: context.scope,
+      viewer: context.viewer,
+      stats: context.stats,
+      stages: context.stages,
+      followUpHints: Array.isArray(context.followUpHints)
+        ? context.followUpHints.slice(0, 12)
+        : [],
+      deals: Array.isArray(context.deals)
+        ? context.deals.slice(0, 40).map((d) => ({
+            id: d.id,
+            name: d.name,
+            amount: d.amount,
+            stage: d.stage,
+            closed: d.closed,
+            owner: d.owner,
+            closeDate: d.closeDate,
+            daysIdle: d.daysIdle,
+            daysPastClose: d.daysPastClose,
+            linked: d.linked,
+            linkedType: d.linkedType,
+            contactEmail: d.contactEmail || null,
+            contactName: d.contactName || null,
+            noteCount: d.noteCount,
+            recentNotes: Array.isArray(d.recentNotes)
+              ? d.recentNotes.slice(-1)
+              : [],
+          }))
+        : [],
+    };
 
     const salesPrompt = `
 You are a sales coach for Ignite PM.
@@ -55,8 +173,9 @@ Rules:
 - communications: 3–6 short outreach drafts (2–5 sentences). If contactEmail is missing, say they should add a contact first instead of faking an address.
 - recommendations: 3–5 pipeline-level tips (stage hygiene, which deals to push or close out).
 - urgency must be "high", "medium", or "low".
+- Keep every string concise so the JSON stays complete.
 - If the pipeline is empty or healthy, say so and return empty arrays.
-- Respond with JSON only:
+- Respond with a single JSON object only (no markdown):
 {
   "summary": "2–4 sentence briefing",
   "followUps": [{ "dealId": "", "dealName": "", "urgency": "high", "reason": "", "suggestedAction": "" }],
@@ -65,7 +184,7 @@ Rules:
 }
 
 Context JSON:
-${JSON.stringify(context).slice(0, 120000)}
+${JSON.stringify(salesContext).slice(0, 80000)}
 `.trim();
 
     const opsPrompt = `
@@ -103,9 +222,9 @@ ${JSON.stringify(context).slice(0, 120000)}
     const requestBody = {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: {
-        temperature: kind === 'sales' ? 0.4 : 0.3,
+        temperature: kind === 'sales' ? 0.35 : 0.3,
         topP: 0.9,
-        maxOutputTokens: kind === 'sales' ? 1600 : 900,
+        maxOutputTokens: kind === 'sales' ? 4096 : 900,
         responseMimeType: 'application/json',
       },
     };
@@ -163,21 +282,45 @@ ${JSON.stringify(context).slice(0, 120000)}
       };
     }
 
-    const text =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-      data?.candidates?.[0]?.content?.parts?.[0] ||
-      '';
-    const parsed = typeof text === 'object' ? text : extractFirstJsonObject(text);
-    const summary = String(parsed?.summary || parsed?.text || '').trim();
-    if (!summary) {
-      return {
-        statusCode: 500,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ error: 'Gemini returned an empty summary.' }),
-      };
-    }
+    const finishReason = String(data?.candidates?.[0]?.finishReason || '');
+    const blockReason = String(
+      data?.promptFeedback?.blockReason ||
+        data?.candidates?.[0]?.finishMessage ||
+        '',
+    );
+    const text = collectCandidateText(data);
+    const parsed = text ? extractFirstJsonObject(text) : null;
 
     if (kind === 'sales') {
+      const followUps = asArray(parsed?.followUps);
+      const communications = asArray(parsed?.communications);
+      const recommendations = asArray(parsed?.recommendations);
+      let summary = String(parsed?.summary || parsed?.text || '').trim();
+      if (!summary && (followUps.length || communications.length || recommendations.length)) {
+        summary = synthesizeSalesSummary(parsed);
+      }
+      if (!summary && text) {
+        // Last resort: model returned prose instead of structured JSON.
+        summary = stripCodeFences(text).slice(0, 1200);
+      }
+      if (!summary) {
+        const detail = [
+          finishReason && finishReason !== 'STOP' ? `finishReason=${finishReason}` : '',
+          blockReason ? `blockReason=${blockReason}` : '',
+          !data?.candidates?.length ? 'no candidates' : '',
+        ]
+          .filter(Boolean)
+          .join('; ');
+        return {
+          statusCode: 500,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            error: detail
+              ? `Gemini returned an empty sales coach response (${detail}).`
+              : 'Gemini returned an empty sales coach response.',
+          }),
+        };
+      }
       return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -185,14 +328,29 @@ ${JSON.stringify(context).slice(0, 120000)}
           summary,
           scope,
           kind: 'sales',
-          followUps: Array.isArray(parsed?.followUps) ? parsed.followUps : [],
-          communications: Array.isArray(parsed?.communications)
-            ? parsed.communications
-            : [],
-          recommendations: Array.isArray(parsed?.recommendations)
-            ? parsed.recommendations
-            : [],
+          followUps,
+          communications,
+          recommendations,
           generatedAt: Date.now(),
+        }),
+      };
+    }
+
+    const summary = String(parsed?.summary || parsed?.text || '').trim();
+    if (!summary) {
+      const detail = [
+        finishReason && finishReason !== 'STOP' ? `finishReason=${finishReason}` : '',
+        blockReason ? `blockReason=${blockReason}` : '',
+      ]
+        .filter(Boolean)
+        .join('; ');
+      return {
+        statusCode: 500,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          error: detail
+            ? `Gemini returned an empty summary (${detail}).`
+            : 'Gemini returned an empty summary.',
         }),
       };
     }
