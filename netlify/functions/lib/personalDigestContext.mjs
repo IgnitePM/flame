@@ -4,10 +4,19 @@
 
 import { getBillingPeriod } from '../../../src/utils/billingEngine.js';
 import { isClientActiveForWork } from '../../../src/utils/clientActiveForWork.js';
-import { extractItemAssigneeEmails } from '../../../src/utils/teamClientAccess.js';
+import {
+  clientHasEnabledRetainers,
+  getEnabledRetainerCategoryNames,
+  isRetainerCategoryDollar,
+} from '../../../src/utils/retainerCategories.js';
+import {
+  extractItemAssigneeEmails,
+  teamMemberCanViewClient,
+} from '../../../src/utils/teamClientAccess.js';
 import { getTaskComments } from '../../../src/utils/taskComments.js';
 import { getSubtasks } from '../../../src/utils/todoSubtasks.js';
 import { NOTIFICATION_TYPES } from '../../../src/utils/notifications.js';
+import { isSuperAdminUser } from '../../../src/utils/staffDirectory.js';
 import {
   buildSalesFollowUpHints,
   listSalesDealsForCoach,
@@ -127,6 +136,91 @@ function addDaysYmd(ymd, days) {
   const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
   const dd = String(dt.getUTCDate()).padStart(2, '0');
   return `${yy}-${mm}-${dd}`;
+}
+
+function formatRetainerQty(value, isDollar) {
+  const n = Number(value) || 0;
+  if (isDollar) {
+    return `$${Math.round(n).toLocaleString('en-US')}`;
+  }
+  const rounded = Math.abs(n) >= 10 ? n.toFixed(0) : n.toFixed(1);
+  return `${rounded}h`;
+}
+
+/**
+ * Retainers ending soon with unused balance, plus over-budget lines.
+ * Admins/billing see every active client; others only clients they can access.
+ */
+function buildRetainerWatchouts({
+  clients = [],
+  getGlobalRetainerStats,
+  email,
+  adminDoc = {},
+  period = 'daily',
+  now = Date.now(),
+} = {}) {
+  const unusedBalance = [];
+  const overBudget = [];
+  if (typeof getGlobalRetainerStats !== 'function') {
+    return { unusedBalance, overBudget };
+  }
+  const me = normEmail(email);
+  const role = String(adminDoc?.role || '').toLowerCase();
+  const seeAll =
+    isSuperAdminUser({ email: me }, role) || role === 'billing';
+  const soonDays = period === 'weekly' ? 14 : 7;
+
+  for (const client of clients || []) {
+    if (!isClientActiveForWork(client) || !clientHasEnabledRetainers(client)) continue;
+    if (!seeAll && !teamMemberCanViewClient(client, me)) continue;
+    let stats = null;
+    let billing = null;
+    try {
+      billing = getBillingPeriod(client.billingDay || 1, 0);
+      stats = getGlobalRetainerStats(client, billing.start, billing.end);
+    } catch {
+      continue;
+    }
+    if (!billing || !stats) continue;
+    const daysLeft = Math.max(0, Math.ceil((billing.end - now) / DAY_MS));
+    const cycleEndYmd = msToYmdToronto(billing.end);
+
+    for (const cat of getEnabledRetainerCategoryNames(client)) {
+      const pc = stats?.perCategory?.[cat];
+      if (!pc) continue;
+      const isDollar = isRetainerCategoryDollar(client, cat);
+      const allotted = Number(pc.adjustedAllotted ?? 0);
+      const used = Number(pc.used ?? 0);
+      const remaining = allotted - used;
+      const eps = isDollar ? 0.02 : 0.03;
+      const over = allotted > eps ? used > allotted + eps : used > eps;
+      const hasAvailable = remaining > eps;
+      const row = {
+        clientName: client.name,
+        category: cat,
+        daysLeft,
+        cycleEndYmd,
+        allotted,
+        used,
+        remaining,
+        isDollar,
+        remainingLabel: formatRetainerQty(remaining, isDollar),
+        allottedLabel: formatRetainerQty(allotted, isDollar),
+        usedLabel: formatRetainerQty(used, isDollar),
+      };
+      if (over) overBudget.push(row);
+      else if (hasAvailable && daysLeft <= soonDays) unusedBalance.push(row);
+    }
+  }
+
+  unusedBalance.sort(
+    (a, b) => a.daysLeft - b.daysLeft || b.remaining - a.remaining,
+  );
+  overBudget.sort((a, b) => a.daysLeft - b.daysLeft);
+  return {
+    unusedBalance: unusedBalance.slice(0, 15),
+    overBudget: overBudget.slice(0, 10),
+  };
 }
 
 /**
@@ -294,6 +388,7 @@ export function buildPersonalDigestForUser({
   deals = [],
   leads = [],
   salesPipeline = null,
+  getGlobalRetainerStats = null,
   period = 'daily',
   now = Date.now(),
 } = {}) {
@@ -303,13 +398,9 @@ export function buildPersonalDigestForUser({
   const dueSoonDays = period === 'weekly' ? 7 : 3;
   const sinceMs = now - lookbackDays * DAY_MS;
   const dueSoonEnd = addDaysYmd(today.ymd, dueSoonDays);
-  const role = String(adminDoc?.role || '').toLowerCase();
-  // Admins/billing also get unassigned tasks that are overdue / due soon
-  // (matches how the kiosk "mine" filter treats empty assignee lists for managers).
-  const includeUnassignedDue = role === 'admin' || role === 'billing';
 
   const assigned = walkAssignedOpenTasks(clients, me, {
-    includeUnassignedDue,
+    includeUnassignedDue: false,
     todayYmd: today.ymd,
     dueSoonEndYmd: dueSoonEnd,
   });
@@ -324,21 +415,14 @@ export function buildPersonalDigestForUser({
         ymdCompare(t.dueYmd, dueSoonEnd) <= 0,
     )
     .sort((a, b) => ymdCompare(a.dueYmd, b.dueYmd));
-  // Everything else still assigned & open (no due date, or due past the
-  // "soon" window). Without this, digests looked sales-only whenever tasks
-  // lacked near-term due dates.
-  const overdueIds = new Set(overdue.map((t) => `${t.clientId}:${t.itemId}`));
-  const dueSoonIds = new Set(dueSoon.map((t) => `${t.clientId}:${t.itemId}`));
-  const openAssigned = assigned
-    .filter((t) => {
-      const key = `${t.clientId}:${t.itemId}`;
-      return !overdueIds.has(key) && !dueSoonIds.has(key);
-    })
-    .sort((a, b) => {
-      if (!a.dueYmd && b.dueYmd) return -1;
-      if (a.dueYmd && !b.dueYmd) return 1;
-      return ymdCompare(a.dueYmd, b.dueYmd) || String(a.clientName).localeCompare(String(b.clientName));
-    });
+  const retainers = buildRetainerWatchouts({
+    clients,
+    getGlobalRetainerStats,
+    email: me,
+    adminDoc,
+    period,
+    now,
+  });
 
   const myNotifs = (notifications || []).filter(
     (n) => normEmail(n.recipientEmail) === me && toMs(n.createdAt) >= sinceMs,
@@ -386,7 +470,8 @@ export function buildPersonalDigestForUser({
     })),
     overdue: overdue.slice(0, 20),
     dueSoon: dueSoon.slice(0, 20),
-    openAssigned: openAssigned.slice(0, 25),
+    unusedRetainers: retainers.unusedBalance,
+    overRetainers: retainers.overBudget,
     mentions: mentions.slice(0, 20),
     salesFollowUps,
   };
@@ -395,7 +480,8 @@ export function buildPersonalDigestForUser({
     sections.newAssignments.length ||
       sections.overdue.length ||
       sections.dueSoon.length ||
-      sections.openAssigned.length ||
+      sections.unusedRetainers.length ||
+      sections.overRetainers.length ||
       sections.mentions.length ||
       sections.salesFollowUps.length,
   );
@@ -412,7 +498,8 @@ export function buildPersonalDigestForUser({
       ...digestTaskDebug(clients, me),
       overdue: sections.overdue.length,
       dueSoon: sections.dueSoon.length,
-      openAssigned: sections.openAssigned.length,
+      unusedRetainers: sections.unusedRetainers.length,
+      overRetainers: sections.overRetainers.length,
       newAssignments: sections.newAssignments.length,
       mentions: sections.mentions.length,
       sales: sections.salesFollowUps.length,

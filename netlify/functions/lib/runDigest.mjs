@@ -1,3 +1,4 @@
+import { computeGlobalRetainerStats } from '../../../src/utils/billingEngine.js';
 import {
   fetchCollection,
   fetchDoc,
@@ -17,6 +18,24 @@ import {
 } from './renderPersonalDigestEmail.mjs';
 
 const NOTIF_LOOKBACK_MS = 14 * 24 * 60 * 60 * 1000;
+const ACTIVITY_LOOKBACK_MS = 400 * 24 * 60 * 60 * 1000;
+
+function coerceMs(value) {
+  if (value == null || value === '') return value;
+  if (typeof value === 'number') return value;
+  if (typeof value?.toMillis === 'function') return value.toMillis();
+  if (typeof value?.seconds === 'number') return value.seconds * 1000;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : value;
+}
+
+function sanitizeActivity(rows, fields) {
+  return (rows || []).map((row) => {
+    const next = { ...row };
+    for (const field of fields) next[field] = coerceMs(next[field]);
+    return next;
+  });
+}
 
 async function loadNotifySettings(db) {
   return (await fetchDoc(db, 'settings/notifications')) || {};
@@ -76,17 +95,62 @@ export async function runWorkspaceDigest(period) {
   }
 
   const notifCutoff = Date.now() - NOTIF_LOOKBACK_MS;
-  const [clients, adminUsers, notifications, deals, leads, salesPipeline] =
-    await Promise.all([
-      fetchCollection(db, 'clients'),
-      fetchCollection(db, 'admins'),
-      fetchCollection(db, 'notifications', {
-        where: [['createdAt', '>=', notifCutoff]],
-      }).catch(() => []),
-      fetchCollection(db, 'deals').catch(() => []),
-      fetchCollection(db, 'leads').catch(() => []),
-      fetchDoc(db, 'settings/salesPipeline').catch(() => null),
-    ]);
+  const activityCutoff = Date.now() - ACTIVITY_LOOKBACK_MS;
+  const [
+    clients,
+    adminUsers,
+    notifications,
+    deals,
+    leads,
+    salesPipeline,
+    taskLogsRaw,
+    expensesRaw,
+    addonsRaw,
+    timesheetsRaw,
+  ] = await Promise.all([
+    fetchCollection(db, 'clients'),
+    fetchCollection(db, 'admins'),
+    fetchCollection(db, 'notifications', {
+      where: [['createdAt', '>=', notifCutoff]],
+    }).catch(() => []),
+    fetchCollection(db, 'deals').catch(() => []),
+    fetchCollection(db, 'leads').catch(() => []),
+    fetchDoc(db, 'settings/salesPipeline').catch(() => null),
+    fetchCollection(db, 'taskLogs', {
+      where: [['clockInTime', '>=', activityCutoff]],
+    }).catch(() => []),
+    fetchCollection(db, 'expenses', {
+      where: [['date', '>=', activityCutoff]],
+    }).catch(() => []),
+    fetchCollection(db, 'addons').catch(() => []),
+    fetchCollection(db, 'timesheets', {
+      where: [['clockInTime', '>=', activityCutoff]],
+    }).catch(() => []),
+  ]);
+
+  const taskLogs = sanitizeActivity(taskLogsRaw, [
+    'clockInTime',
+    'clockOutTime',
+    'lastResumeTime',
+    'duration',
+    'totalSavedDuration',
+  ]);
+  const expenses = sanitizeActivity(expensesRaw, ['date']);
+  const addons = sanitizeActivity(addonsRaw, ['date', 'billingCycleStart']);
+  const timesheets = sanitizeActivity(timesheetsRaw, [
+    'clockInTime',
+    'clockOutTime',
+    'lastResumeTime',
+    'duration',
+    'totalSavedDuration',
+  ]);
+  const getGlobalRetainerStats = (client, start, end) =>
+    computeGlobalRetainerStats(client, start, end, {
+      taskLogs,
+      expenses,
+      addons,
+      timesheets,
+    });
 
   const recipients = resolveRecipients(settings, adminUsers);
   if (!recipients.length) {
@@ -116,6 +180,7 @@ export async function runWorkspaceDigest(period) {
         deals,
         leads,
         salesPipeline,
+        getGlobalRetainerStats,
         period,
       });
       const subject =

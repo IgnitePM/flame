@@ -14,7 +14,6 @@ import {
   canMarkParentTodoDone,
   clampAllSubtaskDueDatesToParent,
   clampSubtaskDueToParent,
-  collectEffectiveAssigneesForTodoTree,
   getSubtasks,
   mapItemSubtasks,
   parentDueCapMs,
@@ -1270,19 +1269,9 @@ const EmployeeKiosk = ({
       return true;
     });
     if (categoryTodoMineOnly) {
-      if (canManageClientTodos) {
-        rows = rows.filter((row) =>
-          collectEffectiveAssigneesForTodoTree(row.item, user?.email).includes(
-            meLower,
-          ),
-        );
-      } else {
-        rows = rows.filter((row) =>
-          canKioskStaffSeeTodoItem(row.item, meLower, {
-            allowManageAll: canManageClientTodos,
-          }),
-        );
-      }
+      rows = rows.filter((row) =>
+        todoTreeExplicitlyAssignsUser(row.item, meLower),
+      );
     }
     const sorted =
       kioskTaskSortMode === 'client'
@@ -1456,16 +1445,10 @@ const EmployeeKiosk = ({
       todoRowMatchesFilters(row, kioskTaskStatusFilter, kioskTaskDueFilter),
     );
     if (kioskTaskAssigneeFilter === 'me') {
-      rows = rows.filter((row) =>
-        canKioskStaffSeeTodoItem(row.item, meLower, {
-          allowManageAll: canManageClientTodos,
-        }),
-      );
+      rows = rows.filter((row) => todoTreeExplicitlyAssignsUser(row.item, meLower));
     } else if (kioskTaskAssigneeFilter !== 'all') {
       const want = String(kioskTaskAssigneeFilter || '').trim().toLowerCase();
-      rows = rows.filter((row) =>
-        collectEffectiveAssigneesForTodoTree(row.item, meLower).includes(want),
-      );
+      rows = rows.filter((row) => todoTreeExplicitlyAssignsUser(row.item, want));
     }
     return kioskTaskSortMode === 'client'
       ? sortTodoRowsByClientThenDue(rows)
@@ -1875,7 +1858,7 @@ const EmployeeKiosk = ({
                                 </span>
                               )}
                             </div>
-                            <p className="text-[11px] text-slate-600 mb-2 rounded-xl bg-sky-50 border border-sky-100 px-3 py-2">
+                            <p className="text-[11px] font-bold text-red-600 mb-2">
                               Please record notes on progress and mark completed tasks as done as they are completed.
                             </p>
                             {categoryTodoShowsPriorCycle && (
@@ -2268,7 +2251,7 @@ const EmployeeKiosk = ({
                                 </span>
                               )}
                             </div>
-                            <p className="text-[11px] text-slate-600 mb-2 rounded-xl bg-sky-50 border border-sky-100 px-3 py-2">
+                            <p className="text-[11px] font-bold text-red-600 mb-2">
                               Please record notes on progress and mark completed tasks as done as they are completed.
                             </p>
                             {categoryTodoShowsPriorCycle && (

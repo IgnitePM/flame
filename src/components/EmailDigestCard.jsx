@@ -85,11 +85,11 @@ const EmailDigestCard = ({ notifySettings = {}, updateNotifySettings }) => {
       </h3>
       <p className="text-slate-400 text-sm font-medium mb-6">
         Each staff member gets a <strong className="text-slate-600">personal</strong>{' '}
-        email with tasks assigned to them (overdue, due soon, and other open work),
-        recent assignment notices, @mentions, and (if Sales Funnel is enabled for
-        them) sales follow-ups. Daily around 8am Toronto on weekdays; weekly on
-        Mondays. Assignment alerts also check every 15 minutes and email only when
-        someone was newly assigned a task. Requires{' '}
+        email with overdue and due-soon tasks assigned to them, retainer lines
+        ending soon with unused balance, recent assignment notices, @mentions, and
+        (if Sales Funnel is enabled) sales follow-ups. Daily around 8am Toronto on
+        weekdays; weekly on Mondays. Assignment alerts also check every 15 minutes
+        and email only when someone was newly assigned a task. Requires{' '}
         <code className="text-[11px]">GMAIL_USER</code>,{' '}
         <code className="text-[11px]">GMAIL_APP_PASSWORD</code>,{' '}
         <code className="text-[11px]">DIGEST_BOT_EMAIL</code>, and{' '}

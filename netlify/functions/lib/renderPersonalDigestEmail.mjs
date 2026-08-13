@@ -41,12 +41,17 @@ export function renderPersonalDigestHtml({ digest, generatedAt }) {
       const step = t.isStep ? ' (step)' : '';
       return `<strong>${escapeHtml(t.text)}</strong>${step}<div style="color:#64748b;font-size:12px;">Due ${escapeHtml(t.dueYmd)} · ${escapeHtml(t.clientName)}</div>`;
     }),
-    sectionHtml('Also assigned to you', s.openAssigned, (t) => {
-      const step = t.isStep ? ' (step)' : '';
-      const due = t.dueYmd
-        ? `Due ${escapeHtml(t.dueYmd)} · `
-        : 'No due date · ';
-      return `<strong>${escapeHtml(t.text)}</strong>${step}<div style="color:#64748b;font-size:12px;">${due}${escapeHtml(t.clientName)}</div>`;
+    sectionHtml('Retainers ending soon (unused balance)', s.unusedRetainers, (r) => {
+      const days =
+        r.daysLeft === 0
+          ? 'Ends today'
+          : r.daysLeft === 1
+            ? '1 day left'
+            : `${r.daysLeft} days left`;
+      return `<strong>${escapeHtml(r.clientName)}</strong> · ${escapeHtml(r.category)}<div style="color:#64748b;font-size:12px;">${escapeHtml(r.remainingLabel)} remaining of ${escapeHtml(r.allottedLabel)} · ${escapeHtml(days)}</div>`;
+    }),
+    sectionHtml('Retainers over budget', s.overRetainers, (r) => {
+      return `<strong>${escapeHtml(r.clientName)}</strong> · ${escapeHtml(r.category)}<div style="color:#b91c1c;font-size:12px;">${escapeHtml(r.usedLabel)} used of ${escapeHtml(r.allottedLabel)} · ${r.daysLeft} day${r.daysLeft === 1 ? '' : 's'} left in cycle</div>`;
     }),
     sectionHtml('Mentions & notes', s.mentions, (m) => {
       const where = m.clientName
@@ -94,10 +99,16 @@ export function renderPersonalDigestText(digest) {
   pushSection('Overdue', s.overdue, (t) => `${t.text} — due ${t.dueYmd} — ${t.clientName}`);
   pushSection('Due soon', s.dueSoon, (t) => `${t.text} — due ${t.dueYmd} — ${t.clientName}`);
   pushSection(
-    'Also assigned to you',
-    s.openAssigned,
-    (t) =>
-      `${t.text}${t.isStep ? ' (step)' : ''} — ${t.dueYmd ? `due ${t.dueYmd}` : 'no due date'} — ${t.clientName}`,
+    'Retainers ending soon (unused balance)',
+    s.unusedRetainers,
+    (r) =>
+      `${r.clientName} · ${r.category} — ${r.remainingLabel} of ${r.allottedLabel} left · ${r.daysLeft}d`,
+  );
+  pushSection(
+    'Retainers over budget',
+    s.overRetainers,
+    (r) =>
+      `${r.clientName} · ${r.category} — ${r.usedLabel} of ${r.allottedLabel} used · ${r.daysLeft}d left`,
   );
   pushSection(
     'Mentions & notes',
