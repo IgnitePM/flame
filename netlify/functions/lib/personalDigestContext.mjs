@@ -17,25 +17,65 @@ import { getTodoStateForCycle } from './workspaceDigestContext.mjs';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** Ignore HubSpot-era close dates that would otherwise flood every digest. */
-const DIGEST_MAX_DAYS_PAST_CLOSE = 45;
-const DIGEST_MAX_DAYS_IDLE = 90;
+const DIGEST_MAX_DAYS_PAST_CLOSE = 21;
+const DIGEST_MAX_DAYS_IDLE = 60;
 const DIGEST_SALES_LIMIT = 4;
 
 function normEmail(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+/** Firestore Timestamps / {seconds} / number → ms. */
+function toMs(value) {
+  if (value == null || value === '') return 0;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value?.toMillis === 'function') {
+    const n = value.toMillis();
+    return Number.isFinite(n) ? n : 0;
+  }
+  if (typeof value?.seconds === 'number') return value.seconds * 1000;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function pushEmail(set, value) {
+  if (!value) return;
+  if (typeof value === 'string') {
+    const e = normEmail(value);
+    if (e.includes('@')) set.add(e);
+    return;
+  }
+  if (typeof value === 'object') {
+    pushEmail(set, value.email || value.value || value.id);
+  }
+}
+
+/** Explicit assignees, including object-shaped picker values. */
+function assigneesOf(node) {
+  const set = new Set(extractItemAssigneeEmails(node));
+  if (Array.isArray(node?.assigneeEmails)) {
+    for (const v of node.assigneeEmails) pushEmail(set, v);
+  }
+  pushEmail(set, node?.assigneeEmail);
+  pushEmail(set, node?.assignee);
+  return [...set];
+}
+
 /** Explicit assignees only (incl. legacy assigneeEmail) — not the kiosk “unassigned = mine” fallback. */
 function nodeAssignedTo(node, parentItem, email) {
   const me = normEmail(email);
   if (!me || !node) return false;
-  const mine = extractItemAssigneeEmails(node);
+  const mine = assigneesOf(node);
   if (mine.length) return mine.includes(me);
-  if (parentItem) {
-    const parent = extractItemAssigneeEmails(parentItem);
-    return parent.includes(me);
-  }
+  if (parentItem) return assigneesOf(parentItem).includes(me);
   return false;
+}
+
+function itemsOf(cat) {
+  if (!cat || typeof cat !== 'object') return [];
+  if (Array.isArray(cat.items)) return cat.items;
+  if (cat.items && typeof cat.items === 'object') return Object.values(cat.items);
+  return [];
 }
 
 /** Sales hints suitable for email — drop ancient import noise. */
@@ -69,9 +109,8 @@ function startOfTorontoDayMs(now = Date.now()) {
 }
 
 function msToYmdToronto(ms) {
-  if (!ms) return null;
-  const n = Number(ms);
-  if (!Number.isFinite(n) || n <= 0) return null;
+  const n = toMs(ms);
+  if (!n || n <= 0) return null;
   return new Date(n).toLocaleDateString('en-CA', { timeZone: 'America/Toronto' });
 }
 
@@ -90,6 +129,34 @@ function addDaysYmd(ymd, days) {
   return `${yy}-${mm}-${dd}`;
 }
 
+/**
+ * Walk every stored billing cycle, not only "current".
+ * Netlify runs in UTC while cycle keys are written from the browser's local
+ * timezone (America/Toronto), so getBillingPeriod() on the server often misses
+ * the map key and returns an empty virtual cycle — which looked like "no tasks".
+ */
+function forEachClientTodoState(clients, visit) {
+  for (const client of clients || []) {
+    if (!isClientActiveForWork(client)) continue;
+    const cycles = client.todoCycles && typeof client.todoCycles === 'object' ? client.todoCycles : {};
+    const seen = new Set();
+    for (const [cycleKey, state] of Object.entries(cycles)) {
+      if (!state || typeof state !== 'object') continue;
+      seen.add(String(cycleKey));
+      visit(client, state, cycleKey);
+    }
+    try {
+      const period = getBillingPeriod(client.billingDay || 1, 0);
+      const currentKey = String(period.start);
+      if (!seen.has(currentKey)) {
+        visit(client, getTodoStateForCycle(client, period.start) || {}, currentKey);
+      }
+    } catch {
+      // Virtual current cycle is optional; stored cycles above are the source of truth.
+    }
+  }
+}
+
 function walkAssignedOpenTasks(clients, email, options = {}) {
   const me = normEmail(email);
   const {
@@ -98,20 +165,17 @@ function walkAssignedOpenTasks(clients, email, options = {}) {
     dueSoonEndYmd = null,
   } = options;
   const rows = [];
-  for (const client of clients || []) {
-    if (!isClientActiveForWork(client)) continue;
-    const period = getBillingPeriod(client.billingDay || 1, 0);
-    const state = getTodoStateForCycle(client, period.start) || {};
-    for (const [categoryKey, cat] of Object.entries(state)) {
-      for (const item of cat?.items || []) {
+  const seenItem = new Set();
+  forEachClientTodoState(clients, (client, state, cycleKey) => {
+    for (const [categoryKey, cat] of Object.entries(state || {})) {
+      for (const item of itemsOf(cat)) {
         if (!item || item.done) continue;
         const pushIfMine = (node, isStep) => {
           if (!node || node.done) return;
           const explicit = nodeAssignedTo(node, isStep ? item : null, me);
           if (!explicit) {
-            // Managers: surface unassigned work only when it has a near-term due date.
             if (!includeUnassignedDue || isStep) return;
-            if (extractItemAssigneeEmails(node).length > 0) return;
+            if (assigneesOf(node).length > 0) return;
             const dueYmd = msToYmdToronto(node.dueDate);
             if (
               !dueYmd ||
@@ -122,15 +186,19 @@ function walkAssignedOpenTasks(clients, email, options = {}) {
               return;
             }
           }
+          const itemId = node.id || `${cycleKey}:${categoryKey}:${node.text || ''}`;
+          const key = `${client.id}:${itemId}`;
+          if (seenItem.has(key)) return;
+          seenItem.add(key);
           rows.push({
             clientId: client.id,
             clientName: client.name,
             categoryKey,
-            itemId: node.id,
+            itemId,
             parentId: isStep ? item.id : null,
             text: node.text || (isStep ? 'Untitled step' : 'Untitled task'),
             dueYmd: msToYmdToronto(node.dueDate),
-            dueMs: Number(node.dueDate || 0) || null,
+            dueMs: toMs(node.dueDate) || null,
             isStep: !!isStep,
           });
         };
@@ -138,23 +206,60 @@ function walkAssignedOpenTasks(clients, email, options = {}) {
         for (const sub of getSubtasks(item)) pushIfMine(sub, true);
       }
     }
-  }
+  });
   return rows;
+}
+
+function digestTaskDebug(clients, email) {
+  const me = normEmail(email);
+  let activeClients = 0;
+  let cycleCount = 0;
+  let openItems = 0;
+  let assignedOpen = 0;
+  const sampleAssignees = new Set();
+  for (const client of clients || []) {
+    if (!isClientActiveForWork(client)) continue;
+    activeClients += 1;
+    const cycles = client.todoCycles && typeof client.todoCycles === 'object' ? client.todoCycles : {};
+    cycleCount += Object.keys(cycles).length;
+    for (const state of Object.values(cycles)) {
+      if (!state || typeof state !== 'object') continue;
+      for (const cat of Object.values(state)) {
+        for (const item of itemsOf(cat)) {
+          if (!item || item.done) continue;
+          openItems += 1;
+          const emails = [
+            ...assigneesOf(item),
+            ...getSubtasks(item).flatMap((s) => (s?.done ? [] : assigneesOf(s))),
+          ];
+          for (const e of emails) {
+            if (sampleAssignees.size < 12) sampleAssignees.add(e);
+          }
+          if (emails.includes(me) || nodeAssignedTo(item, null, me)) assignedOpen += 1;
+        }
+      }
+    }
+  }
+  return {
+    clientCount: (clients || []).length,
+    activeClients,
+    cycleCount,
+    openItems,
+    assignedOpen,
+    sampleAssignees: [...sampleAssignees],
+  };
 }
 
 function collectMentionsFromTodos(clients, email, sinceMs) {
   const me = normEmail(email);
   const rows = [];
-  for (const client of clients || []) {
-    if (!client || client.archived) continue;
-    const period = getBillingPeriod(client.billingDay || 1, 0);
-    const state = getTodoStateForCycle(client, period.start) || {};
-    for (const [categoryKey, cat] of Object.entries(state)) {
-      for (const item of cat?.items || []) {
+  forEachClientTodoState(clients, (client, state) => {
+    for (const [categoryKey, cat] of Object.entries(state || {})) {
+      for (const item of itemsOf(cat)) {
         if (!item) continue;
         const scan = (node) => {
           for (const c of getTaskComments(node)) {
-            const at = Number(c.createdAt || 0);
+            const at = toMs(c.createdAt);
             if (sinceMs && at < sinceMs) continue;
             const mentions = Array.isArray(c.mentions)
               ? c.mentions.map(normEmail)
@@ -174,7 +279,7 @@ function collectMentionsFromTodos(clients, email, sinceMs) {
         for (const sub of getSubtasks(item)) scan(sub);
       }
     }
-  }
+  });
   return rows.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 }
 
@@ -236,7 +341,7 @@ export function buildPersonalDigestForUser({
     });
 
   const myNotifs = (notifications || []).filter(
-    (n) => normEmail(n.recipientEmail) === me && Number(n.createdAt || 0) >= sinceMs,
+    (n) => normEmail(n.recipientEmail) === me && toMs(n.createdAt) >= sinceMs,
   );
   const newAssignments = myNotifs
     .filter((n) => n.type === NOTIFICATION_TYPES.TASK_ASSIGNED)
@@ -303,6 +408,15 @@ export function buildPersonalDigestForUser({
     todayYmd: today.ymd,
     sections,
     hasContent,
+    debug: {
+      ...digestTaskDebug(clients, me),
+      overdue: sections.overdue.length,
+      dueSoon: sections.dueSoon.length,
+      openAssigned: sections.openAssigned.length,
+      newAssignments: sections.newAssignments.length,
+      mentions: sections.mentions.length,
+      sales: sections.salesFollowUps.length,
+    },
   };
 }
 
@@ -317,7 +431,7 @@ export function buildAssignmentAlertForUser({
       (n) =>
         normEmail(n.recipientEmail) === me &&
         n.type === NOTIFICATION_TYPES.TASK_ASSIGNED &&
-        Number(n.createdAt || 0) > Number(sinceMs || 0),
+        toMs(n.createdAt) > Number(sinceMs || 0),
     )
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   return {

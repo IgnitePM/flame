@@ -125,8 +125,8 @@ export async function runWorkspaceDigest(period) {
       const text = renderPersonalDigestText(digest);
       const html = renderPersonalDigestHtml({ digest, generatedAt });
       await sendDigestEmail({ to: email, subject, text, html });
-      if (digest.hasContent) sent.push(email);
-      else empty.push(email);
+      if (digest.hasContent) sent.push({ email, debug: digest.debug });
+      else empty.push({ email, debug: digest.debug });
     } catch (err) {
       errors.push({ email, error: err?.message || String(err) });
     }
@@ -139,6 +139,8 @@ export async function runWorkspaceDigest(period) {
     recipientCount: recipients.length,
     withContent: sent.length,
     emptyBriefings: empty.length,
+    details: sent,
+    emptyDetails: empty,
     errors,
   };
 }
