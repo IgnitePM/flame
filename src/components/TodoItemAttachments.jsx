@@ -41,8 +41,8 @@ export default function TodoItemAttachments({
 
   return (
     <div
-      className={`w-full space-y-1.5 ${
-        compact ? 'ml-8' : 'pt-1'
+      className={`w-full min-w-0 space-y-1.5 ${
+        compact ? 'sm:ml-8' : 'pt-1'
       } ${attachments.length > 0 && !compact ? 'border-l border-slate-200 pl-3 ml-1' : ''}`}
     >
       {attachments.map((doc) => (

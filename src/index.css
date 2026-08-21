@@ -318,10 +318,27 @@ body {
   .client-task-row {
     flex-direction: column;
     align-items: stretch !important;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
   }
 
-  .client-task-row > .flex.flex-wrap {
+  .client-task-row > .flex.flex-wrap,
+  .client-task-row > .flex.items-center {
     width: 100%;
+  }
+
+  .client-task-row-actions > * {
+    min-width: 0;
+  }
+
+  .global-task-card {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .global-task-card-actions > * {
+    min-width: 0;
   }
 
   /* Prevent accidental horizontal scroll on narrow viewports */

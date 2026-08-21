@@ -223,7 +223,7 @@ function ClientCustomProjectsPanelInner({
               prev === openKey ? null : openKey,
             )
           }
-          className="min-w-[160px] max-w-[240px] rounded-xl border border-white/20 bg-zinc-950/95 px-3 py-2 text-xs font-black text-white outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px] flex items-center justify-between gap-2 disabled:opacity-40"
+          className="w-full min-w-0 sm:w-auto sm:min-w-[160px] sm:max-w-[240px] rounded-xl border border-white/20 bg-zinc-950/95 px-3 py-2 text-xs font-black text-white outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px] flex items-center justify-between gap-2 disabled:opacity-40"
           title="Assign to users"
         >
           <span className="truncate">{summary}</span>
@@ -1835,7 +1835,7 @@ const AdminDashboard = ({
           className={
             isLight
               ? 'w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px] flex items-center justify-between gap-2 disabled:opacity-40'
-              : 'min-w-[160px] max-w-[240px] rounded-xl border border-white/20 bg-zinc-950/95 px-3 py-2 text-xs font-black text-white outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px] flex items-center justify-between gap-2 disabled:opacity-40'
+              : 'w-full min-w-0 sm:w-auto sm:min-w-[160px] sm:max-w-[240px] rounded-xl border border-white/20 bg-zinc-950/95 px-3 py-2 text-xs font-black text-white outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px] flex items-center justify-between gap-2 disabled:opacity-40'
           }
           title="Assign to users"
         >
@@ -2515,7 +2515,7 @@ const AdminDashboard = ({
       {adminTab === 'tasks_global' && (
         <div className="space-y-6">
           {/* User-scoped tasks (not tied to a client / cycle) */}
-          <div className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-sm space-y-3">
+          <div className="bg-white p-4 sm:p-6 rounded-[32px] border border-slate-100 shadow-sm space-y-3">
             <div className="flex items-center justify-between gap-3">
               <h4 className="font-black text-xl text-slate-900">Your Tasks</h4>
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
@@ -2659,7 +2659,7 @@ const AdminDashboard = ({
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
+          <div className="bg-white p-4 sm:p-6 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2 mb-2 block">
@@ -2746,7 +2746,7 @@ const AdminDashboard = ({
             </div>
           </div>
 
-          <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm p-6 space-y-3">
+          <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm p-3 sm:p-6 space-y-3 min-w-0 overflow-x-clip">
             {(() => {
               const filtered = globalTodoRows.filter((row) => {
                 if (taskClientFilter !== 'all' && row.clientId !== taskClientFilter) {
@@ -2813,9 +2813,9 @@ const AdminDashboard = ({
                 return (
                   <div
                     key={`${row.clientId}__${row.categoryKey}__${row.item.id}`}
-                    className={`flex flex-col gap-2 rounded-2xl p-3 ${styles.rowClass}`}
+                    className={`global-task-card flex flex-col gap-2 rounded-2xl p-3 min-w-0 max-w-full overflow-hidden ${styles.rowClass}`}
                   >
-                    <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-start gap-3 min-w-0 w-full">
                       <input
                         type="checkbox"
                         checked={!!row.item.done}
@@ -2870,10 +2870,10 @@ const AdminDashboard = ({
                           }
                         }}
                         disabled={todoSaving}
-                        className="w-4 h-4"
+                        className="w-4 h-4 shrink-0 mt-1"
                       />
                       <div className="flex-1 min-w-0">
-                        <div className={`font-black text-sm ${styles.textClass}`}>
+                        <div className={`font-black text-sm break-words ${styles.textClass}`}>
                           {safeDisplayForReact(row.item.text) || '(no text)'}
                           {subs.length > 0 && (
                             <span className={`ml-2 text-[9px] font-bold ${styles.metaClass}`}>
@@ -2881,7 +2881,7 @@ const AdminDashboard = ({
                             </span>
                           )}
                         </div>
-                        <div className={`text-[10px] font-bold uppercase tracking-widest ${styles.metaClass}`}>
+                        <div className={`mt-0.5 text-[10px] font-bold uppercase tracking-widest break-words ${styles.metaClass}`}>
                           <button
                             type="button"
                             onClick={() => navigateToClient?.(row.clientId)}
@@ -2896,113 +2896,118 @@ const AdminDashboard = ({
                             ? ` • Due ${new Date(row.item.dueDate).toLocaleDateString()}`
                             : ' • No due date'}
                         </div>
-                        <div className={`text-[10px] font-bold ${styles.metaClass}`}>
+                        <div className={`text-[10px] font-bold break-words ${styles.metaClass}`}>
                           Assigned: {assignees.join(', ') || 'Unassigned'}
                         </div>
-                        {rowClient && uploadClientDocument && (
-                          <TodoItemAttachments
-                            item={row.item}
-                            client={rowClient}
-                            cycleStart={row.cycleStart}
-                            categoryKey={row.categoryKey}
-                            disabled={
-                              todoSaving ||
-                              isCycleLocked(rowClient, row.cycleStart)
-                            }
-                            onAttach={uploadClientDocument}
-                            onRemove={removeClientDocument}
-                            compact
-                          />
-                        )}
-                        {rowClient && (
-                          <TaskNotesSection
-                            item={row.item}
-                            allItems={row.catTodo?.items || [row.item]}
-                            onPersistItems={(nextItems) =>
-                              updateClientTodo(rowClient, row.cycleStart, row.categoryKey, {
-                                ...row.catTodo,
-                                items: nextItems,
-                              })
-                            }
-                            user={user}
-                            staffEmails={assignableEmails}
-                            adminUsers={adminUsers}
-                            disabled={
-                              todoSaving || isCycleLocked(rowClient, row.cycleStart)
-                            }
-                            compact
-                          />
-                        )}
                       </div>
-                      {isAdmin && rowClient && (
-                        <div className="shrink-0 flex flex-col sm:flex-row sm:items-center gap-2">
-                          {renderAssigneeMultiSelect({
-                            openKey: `global_task__${row.clientId}__${row.categoryKey}__${row.item.id}`,
-                            value: assigneeValue,
-                            disabled: todoSaving || !updateClientTodo,
-                            onChange: async (nextAssignees) => {
-                              if (!updateClientTodo || !rowClient) return;
-                              setTodoSaving(true);
-                              try {
-                                const items = row.catTodo.items || [];
-                                const nextItems = items.map((i) =>
-                                  i.id === row.item.id
-                                    ? { ...i, assigneeEmails: nextAssignees }
-                                    : i,
-                                );
-                                await updateClientTodo(
+                    </div>
+                    {(isAdmin && rowClient) || !row.item.done ? (
+                      <div className="global-task-card-actions flex flex-col gap-2 w-full min-w-0 sm:flex-row sm:flex-wrap sm:items-center pl-0 sm:pl-7">
+                        {isAdmin && rowClient && (
+                          <div className="flex flex-col gap-2 w-full min-w-0 sm:w-auto sm:flex-row sm:items-center">
+                            {renderAssigneeMultiSelect({
+                              openKey: `global_task__${row.clientId}__${row.categoryKey}__${row.item.id}`,
+                              value: assigneeValue,
+                              className: 'w-full sm:w-auto',
+                              disabled: todoSaving || !updateClientTodo,
+                              onChange: async (nextAssignees) => {
+                                if (!updateClientTodo || !rowClient) return;
+                                setTodoSaving(true);
+                                try {
+                                  const items = row.catTodo.items || [];
+                                  const nextItems = items.map((i) =>
+                                    i.id === row.item.id
+                                      ? { ...i, assigneeEmails: nextAssignees }
+                                      : i,
+                                  );
+                                  await updateClientTodo(
+                                    rowClient,
+                                    row.cycleStart,
+                                    row.categoryKey,
+                                    { ...row.catTodo, items: nextItems },
+                                  );
+                                } finally {
+                                  setTodoSaving(false);
+                                  setAssigneePickerOpenKey(null);
+                                }
+                              },
+                            })}
+                            <button
+                              type="button"
+                              disabled={todoSaving || isCycleLocked(rowClient, row.cycleStart)}
+                              onClick={() =>
+                                openTodoEditOptionsModal(
                                   rowClient,
                                   row.cycleStart,
                                   row.categoryKey,
-                                  { ...row.catTodo, items: nextItems },
-                                );
-                              } finally {
-                                setTodoSaving(false);
-                                setAssigneePickerOpenKey(null);
+                                  row.item,
+                                )
                               }
-                            },
-                          })}
+                              className="w-full sm:w-auto shrink-0 px-3 py-2 rounded-xl border border-slate-200 bg-white text-[10px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                              title="Due date and recurrence"
+                            >
+                              Options
+                            </button>
+                          </div>
+                        )}
+                        {!row.item.done && (
                           <button
                             type="button"
-                            disabled={todoSaving || isCycleLocked(rowClient, row.cycleStart)}
-                            onClick={() =>
-                              openTodoEditOptionsModal(
-                                rowClient,
-                                row.cycleStart,
-                                row.categoryKey,
-                                row.item,
-                              )
-                            }
-                            className="shrink-0 px-3 py-2 rounded-xl border border-slate-200 bg-white text-[10px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                            title="Due date and recurrence"
+                            onClick={() => {
+                              const client = clients.find((cl) => cl.id === row.clientId);
+                              if (!client) return;
+                              const target = buildKioskBillingTargetFromTodoRow(
+                                row,
+                                client,
+                                projects,
+                                todoCategoryKey,
+                                'General / Unclassified',
+                              );
+                              navigateToKioskWithTask(row.clientName, target);
+                            }}
+                            className="w-full sm:w-auto shrink-0 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-[#fd7414] text-white text-xs font-black uppercase tracking-widest hover:bg-[#e66a12] transition-colors"
+                            title="Start timer on kiosk with this client and billing target"
                           >
-                            Options
+                            <Play className="w-4 h-4" aria-hidden />
+                            Start
                           </button>
-                        </div>
-                      )}
-                      {!row.item.done && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const client = clients.find((cl) => cl.id === row.clientId);
-                            if (!client) return;
-                            const target = buildKioskBillingTargetFromTodoRow(
-                              row,
-                              client,
-                              projects,
-                              todoCategoryKey,
-                              'General / Unclassified',
-                            );
-                            navigateToKioskWithTask(row.clientName, target);
-                          }}
-                          className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#fd7414] text-white text-xs font-black uppercase tracking-widest hover:bg-[#e66a12] transition-colors"
-                          title="Start timer on kiosk with this client and billing target"
-                        >
-                          <Play className="w-4 h-4" aria-hidden />
-                          Start
-                        </button>
-                      )}
-                    </div>
+                        )}
+                      </div>
+                    ) : null}
+                    {rowClient && uploadClientDocument && (
+                      <TodoItemAttachments
+                        item={row.item}
+                        client={rowClient}
+                        cycleStart={row.cycleStart}
+                        categoryKey={row.categoryKey}
+                        disabled={
+                          todoSaving ||
+                          isCycleLocked(rowClient, row.cycleStart)
+                        }
+                        onAttach={uploadClientDocument}
+                        onRemove={removeClientDocument}
+                        compact
+                      />
+                    )}
+                    {rowClient && (
+                      <TaskNotesSection
+                        item={row.item}
+                        allItems={row.catTodo?.items || [row.item]}
+                        onPersistItems={(nextItems) =>
+                          updateClientTodo(rowClient, row.cycleStart, row.categoryKey, {
+                            ...row.catTodo,
+                            items: nextItems,
+                          })
+                        }
+                        user={user}
+                        staffEmails={assignableEmails}
+                        adminUsers={adminUsers}
+                        disabled={
+                          todoSaving || isCycleLocked(rowClient, row.cycleStart)
+                        }
+                        compact
+                      />
+                    )}
                     {subs.length > 0 && (
                       <ul className="ml-2 border-l border-slate-300/60 pl-3 space-y-2 w-full min-w-0 max-w-full overflow-x-hidden">
                         {subs.map((sub) => {
@@ -3015,8 +3020,9 @@ const AdminDashboard = ({
                           return (
                             <li
                               key={sub.id}
-                              className={`flex flex-wrap items-center gap-2 rounded-xl px-2 py-2 min-w-0 max-w-full w-full overflow-hidden ${subStyles.rowClass}`}
+                              className={`flex flex-col gap-2 rounded-xl px-2 py-2 min-w-0 max-w-full w-full overflow-hidden ${subStyles.rowClass}`}
                             >
+                              <div className="flex items-start gap-2 min-w-0 w-full">
                               <input
                                 type="checkbox"
                                 checked={!!sub.done}
@@ -3049,10 +3055,10 @@ const AdminDashboard = ({
                                   }
                                 }}
                                 disabled={todoSaving}
-                                className="w-4 h-4 shrink-0"
+                                className="w-4 h-4 shrink-0 mt-1"
                               />
                               <div className="flex-1 min-w-0">
-                                <div className={`text-sm font-bold ${subStyles.textClass}`}>
+                                <div className={`text-sm font-bold break-words ${subStyles.textClass}`}>
                                   {safeDisplayForReact(sub.text) || '(sub-task)'}
                                 </div>
                                 {sub.dueDate && (
@@ -3061,11 +3067,13 @@ const AdminDashboard = ({
                                   </div>
                                 )}
                               </div>
+                              </div>
                               {isAdmin && rowClient && (
-                                <div className="flex flex-wrap gap-2 shrink-0">
+                                <div className="flex flex-col gap-2 w-full min-w-0 sm:flex-row sm:flex-wrap sm:items-center pl-0 sm:pl-6">
                                   {renderAssigneeMultiSelect({
                                     openKey: `global_sub__${row.clientId}__${row.categoryKey}__${row.item.id}__${sub.id}`,
                                     value: subAssigneeVal,
+                                    className: 'w-full sm:w-auto',
                                     disabled: todoSaving || !updateClientTodo,
                                     onChange: async (nextAssignees) => {
                                       if (!updateClientTodo || !rowClient) return;
@@ -3093,6 +3101,7 @@ const AdminDashboard = ({
                                       }
                                     },
                                   })}
+                                  <div className="flex flex-wrap gap-2">
                                   <button
                                     type="button"
                                     disabled={todoSaving || isCycleLocked(rowClient, row.cycleStart)}
@@ -3139,6 +3148,7 @@ const AdminDashboard = ({
                                   >
                                     <Trash2 className="w-4 h-4" />
                                   </button>
+                                  </div>
                                 </div>
                               )}
                             </li>
@@ -4836,7 +4846,8 @@ const AdminDashboard = ({
                                           ).finally(() => setTodoSaving(false));
                                         }}
                                       >
-                                        <div className="flex items-center gap-2 w-full min-w-0">
+                                        <div className="flex flex-col gap-2 w-full min-w-0">
+                                        <div className="flex items-start gap-2 w-full min-w-0">
                                         <span
                                           draggable={
                                             !(todoSaving || isCycleLocked(c, cycleStart)) &&
@@ -4848,7 +4859,7 @@ const AdminDashboard = ({
                                               id: item.id,
                                             });
                                           }}
-                                          className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0 select-none touch-none"
+                                          className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0 select-none touch-none mt-0.5"
                                           title="Drag to reorder"
                                         >
                                           <GripVertical className="w-4 h-4" aria-hidden />
@@ -4923,14 +4934,14 @@ const AdminDashboard = ({
                                             }
                                           }}
                                           disabled={todoSaving}
-                                          className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
+                                          className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4 shrink-0 mt-1"
                                         />
-                                        <span className="flex items-center gap-2 flex-1 min-w-0">
-                                          <span className={`${urgency.textClass} truncate`}>
+                                        <span className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 flex-1 min-w-0">
+                                          <span className={`${urgency.textClass} break-words`}>
                                             {item.text || '(no text)'}
                                           </span>
                                           {item.recurring && (
-                                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${urgency.metaClass}`}>
+                                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest w-fit ${urgency.metaClass}`}>
                                               Recurring
                                             </span>
                                           )}
@@ -4940,9 +4951,12 @@ const AdminDashboard = ({
                                             </span>
                                           )}
                                         </span>
+                                        </div>
+                                        <div className="client-task-row-actions flex flex-col gap-2 w-full min-w-0 sm:flex-row sm:flex-wrap sm:items-center pl-0 sm:pl-14">
                                         {renderAssigneeMultiSelect({
                                           openKey: `todo_item__${c.id}__${cycleStart}__${catKey}__${item.id}`,
                                           value: assignees,
+                                          className: 'w-full sm:w-auto',
                                           disabled: todoSaving || isCycleLocked(c, cycleStart),
                                           onChange: async (nextAssignees) => {
                                             if (isCycleLocked(c, cycleStart)) return;
@@ -4962,6 +4976,7 @@ const AdminDashboard = ({
                                             }
                                           },
                                         })}
+                                        <div className="flex flex-wrap gap-2">
                                         <button
                                           type="button"
                                           disabled={todoSaving}
@@ -4999,6 +5014,8 @@ const AdminDashboard = ({
                                             Start
                                           </button>
                                         )}
+                                        </div>
+                                        </div>
                                         </div>
                                         {uploadClientDocument && (
                                           <TodoItemAttachments
@@ -5829,7 +5846,7 @@ const AdminDashboard = ({
                                                               className={`client-task-row flex flex-col gap-2 rounded-lg p-2 min-w-0 max-w-full ${urgency.rowClass}`}
                                                             >
                                                               <div
-                                                                className="flex flex-wrap items-center gap-2 w-full min-w-0 max-w-full"
+                                                                className="flex flex-col gap-2 w-full min-w-0 max-w-full"
                                                                 onDragOver={(e) => {
                                                                   if (todoSaving || isCycleLocked(c, cycleStart) || !clientTodoFiltersAllowReorder) return;
                                                                   e.preventDefault();
@@ -5856,6 +5873,7 @@ const AdminDashboard = ({
                                                                   }).finally(() => setTodoSaving(false));
                                                                 }}
                                                               >
+                                                              <div className="flex items-start gap-2 w-full min-w-0">
                                                               <span
                                                                 draggable={!(todoSaving || isCycleLocked(c, cycleStart)) && clientTodoFiltersAllowReorder}
                                                                 onDragStart={(e) => {
@@ -5864,7 +5882,7 @@ const AdminDashboard = ({
                                                                     id: item.id,
                                                                   });
                                                                 }}
-                                                                className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0 select-none touch-none"
+                                                                className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0 select-none touch-none mt-0.5"
                                                                 title="Drag to reorder"
                                                               >
                                                                 <GripVertical className="w-4 h-4" aria-hidden />
@@ -5918,7 +5936,7 @@ const AdminDashboard = ({
                                                                   }
                                                                 }}
                                                                 disabled={todoSaving}
-                                                                className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414]"
+                                                                className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] shrink-0 mt-1"
                                                               />
                                                               {todoEditId === item.id ? (
                                                                 <input
@@ -5945,7 +5963,7 @@ const AdminDashboard = ({
                                                                     if (e.key === 'Escape') setTodoEditId(null);
                                                                   }}
                                                                   autoFocus
-                                                                  className="flex-1 text-sm border border-slate-200 rounded px-2 py-1 outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                                                  className="flex-1 min-w-0 text-sm border border-slate-200 rounded px-2 py-1 outline-none focus:ring-2 focus:ring-[#fd7414]"
                                                                 />
                                                               ) : (
                                                                 <span
@@ -5956,12 +5974,12 @@ const AdminDashboard = ({
                                                                     setTodoEditText(item.text || '');
                                                                   }}
                                                                 >
-                                                                  <span className="flex items-center gap-2">
-                                                                    <span>
+                                                                  <span className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
+                                                                    <span className="break-words">
                                                                       {item.text || '(no text)'}
                                                                     </span>
                                                                     {item.recurring && (
-                                                                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${urgency.metaClass}`}>
+                                                                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest w-fit ${urgency.metaClass}`}>
                                                                         Recurring
                                                                       </span>
                                                                     )}
@@ -5973,9 +5991,12 @@ const AdminDashboard = ({
                                                                   </span>
                                                                 </span>
                                                               )}
+                                                              </div>
+                                                              <div className="client-task-row-actions flex flex-col gap-2 w-full min-w-0 sm:flex-row sm:flex-wrap sm:items-center pl-0 sm:pl-14">
                                                               {renderAssigneeMultiSelect({
                                                                 openKey: `todo_item__${c.id}__${cycleStart}__${catKey}__${item.id}`,
                                                                 value: assignees,
+                                                                className: 'w-full sm:w-auto',
                                                                 disabled: todoSaving || isCycleLocked(c, cycleStart),
                                                                 onChange: async (nextAssignees) => {
                                                                   if (isCycleLocked(c, cycleStart)) return;
@@ -5995,6 +6016,7 @@ const AdminDashboard = ({
                                                                   }
                                                                 },
                                                               })}
+                                                              <div className="flex flex-wrap gap-2 items-center">
                                                               <button
                                                                 type="button"
                                                                 disabled={todoSaving}
@@ -6049,6 +6071,8 @@ const AdminDashboard = ({
                                                               >
                                                                 <Trash2 className="w-4 h-4" />
                                                               </button>
+                                                              </div>
+                                                              </div>
                                                               </div>
                                                               {uploadClientDocument && (
                                                                 <TodoItemAttachments
