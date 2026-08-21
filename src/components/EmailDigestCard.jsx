@@ -1,5 +1,6 @@
 import React from 'react';
 import { Mail } from 'lucide-react';
+import { authedFetch } from '../utils/authedFetch.js';
 
 /**
  * Admin Config card for personal email digests + assignment alerts.
@@ -50,11 +51,7 @@ const EmailDigestCard = ({ notifySettings = {}, updateNotifySettings }) => {
   const sendTest = async (period) => {
     setTestState((s) => ({ ...s, [period]: 'sending' }));
     try {
-      const resp = await fetch('/.netlify/functions/send-test-digest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ period }),
-      });
+      const resp = await authedFetch('/.netlify/functions/send-test-digest', { period });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data?.error) {
         throw new Error(data?.error || 'Request failed');

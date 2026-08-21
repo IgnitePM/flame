@@ -42,6 +42,7 @@ import {
 } from '../utils/todoDragDrop.js';
 import { buildGlobalTodoRows } from '../utils/todoGlobalRows.js';
 import { isClientActiveForWork } from '../utils/clientActiveForWork.js';
+import { authedFetch } from '../utils/authedFetch.js';
 import {
   filterClientsForTeamMember,
   teamMemberCanViewClient,
@@ -5219,20 +5220,14 @@ const AdminDashboard = ({
                                   try {
                                     const retainerCategories =
                                       getEnabledRetainerCategoryNames(c);
-                                    const res = await fetch(
+                                    const res = await authedFetch(
                                       '/.netlify/functions/gemini-extract-todos',
                                       {
-                                        method: 'POST',
-                                        headers: {
-                                          'Content-Type': 'application/json',
-                                        },
-                                        body: JSON.stringify({
-                                          transcript,
-                                          clientName: c.name,
-                                          retainerCategories,
-                                          generalCategoryLabel:
-                                            'General / Unclassified',
-                                        }),
+                                        transcript,
+                                        clientName: c.name,
+                                        retainerCategories,
+                                        generalCategoryLabel:
+                                          'General / Unclassified',
                                       },
                                     );
                                     const data = await res.json().catch(() => null);

@@ -1,9 +1,9 @@
-import { runWorkspaceDigest } from './lib/runDigest.mjs';
+import { runWorkspaceDigest, summarizeRun } from './lib/runDigest.mjs';
 
 export default async () => {
   try {
     const result = await runWorkspaceDigest('daily');
-    console.log('[send-daily-digest]', result);
+    console.log('[send-daily-digest]', summarizeRun(result));
   } catch (err) {
     console.error('[send-daily-digest] failed:', err);
   }

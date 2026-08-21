@@ -7,21 +7,17 @@ service firebase.storage {
         : '';
     }
 
-    // @ignitepm.com staff — does not require Firestore cross-service lookup.
-    function isIgniteStaffEmail() {
-      return emailLower().matches('.*@ignitepm\\.com$');
-    }
-
     function adminExists() {
       return emailLower() != '' &&
         firestore.exists(/databases/(default)/documents/admins/$(emailLower()));
     }
 
+    // Staff requires an admins/{email} doc, matching firestore.rules'
+    // isAnyStaff(). A bare @ignitepm.com address is not enough: the app
+    // self-provisions a kiosk-role doc on first login, and
+    // ensureStaffAdminDocForStorage() creates it before any upload.
     function isStaff() {
-      return request.auth != null && (
-        isIgniteStaffEmail() ||
-        adminExists()
-      );
+      return request.auth != null && adminExists();
     }
 
     function clientDocData(clientId) {
@@ -44,7 +40,7 @@ service firebase.storage {
     }
 
     match /client-logos/{clientId}/{fileName} {
-      allow read: if request.auth != null;
+      allow read: if isStaff() || clientAllowsEmail(clientId);
       allow write: if isStaff()
         && request.resource.size < 3 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');

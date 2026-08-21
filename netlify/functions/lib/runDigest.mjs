@@ -41,6 +41,19 @@ async function loadNotifySettings(db) {
   return (await fetchDoc(db, 'settings/notifications')) || {};
 }
 
+/**
+ * Log-safe view of a run result. Drops the per-recipient debug objects, which
+ * carry assignee email samples and workload counts, so they don't accumulate in
+ * Netlify's log storage. Errors are kept because they are needed to debug.
+ */
+export function summarizeRun(result) {
+  if (!result || typeof result !== 'object') return result;
+  const out = { ...result };
+  delete out.details;
+  delete out.emptyDetails;
+  return out;
+}
+
 function resolveRecipients(settings, adminUsers = []) {
   const configured = Array.isArray(settings.emailDigestRecipients)
     ? settings.emailDigestRecipients
@@ -82,7 +95,7 @@ function adminByEmail(adminUsers = []) {
  * Per-user morning/weekly digests. Replaces the old shared workspace brief.
  * Each recipient gets only their assignments, dues, mentions, and (if enabled) sales.
  */
-export async function runWorkspaceDigest(period) {
+export async function runWorkspaceDigest(period, { force = false } = {}) {
   const db = await getDigestDb();
   const settings = await loadNotifySettings(db);
 
@@ -92,6 +105,17 @@ export async function runWorkspaceDigest(period) {
   const enabledKey = period === 'weekly' ? 'emailWeeklyEnabled' : 'emailDailyEnabled';
   if (settings[enabledKey] === false) {
     return { skipped: true, reason: `${period} digest is disabled in settings/notifications.` };
+  }
+
+  // The scheduled function URLs are HTTP-reachable, so a repeat hit must not
+  // re-send a digest that already went out this cycle. Admin "send test" passes
+  // force: true. Assignment alerts already dedupe via their own watermark.
+  const cursorKey = period === 'weekly' ? 'lastWeeklyDigestAt' : 'lastDailyDigestAt';
+  const minGapMs = (period === 'weekly' ? 6 * 24 : 20) * 3600 * 1000;
+  const digestCursor = (await fetchDoc(db, 'settings/digestCursor')) || {};
+  const lastRunAt = Number(digestCursor[cursorKey] || 0);
+  if (!force && lastRunAt && Date.now() - lastRunAt < minGapMs) {
+    return { skipped: true, reason: `A ${period} digest already went out recently.` };
   }
 
   const notifCutoff = Date.now() - NOTIF_LOOKBACK_MS;
@@ -196,6 +220,11 @@ export async function runWorkspaceDigest(period) {
       errors.push({ email, error: err?.message || String(err) });
     }
   }
+
+  await mergeDoc(db, 'settings/digestCursor', {
+    [cursorKey]: Date.now(),
+    [`${cursorKey}Iso`]: new Date().toISOString(),
+  });
 
   return {
     sent: true,

@@ -1,4 +1,5 @@
 import { formatTime, getTaskDuration } from './billingEngine.js';
+import { escapeHtml as esc } from './escapeHtml.js';
 
 /**
  * Per-client billing-cycle exports (print-window PDFs + CSV pack).
@@ -53,7 +54,7 @@ import { formatTime, getTaskDuration } from './billingEngine.js';
     const html = `
       <html>
         <head>
-          <title>Ignite PM - ${client?.name || 'Client'} Cycle Report</title>
+          <title>Ignite PM - ${esc(client?.name || 'Client')} Cycle Report</title>
           <style>
             body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 32px; color: #111827; }
             h1 { color: #fd7414; margin: 0 0 6px 0; }
@@ -67,7 +68,7 @@ import { formatTime, getTaskDuration } from './billingEngine.js';
           </style>
         </head>
         <body>
-          <h1>${client?.name || 'Client'} - Billing Cycle Report</h1>
+          <h1>${esc(client?.name || 'Client')} - Billing Cycle Report</h1>
           <div class="meta">
             Cycle: ${fmtDate(mStart)} - ${fmtDate(mEnd)}<br/>
             Generated on: ${new Date().toLocaleString()}<br/>
@@ -117,9 +118,9 @@ import { formatTime, getTaskDuration } from './billingEngine.js';
                         (t) => `
                           <tr>
                             <td>${fmtDate(t.clockInTime)}</td>
-                            <td>${t.projectName || ''}</td>
+                            <td>${esc(t.projectName)}</td>
                             <td>${formatTime(getTaskDuration(t))}</td>
-                            <td>${t.notes ? t.notes : ''}</td>
+                            <td>${esc(t.notes)}</td>
                           </tr>
                         `,
                       )
@@ -146,7 +147,7 @@ import { formatTime, getTaskDuration } from './billingEngine.js';
                         (e) => `
                           <tr>
                             <td>${fmtDate(e.date)}</td>
-                            <td>${e.description || ''}</td>
+                            <td>${esc(e.description)}</td>
                             <td>$${fmtMoney(e.finalCost || e.amount || 0)}</td>
                           </tr>
                         `,
@@ -177,9 +178,9 @@ import { formatTime, getTaskDuration } from './billingEngine.js';
                         (t) => `
                           <tr>
                             <td>${fmtDate(t.clockInTime)}</td>
-                            <td>${projectTitle(t.projectId)}</td>
+                            <td>${esc(projectTitle(t.projectId))}</td>
                             <td>${formatTime(getTaskDuration(t))}</td>
-                            <td>${t.notes ? t.notes : ''}</td>
+                            <td>${esc(t.notes)}</td>
                           </tr>
                         `,
                       )
@@ -209,8 +210,8 @@ import { formatTime, getTaskDuration } from './billingEngine.js';
                         (e) => `
                           <tr>
                             <td>${fmtDate(e.date)}</td>
-                            <td>${projectTitle(e.projectId)}</td>
-                            <td>${e.description || ''}</td>
+                            <td>${esc(projectTitle(e.projectId))}</td>
+                            <td>${esc(e.description)}</td>
                             <td>$${fmtMoney(e.finalCost || e.amount || 0)}</td>
                           </tr>
                         `,
@@ -238,8 +239,8 @@ import { formatTime, getTaskDuration } from './billingEngine.js';
                       .map(
                         (p) => `
                           <tr>
-                            <td>${p.title}</td>
-                            <td><span class="pill">${p.status || ''}</span></td>
+                            <td>${esc(p.title)}</td>
+                            <td><span class="pill">${esc(p.status)}</span></td>
                             <td>${p.hours.toFixed(2)}h</td>
                             <td>$${fmtMoney(p.cost)}</td>
                           </tr>
@@ -281,11 +282,6 @@ import { formatTime, getTaskDuration } from './billingEngine.js';
       return;
     }
 
-    const esc = (v) =>
-      String(v ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
     const fmtDate = (ms) => new Date(ms).toLocaleDateString();
     const fmtMoney = (n) =>
       Number(n || 0).toLocaleString(undefined, {

@@ -1,0 +1,15 @@
+# Headers only. Build settings intentionally stay in the Netlify UI — adding a
+# [build] section here would override them.
+#
+# CSP is deliberately absent for now: Tailwind's injected styles and the
+# Firebase SDK's connect-src needs have to be measured with
+# Content-Security-Policy-Report-Only before a policy can be enforced.
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+    Strict-Transport-Security = "max-age=31536000"

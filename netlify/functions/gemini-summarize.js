@@ -106,6 +106,22 @@ exports.handler = async (event) => {
       };
     }
 
+    // Dynamic import so this works whether the bundler treats the file as CJS
+    // or ESM. Runs before the Gemini key is read so anonymous callers cannot
+    // reach the paid API at all.
+    const { requireStaffCaller, describeAuthError } = await import('./lib/requireAuth.mjs');
+    let caller;
+    try {
+      caller = await requireStaffCaller(event.headers);
+    } catch (err) {
+      const { status, message } = describeAuthError(err);
+      return {
+        statusCode: status,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: message }),
+      };
+    }
+
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return {
@@ -122,8 +138,9 @@ exports.handler = async (event) => {
     const context = payload.context || payload;
     const kind = String(context.kind || 'ops');
     const scope = String(context.scope || 'overall');
-    const viewer = context.viewer || {};
-    const superAdmin = !!viewer.superAdmin;
+    // Derived from the verified token, never from the request body: this decides
+    // whether the prompt may discuss other employees' timesheets.
+    const superAdmin = caller.role === 'admin';
     const period = String(context.period || '').trim(); // 'daily' | 'weekly' | '' (on-demand kiosk brief)
     const periodLabel =
       period === 'weekly' ? 'weekly' : period === 'daily' ? 'daily' : '';
@@ -365,11 +382,12 @@ ${JSON.stringify(context).slice(0, 120000)}
       }),
     };
   } catch (err) {
-    console.error(err);
+    const ref = Date.now().toString(36);
+    console.error(`[gemini-summarize][${ref}]`, err);
     return {
       statusCode: 500,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ error: err?.message || String(err) }),
+      body: JSON.stringify({ error: `Could not generate summary (ref ${ref}).` }),
     };
   }
 };

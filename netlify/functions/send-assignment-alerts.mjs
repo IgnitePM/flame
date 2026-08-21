@@ -1,4 +1,4 @@
-import { runAssignmentAlerts } from './lib/runDigest.mjs';
+import { runAssignmentAlerts, summarizeRun } from './lib/runDigest.mjs';
 
 /**
  * Short assignment-only emails when staff receive new task assignments.
@@ -7,7 +7,7 @@ import { runAssignmentAlerts } from './lib/runDigest.mjs';
 export default async () => {
   try {
     const result = await runAssignmentAlerts();
-    console.log('[send-assignment-alerts]', result);
+    console.log('[send-assignment-alerts]', summarizeRun(result));
   } catch (err) {
     console.error('[send-assignment-alerts] failed:', err);
     throw err;

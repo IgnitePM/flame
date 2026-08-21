@@ -23,6 +23,21 @@ exports.handler = async (event) => {
       };
     }
 
+    // Dynamic import so this works whether the bundler treats the file as CJS
+    // or ESM. Runs before the Gemini key is read so anonymous callers cannot
+    // reach the paid API at all.
+    const { requireStaffCaller, describeAuthError } = await import('./lib/requireAuth.mjs');
+    try {
+      await requireStaffCaller(event.headers);
+    } catch (err) {
+      const { status, message } = describeAuthError(err);
+      return {
+        statusCode: status,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: message }),
+      };
+    }
+
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return {
@@ -39,13 +54,19 @@ exports.handler = async (event) => {
 
     const payload = JSON.parse(event.body || '{}');
     const transcript = String(payload.transcript || '').trim();
-    const clientName = String(payload.clientName || '').trim();
+    // Caps keep prompt size (and cost) bounded regardless of what a caller sends.
+    const clientName = String(payload.clientName || '').trim().slice(0, 200);
     const retainerCategories = Array.isArray(payload.retainerCategories)
-      ? payload.retainerCategories.map((c) => String(c)).filter(Boolean)
+      ? payload.retainerCategories
+          .slice(0, 40)
+          .map((c) => String(c).slice(0, 120))
+          .filter(Boolean)
       : [];
     const generalCategoryLabel = String(
       payload.generalCategoryLabel || 'General / Unclassified',
-    ).trim();
+    )
+      .trim()
+      .slice(0, 120);
 
     if (!transcript) {
       return {
@@ -186,12 +207,15 @@ ${trimmedTranscript}
     }
 
     if (!parsed || !Array.isArray(parsed.todos)) {
+      console.error(
+        '[gemini-extract-todos] unparseable model output:',
+        typeof text === 'string' ? text.slice(0, 2000) : text,
+      );
       return {
-        statusCode: 500,
+        statusCode: 502,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          error: 'Gemini returned an unexpected response format.',
-          raw: typeof text === 'string' ? text.slice(0, 1000) : text,
+          error: 'The AI returned an unexpected response. Try again.',
         }),
       };
     }
@@ -210,11 +234,12 @@ ${trimmedTranscript}
       body: JSON.stringify({ todos }),
     };
   } catch (err) {
-    console.error(err);
+    const ref = Date.now().toString(36);
+    console.error(`[gemini-extract-todos][${ref}]`, err);
     return {
       statusCode: 500,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ error: err?.message || String(err) }),
+      body: JSON.stringify({ error: `Could not extract todos (ref ${ref}).` }),
     };
   }
 };

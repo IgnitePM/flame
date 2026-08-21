@@ -81,6 +81,8 @@ import {
 } from './utils/notifications.js';
 import { buildAiSummaryPayload } from './utils/aiSummaryPayload.js';
 import { buildSalesAiPayload } from './utils/salesAiPayload.js';
+import { escapeHtml as esc } from './utils/escapeHtml.js';
+import { authedFetch } from './utils/authedFetch.js';
 import { staffDisplayName } from './utils/staffDirectory.js';
 import ClientPortal from './components/ClientPortal.jsx';
 import EmployeeKiosk from './components/EmployeeKiosk.jsx';
@@ -285,7 +287,11 @@ const AdminDashboardRouteView = ({
 };
 
 export default function App() {
-  const ENABLE_DEMOS = import.meta?.env?.VITE_ENABLE_DEMOS === 'true';
+  // import.meta.env.DEV is statically replaced with false in production builds,
+  // so the demo sign-in paths below are tree-shaken out of the shipped bundle
+  // and cannot be re-enabled by an env var alone.
+  const ENABLE_DEMOS =
+    import.meta.env.DEV && import.meta.env.VITE_ENABLE_DEMOS === 'true';
   const [user, setUser] = useState(null);
   const [view, setView] = useState('employee'); 
   const [timesheets, setTimesheets] = useState([]);
@@ -2780,7 +2786,7 @@ export default function App() {
           <h2>Ignite PM Timesheet Report</h2>
           <div class="meta">
             Generated on: ${new Date().toLocaleString()}<br/>
-            Filter: ${dateFilterType.toUpperCase()} | Client: ${clientFilter || 'All'}
+            Filter: ${esc(dateFilterType).toUpperCase()} | Client: ${esc(clientFilter || 'All')}
           </div>
           <table>
             <thead>
@@ -2801,7 +2807,7 @@ export default function App() {
       
       html += `
         <tr class="shift-row">
-          <td>${shift.employeeName}</td>
+          <td>${esc(shift.employeeName)}</td>
           <td>${new Date(shift.clockInTime).toLocaleDateString()}</td>
           <td colspan="3"><strong>Total Shift Time</strong></td>
           <td>${formatTime(getShiftDuration(shift))}</td>
@@ -2815,7 +2821,7 @@ export default function App() {
             <tr>
               <td></td>
               <td></td>
-              <td>${t.clientName} - ${t.projectName}<br/><small style="color:#666">${t.notes || ''}</small></td>
+              <td>${esc(t.clientName)} - ${esc(t.projectName)}<br/><small style="color:#666">${esc(t.notes)}</small></td>
               <td>${new Date(t.clockInTime).toLocaleTimeString()}</td>
               <td>${t.clockOutTime ? new Date(t.clockOutTime).toLocaleTimeString() : 'Active'}</td>
               <td>${formatTime(getTaskDuration(t))}</td>
@@ -2985,11 +2991,7 @@ export default function App() {
         user,
         role: currentUserRole,
       });
-      const resp = await fetch('/.netlify/functions/gemini-summarize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ context }),
-      });
+      const resp = await authedFetch('/.netlify/functions/gemini-summarize', { context });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) {
         throw new Error(data?.error || 'Could not generate AI summary.');
@@ -3092,11 +3094,7 @@ export default function App() {
         user,
         mineOnly,
       });
-      const resp = await fetch('/.netlify/functions/gemini-summarize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ context }),
-      });
+      const resp = await authedFetch('/.netlify/functions/gemini-summarize', { context });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) {
         throw new Error(data?.error || 'Could not generate sales coach.');
