@@ -1,5 +1,9 @@
 import { ExternalLink, Mail, Phone, User } from 'lucide-react';
-import { normalizeExternalUrl, normalizePrimaryContact, normalizeClientContacts } from '../utils/clientDocuments.js';
+import {
+  normalizePrimaryContact,
+  normalizeClientContacts,
+} from '../utils/clientDocuments.js';
+import { clientConnectionLinks } from '../utils/clientConnections.js';
 
 function LinkChip({ href, label }) {
   if (!href) return null;
@@ -54,22 +58,20 @@ function ContactBlock({ title, contact }) {
   );
 }
 
-export default function ClientProfileSummary({ client }) {
-  const website = normalizeExternalUrl(client?.website);
-  const driveUrl = normalizeExternalUrl(client?.googleDriveFolderUrl);
-  const hubspotUrl = normalizeExternalUrl(client?.hubspotProfileUrl);
+export default function ClientProfileSummary({ client, onComposeEmail = null }) {
   const phone = String(client?.phone || '').trim();
   const primary = normalizePrimaryContact(client?.primaryContact);
   const contacts = normalizeClientContacts(client?.contacts);
+  const connectionLinks = clientConnectionLinks(client);
 
-  const hasLinks = website || driveUrl || hubspotUrl || phone;
+  const hasLinks = connectionLinks.length > 0 || phone;
   const hasContacts =
     primary.name ||
     primary.email ||
     primary.phone ||
     contacts.length > 0;
 
-  if (!hasLinks && !hasContacts) {
+  if (!hasLinks && !hasContacts && !onComposeEmail) {
     return (
       <p className="text-xs italic text-slate-400">
         No company profile yet. Open client settings to add website, contacts, and links.
@@ -79,11 +81,11 @@ export default function ClientProfileSummary({ client }) {
 
   return (
     <div className="space-y-3">
-      {hasLinks && (
+      {(hasLinks || onComposeEmail) && (
         <div className="flex flex-wrap gap-2 items-center">
-          <LinkChip href={website} label="Website" />
-          <LinkChip href={driveUrl} label="Google Drive" />
-          <LinkChip href={hubspotUrl} label="HubSpot" />
+          {connectionLinks.map((link) => (
+            <LinkChip key={link.key} href={link.href} label={link.label} />
+          ))}
           {phone && (
             <a
               href={`tel:${phone.replace(/\s/g, '')}`}
@@ -92,6 +94,16 @@ export default function ClientProfileSummary({ client }) {
               <Phone className="w-3 h-3" />
               {phone}
             </a>
+          )}
+          {onComposeEmail && (
+            <button
+              type="button"
+              onClick={onComposeEmail}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50"
+            >
+              <Mail className="w-3 h-3" />
+              Email client
+            </button>
           )}
         </div>
       )}

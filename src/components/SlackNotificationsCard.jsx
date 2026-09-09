@@ -34,6 +34,11 @@ const SlackNotificationsCard = ({ notifySettings = {}, updateNotifySettings }) =
       label: 'Client approved/rejected an estimate',
       defaultOn: true,
     },
+    {
+      key: 'notifyPortalInvitesGlobal',
+      label: 'Also post portal invites to the workspace webhook (in addition to client webhook)',
+      defaultOn: false,
+    },
   ];
 
   const saveWebhook = async () => {
@@ -74,7 +79,9 @@ const SlackNotificationsCard = ({ notifySettings = {}, updateNotifySettings }) =
     <div className="bg-white p-8 rounded-[32px] border border-slate-100 shadow-sm text-left">
       <h3 className="font-black text-xl mb-2">Slack Notifications</h3>
       <p className="text-slate-400 text-sm font-medium mb-6">
-        Posts alerts to a Slack channel via an incoming webhook. Toggles save
+        Posts workspace alerts to a Slack channel via an incoming webhook. For
+        per-client channels, set each client’s Slack webhook under Connections
+        (invites, estimates, and overdue tasks post there). Toggles save
         automatically; alerts are sent by the server even when no one has the
         app open.
       </p>

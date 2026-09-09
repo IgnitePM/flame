@@ -105,6 +105,7 @@ import {
   portalInviteStatusLabel,
   validatePortalEmailsExclusive,
 } from './utils/portalAccess.js';
+import { normalizeClientConnectionFields } from './utils/clientConnections.js';
 import {
   filterClientsForTeamMember,
   teamMemberCanViewClient,
@@ -4313,7 +4314,7 @@ export default function App() {
                   )}
                 </div>
                 <div className="space-y-4 pt-4 border-t border-slate-200">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Company profile</p>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Company profile & connections</p>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Website</label>
                     <input
@@ -4363,6 +4364,129 @@ export default function App() {
                       className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
                       placeholder="https://app.hubspot.com/contacts/..."
                     />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Slack channel URL</label>
+                    <input
+                      type="url"
+                      value={editingClient.slackChannelUrl || ''}
+                      onChange={(e) =>
+                        setEditingClient({
+                          ...editingClient,
+                          slackChannelUrl: e.target.value,
+                        })
+                      }
+                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      placeholder="https://ignitepm.slack.com/archives/C..."
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Slack channel webhook (optional)</label>
+                    <input
+                      type="url"
+                      value={editingClient.slackWebhookUrl || ''}
+                      onChange={(e) =>
+                        setEditingClient({
+                          ...editingClient,
+                          slackWebhookUrl: e.target.value,
+                        })
+                      }
+                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      placeholder="https://hooks.slack.com/services/..."
+                    />
+                    <p className="text-[10px] font-bold text-slate-400">
+                      Incoming webhook for this client’s channel. Used for invite / estimate / overdue alerts.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Google Calendar / scheduling URL</label>
+                    <input
+                      type="url"
+                      value={editingClient.googleCalendarUrl || ''}
+                      onChange={(e) =>
+                        setEditingClient({
+                          ...editingClient,
+                          googleCalendarUrl: e.target.value,
+                        })
+                      }
+                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      placeholder="https://calendar.google.com/..."
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Perplexity space / project URL</label>
+                    <input
+                      type="url"
+                      value={editingClient.perplexityUrl || ''}
+                      onChange={(e) =>
+                        setEditingClient({
+                          ...editingClient,
+                          perplexityUrl: e.target.value,
+                        })
+                      }
+                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      placeholder="https://www.perplexity.ai/..."
+                    />
+                  </div>
+                  <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Pinned Docs</p>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditingClient({
+                            ...editingClient,
+                            pinnedDocs: [
+                              ...(editingClient.pinnedDocs || []),
+                              { id: `pin_${Date.now()}`, label: '', url: '' },
+                            ],
+                          })
+                        }
+                        className="text-[10px] font-black uppercase tracking-widest text-[#fd7414]"
+                      >
+                        + Add doc
+                      </button>
+                    </div>
+                    {(editingClient.pinnedDocs || []).length === 0 ? (
+                      <p className="text-xs text-slate-400">Pin SOWs, strategy briefs, or other key Google Docs.</p>
+                    ) : (
+                      (editingClient.pinnedDocs || []).map((pin, idx) => (
+                        <div key={pin.id || idx} className="grid gap-2 sm:grid-cols-[1fr_2fr_auto]">
+                          <input
+                            type="text"
+                            value={pin.label || ''}
+                            onChange={(e) => {
+                              const next = [...(editingClient.pinnedDocs || [])];
+                              next[idx] = { ...next[idx], label: e.target.value };
+                              setEditingClient({ ...editingClient, pinnedDocs: next });
+                            }}
+                            className="w-full bg-white border border-slate-200 p-3 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                            placeholder="Label (e.g. SOW)"
+                          />
+                          <input
+                            type="url"
+                            value={pin.url || ''}
+                            onChange={(e) => {
+                              const next = [...(editingClient.pinnedDocs || [])];
+                              next[idx] = { ...next[idx], url: e.target.value };
+                              setEditingClient({ ...editingClient, pinnedDocs: next });
+                            }}
+                            className="w-full bg-white border border-slate-200 p-3 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                            placeholder="https://docs.google.com/..."
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const next = (editingClient.pinnedDocs || []).filter((_, i) => i !== idx);
+                              setEditingClient({ ...editingClient, pinnedDocs: next });
+                            }}
+                            className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-black text-slate-500 hover:bg-white"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))
+                    )}
                   </div>
                   <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Primary contact</p>
@@ -4877,8 +5001,7 @@ export default function App() {
                     logoUrl: editingClient.logoUrl || null,
                     website: String(editingClient.website || '').trim(),
                     phone: String(editingClient.phone || '').trim(),
-                    googleDriveFolderUrl: String(editingClient.googleDriveFolderUrl || '').trim(),
-                    hubspotProfileUrl: String(editingClient.hubspotProfileUrl || '').trim(),
+                    ...normalizeClientConnectionFields(editingClient),
                     retainerCategoryEnabled: normalizeRetainerCategoryEnabled(
                       editingClient.retainerCategoryEnabled,
                     ),

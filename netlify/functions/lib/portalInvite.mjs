@@ -204,6 +204,20 @@ export async function invitePortalUser({
     updatedAt: now,
   });
 
+  try {
+    const { notifyClientSlack } = await import('./clientSlack.mjs');
+    const settings = (await fetchDoc(db, 'settings/notifications')) || {};
+    await notifyClientSlack({
+      clientId: cid,
+      alsoGlobal: !!settings.notifyPortalInvitesGlobal,
+      text: isReminder
+        ? `:bell: Portal invite reminder sent to ${em} for *${client.name || 'client'}*.`
+        : `:mailbox_with_mail: Portal invite sent to ${em} for *${client.name || 'client'}*.`,
+    });
+  } catch (err) {
+    console.warn('[portalInvite] slack notify skipped:', err?.message || err);
+  }
+
   return {
     ok: true,
     email: em,

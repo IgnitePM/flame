@@ -94,6 +94,7 @@ import PayrollView from './PayrollView.jsx';
 import SlackNotificationsCard from './SlackNotificationsCard.jsx';
 import EmailDigestCard from './EmailDigestCard.jsx';
 import FxRatesCard from './FxRatesCard.jsx';
+import ClientEmailComposeModal from './ClientEmailComposeModal.jsx';
 import TodoDeleteConfirmModal from './TodoDeleteConfirmModal.jsx';
 import {
   exportClientCyclePDF,
@@ -1299,6 +1300,7 @@ const AdminDashboard = ({
     if (adminTab !== 'timesheets') setAdminTab('timesheets');
   }, [isRestrictedStaff, adminTab, setAdminTab, lockedTab]);
   const [estimateModal, setEstimateModal] = useState(null);
+  const [emailComposeClient, setEmailComposeClient] = useState(null);
   const [estimateValues, setEstimateValues] = useState({
     hours: '',
     cost: '',
@@ -4010,7 +4012,12 @@ const AdminDashboard = ({
                           <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
                             Company profile
                           </h5>
-                          <ClientProfileSummary client={c} />
+                          <ClientProfileSummary
+                            client={c}
+                            onComposeEmail={
+                              canBilling ? () => setEmailComposeClient(c) : null
+                            }
+                          />
                         </div>
                         <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
                           <ClientFilesPanel
@@ -7588,6 +7595,17 @@ const AdminDashboard = ({
                       clientId: estimateModal.clientId,
                       cycleStart: null,
                     });
+                    try {
+                      await authedFetch('/.netlify/functions/notify-client-slack', {
+                        clientId: estimateModal.clientId,
+                        alsoGlobal: true,
+                        text:
+                          `:clipboard: *Estimate sent* to *${estimateModal.clientName || 'client'}*: ${estimateModal.title || 'Untitled'}\n` +
+                          `${hours.toFixed(1)}h / $${cost.toFixed(2)} — awaiting client decision.`,
+                      });
+                    } catch {
+                      /* Slack is best-effort */
+                    }
                     setEstimateModal(null);
                     setEstimateValues({ hours: '', cost: '', notes: '' });
                   } catch (err) {
@@ -7607,6 +7625,13 @@ const AdminDashboard = ({
             </div>
           </div>
         </div>
+      )}
+
+      {emailComposeClient && (
+        <ClientEmailComposeModal
+          client={emailComposeClient}
+          onClose={() => setEmailComposeClient(null)}
+        />
       )}
 
       {projectEditModal && (

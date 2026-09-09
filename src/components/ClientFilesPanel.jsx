@@ -1,6 +1,7 @@
 import React from 'react';
 import { ExternalLink, FileText, Paperclip, Trash2, Upload } from 'lucide-react';
-import { formatFileSize, normalizeExternalUrl } from '../utils/clientDocuments.js';
+import { formatFileSize } from '../utils/clientDocuments.js';
+import { clientConnectionLinks } from '../utils/clientConnections.js';
 
 function ExternalOpenButton({ href, label }) {
   if (!href) return null;
@@ -29,8 +30,10 @@ export default function ClientFilesPanel({
   const sorted = [...documents].sort(
     (a, b) => Number(b.uploadedAt || 0) - Number(a.uploadedAt || 0),
   );
-  const driveUrl = normalizeExternalUrl(client?.googleDriveFolderUrl);
-  const hubspotUrl = normalizeExternalUrl(client?.hubspotProfileUrl);
+  const connectionLinks = clientConnectionLinks(client).filter((l) =>
+    ['drive', 'hubspot', 'slack', 'calendar', 'perplexity'].includes(l.key) ||
+    String(l.key).startsWith('doc_'),
+  );
 
   const handleFile = async (file) => {
     if (!file || !onUpload) return;
@@ -51,8 +54,9 @@ export default function ClientFilesPanel({
           Client files ({sorted.length})
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <ExternalOpenButton href={driveUrl} label="Open Drive" />
-          <ExternalOpenButton href={hubspotUrl} label="Open HubSpot" />
+          {connectionLinks.map((link) => (
+            <ExternalOpenButton key={link.key} href={link.href} label={link.label} />
+          ))}
           <label
           className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 ${
             disabled || uploading ? 'pointer-events-none opacity-40' : ''
@@ -143,7 +147,7 @@ export default function ClientFilesPanel({
 
       <p className="flex items-start gap-1.5 text-[10px] font-medium text-slate-400">
         <Paperclip className="mt-0.5 h-3 w-3 shrink-0" />
-        Files attached to tasks also appear here. Max 25 MB per file.
+        Files attached to tasks also appear here. Max 25 MB per file. Prefer the linked Drive folder for large / permanent assets.
       </p>
     </div>
   );
