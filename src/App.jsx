@@ -96,6 +96,7 @@ import {
   buildPerplexityExpenseDescription,
   computePerplexityExpenseAmounts,
 } from './utils/perplexityCredits.js';
+import { getFxToCad, fetchLiveFxToCad } from './utils/fxToCad.js';
 import { buildTeamAccessMergeForTodoAssignees } from './utils/teamClientAccess.js';
 import { isClientActiveForWork } from './utils/clientActiveForWork.js';
 import {
@@ -163,14 +164,6 @@ const DEFAULT_PROJECT_CATEGORIES = [
   'Consulting',
   'Social Ad Budget',
 ];
-
-// Approximate exchange rates to CAD (update as needed). All expense tracking is stored in CAD.
-const FX_TO_CAD = {
-  CAD: 1,
-  USD: 1.36,
-  EUR: 1.47,
-  GBP: 1.72,
-};
 
 const IgniteLogo = ({ className }) => (
   <img
@@ -455,6 +448,8 @@ export default function App() {
   const [portalPreviewClientId, setPortalPreviewClientId] = useState(null);
   // Slack notification settings (settings/notifications, read by Cloud Functions).
   const [notifySettings, setNotifySettings] = useState({});
+  // Live FX → CAD (settings/fxRates); fallback constants until first refresh.
+  const [fxRatesDoc, setFxRatesDoc] = useState(null);
   const POLICY_DEFAULTS = {
     requireClockOutNote: false,
     idleReminderMinutes: 0,
@@ -612,6 +607,11 @@ export default function App() {
       (snapshot) => setNotifySettings(snapshot.exists() ? snapshot.data() : {}),
       () => {},
     );
+    const unsubFxRates = onSnapshot(
+      doc(db, 'settings', 'fxRates'),
+      (snapshot) => setFxRatesDoc(snapshot.exists() ? snapshot.data() : null),
+      () => setFxRatesDoc(null),
+    );
     // Shared policy (idle failsafe etc.) so kiosks on other devices honor it.
     const unsubPolicy = onSnapshot(
       doc(db, 'settings', 'policy'),
@@ -641,9 +641,15 @@ export default function App() {
       unsubAddons();
       unsubUserTodos();
       unsubNotify();
+      unsubFxRates();
       unsubPolicy();
     };
   }, [user, adminDocReady, myAdminDoc?.id]);
+
+  const fxToCad = useMemo(
+    () => getFxToCad(fxRatesDoc?.rates),
+    [fxRatesDoc?.rates],
+  );
 
   // Sales Funnel data — only when the signed-in staff member has the feature enabled.
   useEffect(() => {
@@ -951,6 +957,37 @@ export default function App() {
     user?.email === 'chris@ignitepm.com'
       ? 'admin'
       : adminRecord?.role || (isUserAdmin ? 'admin' : null);
+
+  // Seed / refresh FX when missing or older than ~36h (daily cron is primary).
+  // Only billing/admin can write settings/fxRates; prefer the Netlify function.
+  useEffect(() => {
+    if (!user || !isUserAdmin) return;
+    if (currentUserRole === 'kiosk') return;
+    const updatedAt = Number(fxRatesDoc?.updatedAt || 0);
+    const staleMs = 36 * 60 * 60 * 1000;
+    if (updatedAt && Date.now() - updatedAt < staleMs) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await authedFetch('/.netlify/functions/refresh-fx-rates-http', {});
+        if (cancelled) return;
+        if (resp.ok) return;
+      } catch {
+        /* try browser fallback below */
+      }
+      if (currentUserRole !== 'admin' && currentUserRole !== 'billing') return;
+      try {
+        const live = await fetchLiveFxToCad();
+        if (cancelled) return;
+        await setDoc(doc(db, 'settings', 'fxRates'), live, { merge: true });
+      } catch {
+        /* keep fallback constants */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, isUserAdmin, currentUserRole, fxRatesDoc?.updatedAt]);
   
   // Inject Mock Client Profile for Demo Mode so you don't get Access Denied
   const userEmailLower = String(user?.email || '').trim().toLowerCase();
@@ -1830,6 +1867,7 @@ export default function App() {
         applyMarkup: expenseValues.applyMarkup !== false,
         hourlyRate: clientRate,
         isDollar,
+        usdToCad: fxToCad.USD,
       });
       rawAmount = computed.rawAmount;
       finalCost = computed.finalCost;
@@ -1841,7 +1879,7 @@ export default function App() {
     } else {
       if (!expenseValues.amount) return;
       const currency = expenseValues.currency || 'CAD';
-      const rateToCad = FX_TO_CAD[currency] ?? 1;
+      const rateToCad = fxToCad[currency] ?? 1;
       const amountInOriginalCurrency = Number(expenseValues.amount);
       const amountCad = amountInOriginalCurrency * rateToCad;
       rawAmount = amountCad;
@@ -1874,6 +1912,17 @@ export default function App() {
       ? `expense_recurring_${Date.now()}_${Math.random().toString(36).slice(2)}`
       : null;
 
+    const fxMeta =
+      isPerplexity || (originalCurrency && originalCurrency !== 'CAD')
+        ? {
+            fxRateToCad: isPerplexity
+              ? fxToCad.USD
+              : fxToCad[originalCurrency] ?? 1,
+            fxAsOf: fxRatesDoc?.asOf || null,
+            fxSource: fxRatesDoc?.source || 'fallback',
+          }
+        : {};
+
     await addDoc(collection(db, 'expenses'), {
       clientId: freshClient.id,
       clientName: freshClient.name,
@@ -1887,6 +1936,7 @@ export default function App() {
       originalCurrency,
       originalAmount,
       ...(perplexityCredits != null ? { perplexityCredits } : {}),
+      ...fxMeta,
       recurring,
       recurringId,
       recurrence,
@@ -1953,6 +2003,7 @@ export default function App() {
         applyMarkup,
         hourlyRate,
         isDollar,
+        usdToCad: fxToCad.USD,
       });
       rawAmount = computed.rawAmount;
       finalCost = computed.finalCost;
@@ -1964,7 +2015,7 @@ export default function App() {
     } else {
       const amt = Number(amount);
       if (!clientId || !clientName || !category || !Number.isFinite(amt) || amt <= 0) return;
-      const fx = FX_TO_CAD[currency] ?? 1;
+      const fx = fxToCad[currency] ?? 1;
       rawAmount = amt * fx;
       const shouldMarkup = applyMarkup && !isDollar;
       finalCost = shouldMarkup ? rawAmount * 1.3 : rawAmount;
@@ -1973,6 +2024,18 @@ export default function App() {
       originalAmount = amt;
       expenseDescription = description || 'Logged from kiosk';
     }
+
+    const fxMeta =
+      perplexityCredits != null || (originalCurrency && originalCurrency !== 'CAD')
+        ? {
+            fxRateToCad:
+              perplexityCredits != null
+                ? fxToCad.USD
+                : fxToCad[originalCurrency] ?? 1,
+            fxAsOf: fxRatesDoc?.asOf || null,
+            fxSource: fxRatesDoc?.source || 'fallback',
+          }
+        : {};
 
     await addDoc(collection(db, 'expenses'), {
       clientId,
@@ -1987,6 +2050,7 @@ export default function App() {
       originalCurrency,
       originalAmount,
       ...(perplexityCredits != null ? { perplexityCredits } : {}),
+      ...fxMeta,
     });
   };
 
@@ -3115,6 +3179,8 @@ export default function App() {
     formatTime,
     onLogSocialAdSpend: logSocialAdSpend,
     onLogClientExpense: logKioskClientExpense,
+    fxToCad,
+    fxRatesDoc,
     getTodoStateForCycle,
     updateClientTodo,
     setClientTodoItemDone,
@@ -3169,6 +3235,7 @@ export default function App() {
     notifySettings,
     updateNotifySettings: (patch) =>
       setDoc(doc(db, 'settings', 'notifications'), patch, { merge: true }),
+    fxRatesDoc,
     user,
     clients,
     taskLogs,
@@ -3765,7 +3832,9 @@ export default function App() {
                         </span>
                       </div>
                       <p className="text-[10px] font-bold text-slate-500">
-                        1 credit = $0.01 CAD before markup
+                        1 credit = $0.01 USD → CAD at live rate
+                        {fxRatesDoc?.asOf ? ` (as of ${fxRatesDoc.asOf})` : ''}
+                        {`: ×${Number(fxToCad.USD).toFixed(4)}`}
                       </p>
                     </div>
                   ) : (
@@ -3823,7 +3892,7 @@ export default function App() {
                   {expenseValues.amount && expenseValues.inputMode !== 'perplexity_credits' && (
                     (() => {
                       const currency = expenseValues.currency || 'CAD';
-                      const rateToCad = FX_TO_CAD[currency] ?? 1;
+                      const rateToCad = fxToCad[currency] ?? 1;
                       const amountOrig = Number(expenseValues.amount);
                       const amountCad = amountOrig * rateToCad;
                       const applyMarkup = expenseValues.applyMarkup !== false;
@@ -3868,11 +3937,16 @@ export default function App() {
                         applyMarkup: expenseValues.applyMarkup !== false,
                         hourlyRate: expenseModal.hourlyRate,
                         isDollar,
+                        usdToCad: fxToCad.USD,
                       });
                       return (
                         <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-2 mt-4">
                           <div className="flex justify-between text-xs font-bold text-slate-500">
-                            <span>Credits × $0.01:</span>
+                            <span>Credits × $0.01 USD:</span>
+                            <span>${computed.rawUsd.toFixed(2)} USD</span>
+                          </div>
+                          <div className="flex justify-between text-xs font-bold text-slate-500">
+                            <span>Converted to CAD (×{computed.usdToCad.toFixed(2)}):</span>
                             <span>${computed.rawAmount.toFixed(2)} CAD</span>
                           </div>
                           {computed.applyMarkup && (

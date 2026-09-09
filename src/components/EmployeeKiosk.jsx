@@ -29,6 +29,7 @@ import ClientProfileSummary from './ClientProfileSummary.jsx';
 import { buildGlobalTodoRows } from '../utils/todoGlobalRows.js';
 import { isClientActiveForWork } from '../utils/clientActiveForWork.js';
 import { computePerplexityExpenseAmounts } from '../utils/perplexityCredits.js';
+import { FALLBACK_FX_TO_CAD } from '../utils/fxToCad.js';
 import {
   clientHasEnabledRetainers,
   getEnabledRetainerCategoryNames,
@@ -130,6 +131,8 @@ const EmployeeKiosk = ({
   formatTime,
   onLogSocialAdSpend,
   onLogClientExpense,
+  fxToCad = null,
+  fxRatesDoc = null,
   getTodoStateForCycle,
   updateClientTodo,
   setClientTodoItemDone,
@@ -153,6 +156,7 @@ const EmployeeKiosk = ({
 }) => {
   const canManageClientTodos =
     currentUserRole === 'admin' || currentUserRole === 'billing';
+  const expenseFx = fxToCad || FALLBACK_FX_TO_CAD;
   const [clientSearch, setClientSearch] = React.useState('');
   const [socialAdAmount, setSocialAdAmount] = React.useState('');
   const [socialAdDescription, setSocialAdDescription] = React.useState('');
@@ -2527,7 +2531,9 @@ const EmployeeKiosk = ({
                                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
                                 />
                                 <p className="text-[10px] font-bold text-slate-500">
-                                  1 credit = $0.01 CAD before markup
+                                  1 credit = $0.01 USD → CAD
+                                  {fxRatesDoc?.asOf ? ` (as of ${fxRatesDoc.asOf})` : ''}
+                                  {` ×${Number(expenseFx.USD).toFixed(4)}`}
                                 </p>
                               </div>
                             ) : (
@@ -2574,12 +2580,17 @@ const EmployeeKiosk = ({
                                         applyMarkup: kioskExpenseApplyMarkup,
                                         hourlyRate: selectedClientObj?.hourlyRate,
                                         isDollar: kioskRetainerExpenseIsDollar,
+                                        usdToCad: expenseFx.USD,
                                       },
                                     );
                                     return (
                                       <>
                                         <div className="flex justify-between">
-                                          <span>Cost (CAD):</span>
+                                          <span>Cost (USD):</span>
+                                          <span>${computed.rawUsd.toFixed(2)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span>Cost (CAD ×{computed.usdToCad.toFixed(2)}):</span>
                                           <span>${computed.rawAmount.toFixed(2)}</span>
                                         </div>
                                         {computed.applyMarkup && (

@@ -93,6 +93,7 @@ import MentionTextarea from './MentionTextarea.jsx';
 import PayrollView from './PayrollView.jsx';
 import SlackNotificationsCard from './SlackNotificationsCard.jsx';
 import EmailDigestCard from './EmailDigestCard.jsx';
+import FxRatesCard from './FxRatesCard.jsx';
 import TodoDeleteConfirmModal from './TodoDeleteConfirmModal.jsx';
 import {
   exportClientCyclePDF,
@@ -994,6 +995,7 @@ const AdminDashboard = ({
   previewClientPortal,
   notifySettings,
   updateNotifySettings,
+  fxRatesDoc,
   newTaskType,
   setNewTaskType,
   newAdminEmail,
@@ -7234,6 +7236,11 @@ const AdminDashboard = ({
           <EmailDigestCard
             notifySettings={notifySettings}
             updateNotifySettings={updateNotifySettings}
+          />
+
+          <FxRatesCard
+            fxRatesDoc={fxRatesDoc}
+            canRefresh={canBilling}
           />
 
           <div className="flex flex-col sm:flex-row gap-4">
