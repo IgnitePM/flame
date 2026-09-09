@@ -233,5 +233,21 @@ service cloud.firestore {
          request.resource.data.status == 'accepted');
       allow delete: if isAdmin();
     }
+
+    // Client CRM activity timeline (HubSpot-style relationship history).
+    // Staff read/create; portal may create a few system events they trigger;
+    // portal cannot read the feed in v1.
+    match /clientActivities/{activityId} {
+      allow read: if isAnyStaff();
+      allow create: if isAnyStaff() ||
+        (isSignedIn() &&
+         request.resource.data.clientId is string &&
+         request.resource.data.clientId != '' &&
+         clientAllowsEmail(request.resource.data.clientId) &&
+         request.resource.data.type in ['estimate_decision', 'project_request'] &&
+         request.resource.data.source == 'system');
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
   }
 }

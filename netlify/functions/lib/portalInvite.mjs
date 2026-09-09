@@ -218,6 +218,26 @@ export async function invitePortalUser({
     console.warn('[portalInvite] slack notify skipped:', err?.message || err);
   }
 
+  try {
+    const { writeClientActivity } = await import('./clientActivity.mjs');
+    await writeClientActivity({
+      clientId: cid,
+      clientName: client.name || '',
+      type: 'portal_invite',
+      title: isReminder
+        ? `Portal invite reminder: ${em}`
+        : `Portal invite sent: ${em}`,
+      body: isReminder
+        ? 'Set-password reminder emailed.'
+        : 'Invite and set-password email sent.',
+      actorEmail: invitedBy || 'system',
+      source: 'system',
+      meta: { email: em, reminded: !!isReminder },
+    });
+  } catch (err) {
+    console.warn('[portalInvite] activity log skipped:', err?.message || err);
+  }
+
   return {
     ok: true,
     email: em,

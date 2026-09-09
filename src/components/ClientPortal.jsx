@@ -36,6 +36,7 @@ const ClientPortal = ({
   setProjectModal,
   updateProject,
   logAudit,
+  logClientActivity,
   setUser,
   signOut,
   auth,
@@ -388,15 +389,27 @@ const ClientPortal = ({
                               adminNeedsReview: false,
                               adminApproved: true,
                             },
-                          }).then(() =>
+                          }).then(() => {
                             logAudit?.({
                               type: 'estimate_approved',
                               entityType: 'project',
                               entityId: p.id,
                               clientId: clientProfile.id,
                               cycleStart: mStart,
-                            }),
-                          )
+                            });
+                            logClientActivity?.({
+                              clientId: clientProfile.id,
+                              clientName: clientProfile.name || '',
+                              type: 'estimate_decision',
+                              title: `Estimate approved: ${p.title || 'Untitled'}`,
+                              body: `${Number(p.estimate?.hours || 0).toFixed(1)}h / $${Number(p.estimate?.cost || 0).toFixed(2)}`,
+                              source: 'system',
+                              meta: {
+                                projectId: p.id,
+                                decision: 'approved',
+                              },
+                            });
+                          })
                         }
                         className="flex-1 bg-black hover:bg-slate-800 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all"
                       >
@@ -414,15 +427,27 @@ const ClientPortal = ({
                               ...(p.notificationState || {}),
                               clientNeedsDecision: false,
                             },
-                          }).then(() =>
+                          }).then(() => {
                             logAudit?.({
                               type: 'estimate_rejected',
                               entityType: 'project',
                               entityId: p.id,
                               clientId: clientProfile.id,
                               cycleStart: mStart,
-                            }),
-                          )
+                            });
+                            logClientActivity?.({
+                              clientId: clientProfile.id,
+                              clientName: clientProfile.name || '',
+                              type: 'estimate_decision',
+                              title: `Estimate rejected: ${p.title || 'Untitled'}`,
+                              body: `${Number(p.estimate?.hours || 0).toFixed(1)}h / $${Number(p.estimate?.cost || 0).toFixed(2)}`,
+                              source: 'system',
+                              meta: {
+                                projectId: p.id,
+                                decision: 'rejected',
+                              },
+                            });
+                          })
                         }
                         className="flex-1 bg-white border border-slate-200 hover:bg-slate-100 text-slate-600 py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all"
                       >

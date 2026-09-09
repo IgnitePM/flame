@@ -105,6 +105,7 @@ import {
   portalInviteStatusLabel,
   validatePortalEmailsExclusive,
 } from './utils/portalAccess.js';
+import { buildClientActivityDoc } from './utils/clientActivity.js';
 import { normalizeClientConnectionFields } from './utils/clientConnections.js';
 import {
   filterClientsForTeamMember,
@@ -1285,6 +1286,19 @@ export default function App() {
     }
   };
 
+  const logClientActivity = useCallback(async (entry) => {
+    try {
+      const docData = buildClientActivityDoc({
+        ...entry,
+        actorEmail: entry?.actorEmail || user?.email || 'system',
+        at: entry?.at || Date.now(),
+      });
+      await addDoc(collection(db, 'clientActivities'), docData);
+    } catch (err) {
+      console.warn('[clientActivity]', err?.message || err);
+    }
+  }, [user?.email]);
+
   const enterDemoMode = () => {
     if (!ENABLE_DEMOS) return;
     setUser({ displayName: "Chris Rouse (Admin Demo)", uid: "demo-user-123", email: "chris@ignitepm.com" });
@@ -2127,6 +2141,16 @@ export default function App() {
           },
         });
 
+        await logClientActivity({
+          clientId,
+          clientName,
+          type: 'project_request',
+          title: `Project requested: ${projectValues.category || 'Custom'}`,
+          body: String(projectValues.requestDescription || '').slice(0, 500),
+          source: 'system',
+          meta: { category: projectValues.category || null },
+        });
+
         setProjectModal(null);
         setProjectBudgetOverride(false);
         setProjectValues({
@@ -2159,6 +2183,16 @@ export default function App() {
         status: 'requested',
         invoiced: false,
         createdAt: Date.now(),
+      });
+
+      await logClientActivity({
+        clientId,
+        clientName,
+        type: 'project_request',
+        title: `Project requested: ${projectValues.title}`,
+        body: String(projectValues.description || projectValues.requestDescription || '').slice(0, 500),
+        source: 'system',
+        meta: { category: projectValues.category || null },
       });
 
       setProjectModal(null);
@@ -2694,9 +2728,23 @@ export default function App() {
       }
 
       await updateDoc(doc(db, 'clients', client.id), patch);
+      await logClientActivity({
+        clientId: client.id,
+        clientName: client.name || '',
+        type: 'file_upload',
+        title: `File uploaded: ${file.name}`,
+        body: linkedTodoText ? `Attached to task: ${linkedTodoText}` : '',
+        source: 'system',
+        meta: {
+          documentId,
+          fileName: file.name,
+          sizeBytes: file.size,
+          linkedTodoId,
+        },
+      });
       return record;
     },
-    [clients, user?.email, myAdminDoc?.email],
+    [clients, user?.email, myAdminDoc?.email, logClientActivity],
   );
 
   const removeClientDocument = useCallback(
@@ -3291,6 +3339,7 @@ export default function App() {
     updateDoc,
     doc: (coll, id) => doc(db, coll, id),
     logAudit,
+    logClientActivity,
     policy,
     getTodoStateForCycle,
     updateClientTodo,
@@ -3388,6 +3437,7 @@ export default function App() {
           updateDoc(doc(db, 'projects', projectId), data)
         }
         logAudit={logAudit}
+        logClientActivity={logClientActivity}
         setUser={() => {}}
         signOut={() => setPortalPreviewClientId(null)}
         auth={auth}
@@ -3416,6 +3466,7 @@ export default function App() {
           updateDoc(doc(db, 'projects', projectId), data)
         }
         logAudit={logAudit}
+        logClientActivity={logClientActivity}
         setUser={setUser}
         signOut={signOut}
         auth={auth}

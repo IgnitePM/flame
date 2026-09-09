@@ -1,3 +1,4 @@
+import { writeClientActivity } from './lib/clientActivity.mjs';
 import { describeAuthError, requireStaffCaller } from './lib/requireAuth.mjs';
 import { sendDigestEmail } from './lib/mailer.mjs';
 import { fetchDoc, getDigestDb, mergeDoc } from './lib/firebaseDigestClient.mjs';
@@ -90,6 +91,21 @@ export default async (req) => {
       actorEmail: caller.email,
       at: Date.now(),
     });
+
+    try {
+      await writeClientActivity({
+        clientId,
+        clientName: client.name || '',
+        type: 'email_sent',
+        title: subject,
+        body: text.slice(0, 800),
+        actorEmail: caller.email,
+        source: 'system',
+        meta: { to: toList, subject },
+      });
+    } catch (err) {
+      console.warn('[send-client-email] activity log skipped:', err?.message || err);
+    }
 
     await mergeDoc(db, `clients/${clientId}`, {
       lastClientEmailAt: Date.now(),

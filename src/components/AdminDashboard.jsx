@@ -95,6 +95,7 @@ import SlackNotificationsCard from './SlackNotificationsCard.jsx';
 import EmailDigestCard from './EmailDigestCard.jsx';
 import FxRatesCard from './FxRatesCard.jsx';
 import ClientEmailComposeModal from './ClientEmailComposeModal.jsx';
+import ClientActivityTimeline from './ClientActivityTimeline.jsx';
 import TodoDeleteConfirmModal from './TodoDeleteConfirmModal.jsx';
 import {
   exportClientCyclePDF,
@@ -1035,6 +1036,7 @@ const AdminDashboard = ({
   updateDoc,
   doc,
   logAudit,
+  logClientActivity,
   getTodoStateForCycle,
   updateClientTodo,
   updateClientTodosBatch,
@@ -4019,6 +4021,11 @@ const AdminDashboard = ({
                             }
                           />
                         </div>
+                        <ClientActivityTimeline
+                          client={c}
+                          logClientActivity={logClientActivity}
+                          canCompose={!isRestrictedStaff}
+                        />
                         <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
                           <ClientFilesPanel
                             client={c}
@@ -4089,6 +4096,17 @@ const AdminDashboard = ({
                                         entityType: 'client',
                                         entityId: c.id,
                                         clientId: c.id,
+                                      });
+                                      const noteText = String(
+                                        clientNotesDraft[c.id] ?? '',
+                                      ).trim();
+                                      logClientActivity?.({
+                                        clientId: c.id,
+                                        clientName: c.name || '',
+                                        type: 'client_note_saved',
+                                        title: 'Internal client notes updated',
+                                        body: noteText.slice(0, 500),
+                                        source: 'system',
                                       });
                                     } catch (err) {
                                       window.alert(
@@ -7594,6 +7612,23 @@ const AdminDashboard = ({
                       entityId: estimateModal.id,
                       clientId: estimateModal.clientId,
                       cycleStart: null,
+                    });
+                    logClientActivity?.({
+                      clientId: estimateModal.clientId,
+                      clientName: estimateModal.clientName || '',
+                      type: 'estimate_sent',
+                      title: `Estimate sent: ${estimateModal.title || 'Untitled'}`,
+                      body: `${hours.toFixed(1)}h / $${cost.toFixed(2)}${
+                        estimateValues.notes
+                          ? ` — ${String(estimateValues.notes).slice(0, 300)}`
+                          : ''
+                      }`,
+                      source: 'system',
+                      meta: {
+                        projectId: estimateModal.id,
+                        hours,
+                        cost,
+                      },
                     });
                     try {
                       await authedFetch('/.netlify/functions/notify-client-slack', {
