@@ -85,6 +85,7 @@ import TaskLogSessionDetail from './TaskLogSessionDetail.jsx';
 import TaskLogTimesheetRow from './TaskLogTimesheetRow.jsx';
 import TodoItemAttachments from './TodoItemAttachments.jsx';
 import TaskNotesSection from './TaskNotesSection.jsx';
+import MentionTextarea from './MentionTextarea.jsx';
 import PayrollView from './PayrollView.jsx';
 import SlackNotificationsCard from './SlackNotificationsCard.jsx';
 import EmailDigestCard from './EmailDigestCard.jsx';
@@ -982,6 +983,8 @@ const AdminDashboard = ({
   addons,
   taskTypes,
   adminUsers,
+  staffEmails = [],
+  notifyTextMentions,
   policy,
   updatePolicy,
   previewClientPortal,
@@ -1732,6 +1735,10 @@ const AdminDashboard = ({
         if (deleted) {
           setTodoDeletePrompt(null);
           setTodoEditOptionsTarget(null);
+        } else {
+          window.alert(
+            'Could not delete that task. Try refreshing, then delete again. For recurring tasks, use “Delete series” if you want it gone from future cycles too.',
+          );
         }
         return;
       }
@@ -2072,6 +2079,8 @@ const AdminDashboard = ({
           salesPipeline={salesPipeline}
           clients={clients}
           adminUsers={adminUsers}
+          staffEmails={staffEmails}
+          notifyTextMentions={notifyTextMentions}
           user={user}
           addDoc={addDoc}
           updateDoc={updateDoc}
@@ -3985,20 +3994,23 @@ const AdminDashboard = ({
                             </div>
                           ) : (
                             <>
-                              <textarea
+                              <MentionTextarea
                                 value={
                                   clientNotesDraft[c.id] !== undefined
                                     ? clientNotesDraft[c.id]
                                     : c.generalNotes || ''
                                 }
-                                onChange={(e) =>
+                                onChange={(next) =>
                                   setClientNotesDraft((prev) => ({
                                     ...prev,
-                                    [c.id]: e.target.value,
+                                    [c.id]: next,
                                   }))
                                 }
-                                className="w-full bg-white border border-slate-200 p-4 rounded-2xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[110px] break-words"
-                                placeholder="Brand voice, important links, access details, preferences, etc."
+                                staffEmails={staffEmails.length ? staffEmails : assignableEmails}
+                                adminUsers={adminUsers}
+                                rows={5}
+                                textareaClassName="w-full bg-white border border-slate-200 p-4 rounded-2xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[110px] break-words"
+                                placeholder="Brand voice, important links, access details, preferences, etc. Use @name to tag a teammate."
                               />
                               <div className="flex justify-end">
                                 <button
@@ -4018,6 +4030,13 @@ const AdminDashboard = ({
                                         },
                                         { merge: true },
                                       );
+                                      notifyTextMentions?.({
+                                        text: clientNotesDraft[c.id] ?? '',
+                                        prevText: c.generalNotes || '',
+                                        title: `Client notes · ${c.name}`,
+                                        clientId: c.id,
+                                        clientName: c.name,
+                                      });
                                       logAudit?.({
                                         type: 'client_notes_saved',
                                         entityType: 'client',
@@ -6430,19 +6449,22 @@ const AdminDashboard = ({
                                               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
                                                 Cycle note
                                               </label>
-                                              <textarea
+                                              <MentionTextarea
                                                 value={
                                                   cycleNotesDraft[noteKey] ??
                                                   (existingNote || '')
                                                 }
-                                                onChange={(e) =>
+                                                onChange={(next) =>
                                                   setCycleNotesDraft((prev) => ({
                                                     ...prev,
-                                                    [noteKey]: e.target.value,
+                                                    [noteKey]: next,
                                                   }))
                                                 }
-                                                className="w-full bg-white border border-slate-200 p-3 rounded-xl font-medium text-xs outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[70px]"
-                                                placeholder="Cycle note for this category (manual entry)..."
+                                                staffEmails={staffEmails.length ? staffEmails : assignableEmails}
+                                                adminUsers={adminUsers}
+                                                rows={3}
+                                                textareaClassName="w-full bg-white border border-slate-200 p-3 rounded-xl font-medium text-xs outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[70px]"
+                                                placeholder="Cycle note for this category. Use @name to tag a teammate."
                                               />
                                               <div className="flex justify-end mt-2">
                                                 <button
@@ -6473,6 +6495,14 @@ const AdminDashboard = ({
                                                         },
                                                         { merge: true },
                                                       );
+                                                      notifyTextMentions?.({
+                                                        text: value,
+                                                        prevText: existingNote || '',
+                                                        title: `Cycle note · ${c.name} · ${cat}`,
+                                                        clientId: c.id,
+                                                        clientName: c.name,
+                                                        categoryKey: catKey,
+                                                      });
                                                       logAudit?.({
                                                         type: 'retainer_cycle_note_saved',
                                                         entityType: 'client',

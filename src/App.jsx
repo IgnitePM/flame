@@ -76,6 +76,7 @@ import {
 } from './utils/billingEngine.js';
 import {
   buildNotificationDoc,
+  collectMentionNotificationsFromText,
   collectTodoChangeNotifications,
   NOTIFICATION_TYPES,
 } from './utils/notifications.js';
@@ -83,11 +84,12 @@ import { buildAiSummaryPayload } from './utils/aiSummaryPayload.js';
 import { buildSalesAiPayload } from './utils/salesAiPayload.js';
 import { escapeHtml as esc } from './utils/escapeHtml.js';
 import { authedFetch } from './utils/authedFetch.js';
-import { staffDisplayName } from './utils/staffDirectory.js';
+import { collectStaffEmails, staffDisplayName } from './utils/staffDirectory.js';
 import ClientPortal from './components/ClientPortal.jsx';
 import EmployeeKiosk from './components/EmployeeKiosk.jsx';
 import AdminDashboard from './components/AdminDashboard.jsx';
 import DurationSlider from './components/DurationSlider.jsx';
+import MentionTextarea from './components/MentionTextarea.jsx';
 import { getTaskDurationHours, getTaskEmployeeName } from './utils/taskLogDisplay.js';
 import {
   buildPerplexityExpenseDescription,
@@ -108,7 +110,7 @@ import {
   recurringAnchorKey,
   removeRecurringSeriesFromAllCycles,
   removeTodoItemFromAllCycles,
-  seedNextRecurringOccurrence,
+  upsertRecurringSeriesTemplate,
 } from './utils/recurringTodoMaterialize.js';
 import { canMarkParentTodoDone } from './utils/todoSubtasks.js';
 import {
@@ -861,6 +863,28 @@ export default function App() {
     );
   }, []);
 
+  const staffEmails = useMemo(
+    () => collectStaffEmails(adminUsers, [user?.email]),
+    [adminUsers, user?.email],
+  );
+
+  const notifyTextMentions = useCallback(
+    (args) => {
+      createInboxNotifications(
+        collectMentionNotificationsFromText({
+          staffEmails,
+          actorEmail: user?.email,
+          actorName: staffDisplayName({
+            email: user?.email,
+            displayName: user?.displayName,
+          }),
+          ...args,
+        }),
+      ).catch(() => {});
+    },
+    [createInboxNotifications, staffEmails, user?.displayName, user?.email],
+  );
+
   const dismissInboxNotification = useCallback(async (notification) => {
     if (!notification?.id) return;
     await updateDoc(doc(db, 'notifications', notification.id), {
@@ -1296,6 +1320,14 @@ export default function App() {
     const segment = endTime - (activeTask.lastResumeTime || activeTask.clockInTime);
     const newTotal = (activeTask.totalSavedDuration || 0) + segment;
     await updateDoc(doc(db, 'taskLogs', activeTask.id), { clockOutTime: endTime, status: 'completed', totalSavedDuration: newTotal, duration: newTotal, notes: activeTaskNotes });
+    notifyTextMentions({
+      text: activeTaskNotes,
+      title: activeTask.projectName
+        ? `Work notes · ${activeTask.projectName}`
+        : 'Work notes',
+      clientId: activeTask.clientId || null,
+      clientName: activeTask.clientName || null,
+    });
     setActiveTaskNotes('');
   };
 
@@ -1677,6 +1709,12 @@ export default function App() {
       clientId: manualClient?.id || '',
       projectName: projName, projectId: targetId,
       clockInTime: startMs, clockOutTime: endMs, duration: durationMs, totalSavedDuration: durationMs, status: 'completed', notes: manualTaskValues.notes
+    });
+    notifyTextMentions({
+      text: manualTaskValues.notes,
+      title: projName ? `Work notes · ${projName}` : 'Work notes',
+      clientId: manualClient?.id || null,
+      clientName: manualTaskValues.clientName || null,
     });
 
     if (manualTaskValues.parsedExpense > 0) {
@@ -2310,6 +2348,32 @@ export default function App() {
       if (!item) return false;
 
       let cycles = ensureCurrentCycleTodoData(client, cycleStart);
+      // Make sure the row the UI is looking at exists in the cycle map we
+      // mutate (virtual materialization could otherwise use a different id).
+      {
+        const cycleKey = String(cycleStart);
+        const cat = cycles[cycleKey]?.[categoryKey] || { closed: false, items: [] };
+        const hasId = (cat.items || []).some((i) => i?.id === itemId);
+        const hasSeriesDue =
+          item.recurring &&
+          (cat.items || []).some(
+            (i) =>
+              i?.recurring &&
+              !i.done &&
+              String(i.recurringId || i.id || '') ===
+                String(item.recurringId || item.id || '') &&
+              Number(i.dueDate || 0) &&
+              Number(item.dueDate || 0) &&
+              new Date(i.dueDate).toDateString() ===
+                new Date(item.dueDate).toDateString(),
+          );
+        if (!hasId && !hasSeriesDue) {
+          cycles[cycleKey] = {
+            ...(cycles[cycleKey] || {}),
+            [categoryKey]: { ...cat, items: [...(cat.items || []), item] },
+          };
+        }
+      }
 
       // Recurring + "delete all future": end the whole series everywhere.
       if (item.recurring && scope === 'series') {
@@ -2332,18 +2396,22 @@ export default function App() {
       }
 
       let recurringSkipKey = '';
+      const seriesId = item.recurring
+        ? String(item.recurringId || item.id || '')
+        : '';
       if (item.recurring) {
-        recurringSkipKey = recurringAnchorKey(
-          item.recurringId || item.id,
-          item.dueDate,
-        );
+        recurringSkipKey = recurringAnchorKey(seriesId, item.dueDate);
       }
 
       const { cycles: strippedCycles, removed } = removeTodoItemFromAllCycles(
         cycles,
         categoryKey,
         itemId,
-        { recurringSkipKey },
+        {
+          recurringSkipKey,
+          matchRecurringId: seriesId,
+          matchDueDate: item.dueDate,
+        },
       );
       if (!removed) return false;
 
@@ -2357,35 +2425,33 @@ export default function App() {
         );
       }
 
-      // Occurrence-only delete of a recurring task: if this was the last live
-      // instance of the series anywhere, re-seed the next occurrence so the
-      // series keeps going (otherwise it would silently end).
+      // Occurrence-only delete: keep a series template so later cycles can still
+      // spawn the next due date — but never put a replacement back into this cycle
+      // (that made deletes look like they did nothing).
       if (item.recurring && scope === 'occurrence') {
-        const rid = String(item.recurringId || item.id || '');
+        const rid = seriesId;
         const seriesStillAlive = Object.values(cycles).some((cycleData) => {
           const cat = cycleData?.[categoryKey];
           return (cat?.items || []).some(
             (row) =>
-              row?.recurring && String(row.recurringId || row.id || '') === rid,
+              row?.recurring &&
+              !row.done &&
+              String(row.recurringId || row.id || '') === rid,
           );
         });
-        if (!seriesStillAlive) {
-          const fresh = seedNextRecurringOccurrence(
-            item,
-            Number(item.dueDate || Date.now()),
-            newRecurringTodoRowId,
-          );
-          if (fresh) {
-            const cycleKey = String(cycleStart);
-            const cat = cycles[cycleKey]?.[categoryKey] || {
-              closed: false,
-              items: [],
-            };
-            cycles[cycleKey] = {
-              ...(cycles[cycleKey] || {}),
-              [categoryKey]: { ...cat, items: [...(cat.items || []), fresh] },
-            };
-          }
+        const cycleKey = String(cycleStart);
+        const cat = cycles[cycleKey]?.[categoryKey] || {
+          closed: false,
+          items: [],
+        };
+        const hasTemplate = (cat.recurringSeriesTemplates || []).some(
+          (t) => String(t?.recurringId || t?.id || '') === rid,
+        );
+        if (!seriesStillAlive && !hasTemplate) {
+          cycles[cycleKey] = {
+            ...(cycles[cycleKey] || {}),
+            [categoryKey]: upsertRecurringSeriesTemplate(cat, item),
+          };
         }
       }
 
@@ -2399,6 +2465,27 @@ export default function App() {
           newRecurringTodoRowId,
         );
         if (changed) cycles[String(cycleStart)] = cycleDataByCategory;
+      }
+
+      // After reconcile, make sure the deleted occurrence did not come back.
+      if (recurringSkipKey) {
+        cycles = ensureRecurringSkipOnCategory(
+          cycles,
+          String(cycleStart),
+          categoryKey,
+          recurringSkipKey,
+        );
+        const scrub = removeTodoItemFromAllCycles(
+          cycles,
+          categoryKey,
+          itemId,
+          {
+            recurringSkipKey,
+            matchRecurringId: seriesId,
+            matchDueDate: item.dueDate,
+          },
+        );
+        cycles = scrub.cycles;
       }
 
       const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(client, cycles);
@@ -2614,7 +2701,7 @@ export default function App() {
   const toggleClientAccordion = (clientId) => { setExpandedClients(prev => ({ ...prev, [clientId]: !prev[clientId] })); };
 
   const startEditing = (type, item) => {
-    setEditingItem({ type, id: item.id });
+    setEditingItem({ type, id: item.id, notes: item.notes || '' });
     const clockInDate = formatMsForDatetimeLocal(item.clockInTime);
     const clockOutDate = item.clockOutTime
       ? formatMsForDatetimeLocal(item.clockOutTime)
@@ -2697,6 +2784,7 @@ export default function App() {
       const client = clients.find((c) => c.name === clientName);
       updates.clientId = client?.id ?? null;
       updates.clientName = clientName;
+      updates.notes = editValues.notes || '';
       const bt = editValues.billingTarget || '';
       if (bt.startsWith('project_')) {
         updates.projectId = bt.replace('project_', '');
@@ -2710,6 +2798,17 @@ export default function App() {
 
     try {
       await updateDoc(doc(db, coll, editingItem.id), updates);
+      if (editingItem.type === 'task') {
+        notifyTextMentions({
+          text: editValues.notes || '',
+          prevText: editingItem.notes || '',
+          title: updates.projectName
+            ? `Work notes · ${updates.projectName}`
+            : 'Work notes',
+          clientId: updates.clientId || null,
+          clientName: updates.clientName || null,
+        });
+      }
       setEditingItem(null);
     } catch (err) {
       window.alert(err?.message || 'Could not save changes.');
@@ -2966,6 +3065,8 @@ export default function App() {
     userTodos,
     updateUserTodos,
     adminUsers,
+    staffEmails,
+    notifyTextMentions,
     currentUserRole,
     staffEmail: String(user?.email || myAdminDoc?.email || '').trim().toLowerCase(),
     uploadClientDocument,
@@ -3017,6 +3118,8 @@ export default function App() {
     addons,
     taskTypes,
     adminUsers,
+    staffEmails,
+    notifyTextMentions,
     newClientName,
     setNewClientName,
     newTaskType,
@@ -3488,7 +3591,15 @@ export default function App() {
                 
                 <div className="col-span-2 space-y-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Notes (Paste HubSpot Notes Here)</label>
-                  <textarea value={manualTaskValues.notes} onChange={e => setManualTaskValues({...manualTaskValues, notes: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[100px]" placeholder="Work completed..."/>
+                  <MentionTextarea
+                    value={manualTaskValues.notes}
+                    onChange={(next) => setManualTaskValues({...manualTaskValues, notes: next})}
+                    staffEmails={staffEmails}
+                    adminUsers={adminUsers}
+                    placeholder="Work completed… Use @name to tag a teammate"
+                    rows={4}
+                    textareaClassName="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[100px]"
+                  />
                   
                   <div className="flex justify-between items-center mt-2">
                     <button onClick={extractFromNotes} className="text-[10px] bg-[#fd7414]/10 hover:bg-[#fd7414]/20 text-[#fd7414] px-4 py-2 rounded-xl font-black uppercase tracking-widest transition-all">
@@ -3856,7 +3967,15 @@ export default function App() {
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Work Description / Notes</label>
-                    <textarea value={editValues.notes || ''} onChange={e => setEditValues({...editValues, notes: e.target.value})} className="w-full bg-slate-50 border-slate-200 border p-4 rounded-2xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[100px]" placeholder="Task notes..." />
+                    <MentionTextarea
+                      value={editValues.notes || ''}
+                      onChange={(next) => setEditValues({...editValues, notes: next})}
+                      staffEmails={staffEmails}
+                      adminUsers={adminUsers}
+                      placeholder="Task notes… Use @name to tag a teammate"
+                      rows={4}
+                      textareaClassName="w-full bg-slate-50 border-slate-200 border p-4 rounded-2xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[100px]"
+                    />
                   </div>
                 </div>
               )}

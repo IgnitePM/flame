@@ -203,6 +203,8 @@ export default function SalesFunnelPanel({
   salesPipeline = null,
   clients = [],
   adminUsers = [],
+  staffEmails = [],
+  notifyTextMentions,
   user,
   addDoc,
   updateDoc,
@@ -348,6 +350,8 @@ export default function SalesFunnelPanel({
             leads={leads}
             deals={deals}
             adminUsers={adminUsers}
+            staffEmails={staffEmails}
+            notifyTextMentions={notifyTextMentions}
             user={user}
             addDoc={addDoc}
             updateDoc={updateDoc}
@@ -370,6 +374,8 @@ export default function SalesFunnelPanel({
           leads={leads}
           clients={clients}
           adminUsers={adminUsers}
+          staffEmails={staffEmails}
+          notifyTextMentions={notifyTextMentions}
           user={user}
           onClose={() => setSelectedDealId(null)}
           updateDoc={updateDoc}

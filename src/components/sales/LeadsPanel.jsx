@@ -4,6 +4,7 @@ import {
   formatRelativeActivity,
   staffDisplayFromEmail,
 } from '../../utils/salesPipeline.js';
+import MentionTextarea from '../MentionTextarea.jsx';
 
 function emptyLeadForm(ownerEmail = '') {
   return {
@@ -24,6 +25,8 @@ export default function LeadsPanel({
   leads = [],
   deals = [],
   adminUsers = [],
+  staffEmails = [],
+  notifyTextMentions,
   user,
   addDoc,
   updateDoc,
@@ -105,6 +108,9 @@ export default function LeadsPanel({
     setSaving(true);
     try {
       const payload = buildPayload();
+      const prevNotes = editingId
+        ? (leads || []).find((l) => l.id === editingId)?.notes || ''
+        : '';
       if (editingId) {
         await updateDoc(doc('leads', editingId), payload);
       } else {
@@ -115,6 +121,13 @@ export default function LeadsPanel({
           createdAt: Date.now(),
         });
       }
+      notifyTextMentions?.({
+        text: payload.notes,
+        prevText: prevNotes,
+        title: `Lead notes · ${payload.name || payload.companyName || 'Lead'}`,
+        clientName: payload.companyName || payload.name || null,
+        itemId: editingId || null,
+      });
       closeForm();
     } catch (err) {
       window.alert(`Could not save lead.\n\n${err?.message || String(err)}`);
@@ -270,11 +283,14 @@ export default function LeadsPanel({
             </label>
             <label className="text-xs font-bold text-slate-500 space-y-1 md:col-span-2">
               Notes
-              <textarea
+              <MentionTextarea
                 rows={3}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-800 outline-none resize-y"
+                textareaClassName="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-800 outline-none resize-y"
                 value={form.notes}
-                onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                onChange={(next) => setForm((f) => ({ ...f, notes: next }))}
+                staffEmails={staffEmails}
+                adminUsers={adminUsers}
+                placeholder="Notes… Use @name to tag a teammate"
               />
             </label>
           </div>

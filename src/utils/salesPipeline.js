@@ -121,12 +121,13 @@ export function newNoteId() {
   return `note_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
-export function makeDealNote(body, authorEmail) {
+export function makeDealNote(body, authorEmail, mentions = []) {
   return {
     id: newNoteId(),
     body: String(body || '').trim(),
     authorEmail: String(authorEmail || '').trim().toLowerCase(),
     createdAt: Date.now(),
+    mentions: Array.isArray(mentions) ? mentions.filter(Boolean) : [],
   };
 }
 

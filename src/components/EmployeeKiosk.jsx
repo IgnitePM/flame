@@ -24,6 +24,7 @@ import { recurringAnchorKey } from '../utils/recurringTodoMaterialize.js';
 import KioskClientTodoItem from './KioskClientTodoItem.jsx';
 import KioskNotificationsPanel from './KioskNotificationsPanel.jsx';
 import TaskNotesSection from './TaskNotesSection.jsx';
+import MentionTextarea from './MentionTextarea.jsx';
 import ClientProfileSummary from './ClientProfileSummary.jsx';
 import { buildGlobalTodoRows } from '../utils/todoGlobalRows.js';
 import { isClientActiveForWork } from '../utils/clientActiveForWork.js';
@@ -139,6 +140,7 @@ const EmployeeKiosk = ({
   userTodos = [],
   updateUserTodos,
   adminUsers = [],
+  staffEmails = [],
   currentUserRole = null,
   staffEmail = '',
   uploadClientDocument,
@@ -549,6 +551,10 @@ const EmployeeKiosk = ({
         if (deleted) {
           setClientTodoDeletePrompt(null);
           setClientTodoEditTarget(null);
+        } else {
+          window.alert(
+            'Could not delete that task. Try refreshing, then delete again. For recurring tasks, use “Delete series” if you want it gone from future cycles too.',
+          );
         }
         return;
       }
@@ -2228,11 +2234,14 @@ const EmployeeKiosk = ({
                         <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
                           Progress Notes
                         </label>
-                        <textarea
+                        <MentionTextarea
                           value={activeTaskNotes}
-                          onChange={(e) => setActiveTaskNotes(e.target.value)}
-                          placeholder="Briefly describe what you've accomplished..."
-                          className="w-full p-5 border-orange-200 border rounded-2xl bg-white/70 focus:ring-2 focus:ring-[#fd7414] outline-none text-sm min-h-[120px] font-medium"
+                          onChange={setActiveTaskNotes}
+                          staffEmails={staffEmails}
+                          adminUsers={adminUsers}
+                          placeholder="Briefly describe what you've accomplished… Use @name to tag a teammate"
+                          rows={5}
+                          textareaClassName="w-full p-5 border-orange-200 border rounded-2xl bg-white/70 focus:ring-2 focus:ring-[#fd7414] outline-none text-sm min-h-[120px] font-medium"
                         />
                       </div>
 

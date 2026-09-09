@@ -10,6 +10,8 @@ export default function MentionTextarea({
   disabled = false,
   onSubmit,
   className = '',
+  textareaClassName = 'w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]/40 disabled:opacity-50',
+  rows = 3,
 }) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
@@ -89,8 +91,8 @@ export default function MentionTextarea({
         disabled={disabled}
         onChange={onInput}
         placeholder={placeholder}
-        rows={3}
-        className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]/40 disabled:opacity-50"
+        rows={rows}
+        className={textareaClassName}
         onKeyDown={(e) => {
           if (open && matches.length) {
             if (e.key === 'ArrowDown') {

@@ -8,6 +8,8 @@ import {
   staffDisplayFromEmail,
   todayYmd,
 } from '../../utils/salesPipeline.js';
+import { parseMentionEmails } from '../../utils/taskComments.js';
+import MentionTextarea from '../MentionTextarea.jsx';
 
 export default function DealDetailDrawer({
   deal,
@@ -15,6 +17,8 @@ export default function DealDetailDrawer({
   leads = [],
   clients = [],
   adminUsers = [],
+  staffEmails = [],
+  notifyTextMentions,
   user,
   onClose,
   updateDoc,
@@ -127,13 +131,23 @@ export default function DealDetailDrawer({
     if (!body) return;
     setSaving(true);
     try {
-      const note = makeDealNote(body, me);
+      const mentions = parseMentionEmails(body, staffEmails);
+      const note = makeDealNote(body, me, mentions);
       const nextNotes = [...(deal.notes || []), note];
       const now = Date.now();
       await updateDoc(doc('deals', deal.id), {
         notes: nextNotes,
         updatedAt: now,
         lastActivityAt: now,
+      });
+      const linked =
+        (deal.clientId && clients.find((c) => c.id === deal.clientId)) || null;
+      notifyTextMentions?.({
+        text: body,
+        title: `Deal note · ${deal.name || 'Untitled deal'}`,
+        clientId: linked?.id || deal.clientId || null,
+        clientName: linked?.name || deal.name || null,
+        itemId: deal.id,
       });
       setNoteBody('');
     } catch (err) {
@@ -327,12 +341,15 @@ export default function DealDetailDrawer({
           <div className="text-xs font-black uppercase tracking-widest text-slate-400">
             Notes
           </div>
-          <textarea
+          <MentionTextarea
             rows={3}
-            placeholder="Record progress on this deal…"
-            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm outline-none resize-y"
+            placeholder="Record progress on this deal… Use @name to tag a teammate"
+            textareaClassName="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm outline-none resize-y"
             value={noteBody}
-            onChange={(e) => setNoteBody(e.target.value)}
+            onChange={setNoteBody}
+            staffEmails={staffEmails}
+            adminUsers={adminUsers}
+            onSubmit={addNote}
           />
           <button
             type="button"

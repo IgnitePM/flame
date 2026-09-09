@@ -25,6 +25,91 @@ export function recurringAnchorKey(recurringId, dueDateMs) {
   return `${rid}__${stamp}`;
 }
 
+/**
+ * Stable id for a recurring occurrence so virtual materialization and persisted
+ * rows share the same id (random ids made delete miss the row and look stuck).
+ */
+export function deterministicRecurringTodoId(seriesId, dueDateMs) {
+  const rid = String(seriesId || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .slice(0, 80);
+  const d = Number(dueDateMs || 0);
+  if (!rid || !d) return '';
+  const y = new Date(d).getFullYear();
+  const m = String(new Date(d).getMonth() + 1).padStart(2, '0');
+  const day = String(new Date(d).getDate()).padStart(2, '0');
+  return `todo_r_${rid}_${y}${m}${day}`;
+}
+
+function resolveRecurringInstanceId(seriesId, dueDateMs, newTodoId) {
+  return (
+    deterministicRecurringTodoId(seriesId, dueDateMs) ||
+    (typeof newTodoId === 'function' ? newTodoId() : `todo_${Date.now()}`)
+  );
+}
+
+/** Compact template stored on a category so a series can continue after occurrence delete. */
+export function seriesTemplateFromItem(item) {
+  if (!item?.recurring) return null;
+  const rid = stableRecurringSeriesId(item);
+  if (!rid) return null;
+  return {
+    id: rid,
+    text: item.text || '',
+    recurring: true,
+    recurringId: rid,
+    recurrence: item.recurrence || effectiveRecurrence(item),
+    dueDate: Number(item.dueDate || 0) || null,
+    assigneeEmails: Array.isArray(item.assigneeEmails)
+      ? item.assigneeEmails.filter(Boolean)
+      : [],
+    subtasks: getSubtasks(item).map((s) => ({ ...s })),
+  };
+}
+
+export function upsertRecurringSeriesTemplate(cat, itemOrTemplate) {
+  const template = itemOrTemplate?.recurringId
+    ? seriesTemplateFromItem(itemOrTemplate) || itemOrTemplate
+    : itemOrTemplate;
+  if (!template?.recurringId && !template?.id) return cat || { closed: false, items: [] };
+  const rid = String(template.recurringId || template.id);
+  const prev = Array.isArray(cat?.recurringSeriesTemplates)
+    ? cat.recurringSeriesTemplates.filter(
+        (t) => String(t?.recurringId || t?.id || '') !== rid,
+      )
+    : [];
+  return {
+    ...(cat || { closed: false, items: [] }),
+    recurringSeriesTemplates: [...prev, { ...template, recurring: true, recurringId: rid }],
+  };
+}
+
+export function removeRecurringSeriesTemplate(cat, seriesId) {
+  const rid = String(seriesId || '').trim();
+  if (!rid || !cat) return cat;
+  const prev = Array.isArray(cat.recurringSeriesTemplates)
+    ? cat.recurringSeriesTemplates
+    : [];
+  const next = prev.filter((t) => String(t?.recurringId || t?.id || '') !== rid);
+  if (next.length === prev.length) return cat;
+  return { ...cat, recurringSeriesTemplates: next };
+}
+
+function templatesFromCategory(cat) {
+  return Array.isArray(cat?.recurringSeriesTemplates)
+    ? cat.recurringSeriesTemplates.filter((t) => t?.recurring)
+    : [];
+}
+
+function skippedAnchorSet(cat) {
+  return new Set(
+    (Array.isArray(cat?.skippedRecurringAnchors) ? cat.skippedRecurringAnchors : [])
+      .map((k) => String(k || '').trim())
+      .filter(Boolean),
+  );
+}
+
 function effectiveRecurrence(item) {
   if (item?.recurrence?.type) return item.recurrence;
   const d = Number(item?.dueDate || 0);
@@ -175,8 +260,9 @@ function buildRecurringSeedRow(template, cycleStartMs, newTodoId) {
         }
       : null);
   const newParentDue = computeRecurringDueDate(effectiveRecurrence, cycleStartMs);
+  const rid = String(template.recurringId || template.id || '');
   return {
-    id: newTodoId(),
+    id: resolveRecurringInstanceId(rid, newParentDue, newTodoId),
     text: template.text,
     done: false,
     doneAt: null,
@@ -250,17 +336,41 @@ export function materializeCategoryTodoFromPrev(
   const existing = existingCat || { closed: false, items: [] };
   let items = [...(existing.items || [])];
   let changed = false;
+  const skipped = skippedAnchorSet(existing);
 
   const existingIds = new Set(items.map((item) => item?.id).filter(Boolean));
   for (const item of prevItems.filter((row) => row && !row.done)) {
     if (!item.id || existingIds.has(item.id)) continue;
+    // Don't re-carry a recurring occurrence that was deleted for this anchor.
+    if (item.recurring) {
+      const skipKey = recurringAnchorKey(
+        item.recurringId || item.id,
+        item.dueDate,
+      );
+      if (skipKey && skipped.has(skipKey)) continue;
+    }
     items.push(carryPrimaryTodoItemFromPrevCycle(item));
     existingIds.add(item.id);
     changed = true;
   }
 
-  const templates = collectRecurringSeriesTemplates(prevItems);
-  const seeds = buildRecurringSeedsForCycle(templates, cycleStartMs, newTodoId);
+  const templates = [
+    ...collectRecurringSeriesTemplates(prevItems),
+    ...templatesFromCategory(prevCat),
+    ...templatesFromCategory(existing),
+  ];
+  // Prefer live item templates; de-dupe by series id.
+  const byRid = new Map();
+  for (const t of templates) {
+    const rid = stableRecurringSeriesId(t) || String(t?.recurringId || t?.id || '');
+    if (!rid) continue;
+    if (!byRid.has(rid)) byRid.set(rid, t);
+  }
+  const seeds = buildRecurringSeedsForCycle(
+    [...byRid.values()],
+    cycleStartMs,
+    newTodoId,
+  );
   const dedupedSeeds = dedupeRecurringSeedsAgainstCarried(
     items.filter((row) => row && !row.done),
     seeds,
@@ -270,6 +380,8 @@ export function materializeCategoryTodoFromPrev(
     if (!rid) return true;
     if (openRecurringInstanceExists(items, rid)) return false;
     const anchor = Number(seed.dueDate || 0);
+    const skipKey = recurringAnchorKey(rid, anchor);
+    if (skipKey && skipped.has(skipKey)) return false;
     if (!anchor) return true;
     return !recurringInstanceExistsForAnchor(items, rid, anchor);
   });
@@ -499,7 +611,7 @@ function cloneRecurringInstanceFromTemplate(template, anchorDueMs, newTodoId) {
       dueDate: projectSubtaskDueDateForNewCycle(oldParentDue, newParentDue, s.dueDate),
     }));
   return {
-    id: newTodoId(),
+    id: resolveRecurringInstanceId(rid, anchorDueMs, newTodoId),
     text: template.text || '',
     done: false,
     doneAt: null,
@@ -547,6 +659,10 @@ export function reconcileRecurringTodoInstances(
     for (const it of collectRecurringSeriesTemplates(items)) {
       const rid = stableRecurringSeriesId(it);
       if (rid) templatesByRid.set(rid, it);
+    }
+    for (const t of templatesFromCategory(cat)) {
+      const rid = stableRecurringSeriesId(t) || String(t?.recurringId || t?.id || '');
+      if (rid && !templatesByRid.has(rid)) templatesByRid.set(rid, t);
     }
 
     let itemsMut = items;
@@ -640,8 +756,19 @@ export function mergeOpenItemsFromPrevCycle(existingCycleData, prevCycleData) {
 
     const existingCat = next[catKey] || { closed: false, items: [] };
     const existingIds = new Set((existingCat.items || []).map((item) => item?.id));
+    const skipped = skippedAnchorSet(existingCat);
     const toAdd = openPrev
-      .filter((item) => item?.id && !existingIds.has(item.id))
+      .filter((item) => {
+        if (!item?.id || existingIds.has(item.id)) return false;
+        if (item.recurring) {
+          const skipKey = recurringAnchorKey(
+            item.recurringId || item.id,
+            item.dueDate,
+          );
+          if (skipKey && skipped.has(skipKey)) return false;
+        }
+        return true;
+      })
       .map(carryPrimaryTodoItemFromPrevCycle);
     if (!toAdd.length) continue;
 
@@ -715,11 +842,11 @@ export function removeRecurringSeriesFromAllCycles(cycles, categoryKey, seriesId
   for (const [cycleKey, cycleData] of Object.entries(next)) {
     if (!cycleData || typeof cycleData !== 'object') continue;
     const cat = cycleData[categoryKey];
-    if (!cat || !Array.isArray(cat.items)) continue;
+    if (!cat || typeof cat !== 'object') continue;
 
     let catTouched = false;
     const items = [];
-    for (const it of cat.items) {
+    for (const it of cat.items || []) {
       const matches = it?.recurring && stableRecurringSeriesId(it) === rid;
       if (!matches) {
         items.push(it);
@@ -733,11 +860,18 @@ export function removeRecurringSeriesFromAllCycles(cycles, categoryKey, seriesId
       // Open instances are dropped entirely.
     }
 
-    if (catTouched) {
+    const hadTemplate = (cat.recurringSeriesTemplates || []).some(
+      (t) => String(t?.recurringId || t?.id || '') === rid,
+    );
+    const cleared = hadTemplate
+      ? removeRecurringSeriesTemplate({ ...cat, items }, rid)
+      : { ...cat, items };
+
+    if (catTouched || hadTemplate) {
       touched = true;
       next[cycleKey] = {
         ...cycleData,
-        [categoryKey]: { ...cat, items },
+        [categoryKey]: cleared,
       };
     }
   }
@@ -769,15 +903,27 @@ export function removeTodoItemFromAllCycles(
   cycles,
   categoryKey,
   itemId,
-  { recurringSkipKey } = {},
+  { recurringSkipKey, matchRecurringId = '', matchDueDate = null } = {},
 ) {
   const next = { ...(cycles || {}) };
   let removed = false;
+  const wantRid = String(matchRecurringId || '').trim();
+  const wantDue = Number(matchDueDate || 0) || 0;
+
+  const matchesItem = (i) => {
+    if (!i) return false;
+    if (itemId && i.id === itemId) return true;
+    if (!wantRid || !i.recurring) return false;
+    if (stableRecurringSeriesId(i) !== wantRid) return false;
+    if (!wantDue) return !i.done;
+    return !i.done && sameCalendarDay(i.dueDate, wantDue);
+  };
+
   for (const [cycleKey, cycleData] of Object.entries(next)) {
     if (!cycleData || typeof cycleData !== 'object') continue;
     const cat = cycleData[categoryKey];
     if (!cat || !Array.isArray(cat.items)) continue;
-    if (!cat.items.some((i) => i?.id === itemId)) continue;
+    if (!cat.items.some(matchesItem)) continue;
     removed = true;
     let skipped = Array.isArray(cat.skippedRecurringAnchors)
       ? [...cat.skippedRecurringAnchors]
@@ -789,7 +935,7 @@ export function removeTodoItemFromAllCycles(
       ...cycleData,
       [categoryKey]: {
         ...cat,
-        items: cat.items.filter((i) => i?.id !== itemId),
+        items: cat.items.filter((i) => !matchesItem(i)),
         skippedRecurringAnchors: skipped,
       },
     };

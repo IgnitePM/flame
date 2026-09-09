@@ -1,5 +1,5 @@
 import { normalizeStaffEmail } from './staffDirectory.js';
-import { getTaskComments } from './taskComments.js';
+import { getTaskComments, parseMentionEmails } from './taskComments.js';
 
 export const NOTIFICATION_TYPES = {
   TASK_ASSIGNED: 'task_assigned',
@@ -61,6 +61,46 @@ function assigneesOf(item) {
   return Array.isArray(item?.assigneeEmails)
     ? item.assigneeEmails.map((e) => normalizeStaffEmail(e)).filter(Boolean)
     : [];
+}
+
+/**
+ * @mentions newly added in any note field (deals, leads, client notes, work notes).
+ * `prevText` is used so editing an existing blob only notifies newly tagged people.
+ */
+export function collectMentionNotificationsFromText({
+  text,
+  prevText = '',
+  staffEmails = [],
+  actorEmail,
+  actorName,
+  title,
+  clientId = null,
+  clientName = null,
+  categoryKey = null,
+  itemId = null,
+} = {}) {
+  const actor = normalizeStaffEmail(actorEmail);
+  const next = new Set(parseMentionEmails(text, staffEmails));
+  const prev = new Set(parseMentionEmails(prevText, staffEmails));
+  const snippet = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 280);
+  const docs = [];
+  for (const email of next) {
+    if (!email || email === actor || prev.has(email)) continue;
+    const doc = buildNotificationDoc({
+      recipientEmail: email,
+      type: NOTIFICATION_TYPES.MENTION,
+      title: title || 'You were mentioned',
+      body: actorName || actor ? `${actorName || actor}: ${snippet}` : snippet,
+      actorEmail: actor,
+      actorName,
+      clientId,
+      clientName,
+      categoryKey,
+      itemId,
+    });
+    if (doc) docs.push(doc);
+  }
+  return docs;
 }
 
 /**
