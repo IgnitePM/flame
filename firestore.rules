@@ -234,6 +234,13 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Outbound client emails (CRM send history). Staff only; digest bot writes.
+    match /clientEmailMessages/{messageId} {
+      allow read: if isAnyStaff();
+      allow create: if isAnyStaff() || isBilling();
+      allow update, delete: if isAdmin();
+    }
+
     // Client CRM activity timeline (HubSpot-style relationship history).
     // Staff read/create; portal may create a few system events they trigger;
     // portal cannot read the feed in v1.

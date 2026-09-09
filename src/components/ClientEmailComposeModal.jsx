@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import { authedFetch } from '../utils/authedFetch.js';
 import { normalizePrimaryContact, normalizeClientContacts } from '../utils/clientDocuments.js';
@@ -24,20 +24,55 @@ function collectRecipientOptions(client) {
   return opts;
 }
 
+function replySubject(subject) {
+  const s = String(subject || '').trim();
+  if (!s) return 'Re:';
+  return /^re:/i.test(s) ? s : `Re: ${s}`;
+}
+
 /**
  * Admin/billing compose modal — sends via Workspace Gmail (Netlify mailer).
+ * Supports reply drafts via initialSubject / initialTo / initialBody / inReplyToId.
  */
-export default function ClientEmailComposeModal({ client, onClose }) {
+export default function ClientEmailComposeModal({
+  client,
+  onClose,
+  initialSubject = '',
+  initialTo = null,
+  initialBody = '',
+  inReplyToId = null,
+}) {
   const options = useMemo(() => collectRecipientOptions(client), [client]);
-  const [selected, setSelected] = useState(() =>
-    options[0] ? [options[0].email] : [],
-  );
-  const [subject, setSubject] = useState(
-    client?.name ? `${client.name} — Ignite PM` : '',
-  );
+  const [selected, setSelected] = useState([]);
+  const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+
+  const initialToKey = Array.isArray(initialTo) ? initialTo.join(',') : '';
+
+  useEffect(() => {
+    if (!client) return;
+    const prefTo = initialToKey
+      ? initialToKey.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean)
+      : [];
+    const validPref = prefTo.filter((e) => options.some((o) => o.email === e));
+    setSelected(
+      validPref.length
+        ? validPref
+        : options[0]
+          ? [options[0].email]
+          : [],
+    );
+    setSubject(
+      initialSubject
+        ? String(initialSubject)
+        : client?.name
+          ? `${client.name} — Ignite PM`
+          : '',
+    );
+    setBody(String(initialBody || ''));
+  }, [client?.id, initialSubject, initialBody, initialToKey, options]);
 
   if (!client) return null;
 
@@ -57,6 +92,7 @@ export default function ClientEmailComposeModal({ client, onClose }) {
         to: selected,
         subject,
         body,
+        ...(inReplyToId ? { inReplyToId } : {}),
       });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(data.error || 'Send failed');
@@ -74,7 +110,9 @@ export default function ClientEmailComposeModal({ client, onClose }) {
       <div className="bg-white rounded-[32px] w-full max-w-xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
         <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
           <div>
-            <h3 className="font-black text-xl text-slate-900">Email client</h3>
+            <h3 className="font-black text-xl text-slate-900">
+              {inReplyToId ? 'Reply to client' : 'Email client'}
+            </h3>
             <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-1">
               {client.name} · via Google Workspace
             </p>
@@ -159,3 +197,5 @@ export default function ClientEmailComposeModal({ client, onClose }) {
     </div>
   );
 }
+
+export { replySubject };

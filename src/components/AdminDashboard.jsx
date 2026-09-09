@@ -94,7 +94,10 @@ import PayrollView from './PayrollView.jsx';
 import SlackNotificationsCard from './SlackNotificationsCard.jsx';
 import EmailDigestCard from './EmailDigestCard.jsx';
 import FxRatesCard from './FxRatesCard.jsx';
-import ClientEmailComposeModal from './ClientEmailComposeModal.jsx';
+import ClientEmailComposeModal, {
+  replySubject,
+} from './ClientEmailComposeModal.jsx';
+import ClientEmailHistory from './ClientEmailHistory.jsx';
 import ClientActivityTimeline from './ClientActivityTimeline.jsx';
 import TodoDeleteConfirmModal from './TodoDeleteConfirmModal.jsx';
 import {
@@ -1303,6 +1306,7 @@ const AdminDashboard = ({
   }, [isRestrictedStaff, adminTab, setAdminTab, lockedTab]);
   const [estimateModal, setEstimateModal] = useState(null);
   const [emailComposeClient, setEmailComposeClient] = useState(null);
+  const [emailComposeDraft, setEmailComposeDraft] = useState(null);
   const [estimateValues, setEstimateValues] = useState({
     hours: '',
     cost: '',
@@ -4017,7 +4021,12 @@ const AdminDashboard = ({
                           <ClientProfileSummary
                             client={c}
                             onComposeEmail={
-                              canBilling ? () => setEmailComposeClient(c) : null
+                              canBilling
+                                ? () => {
+                                    setEmailComposeDraft(null);
+                                    setEmailComposeClient(c);
+                                  }
+                                : null
                             }
                           />
                         </div>
@@ -4026,6 +4035,29 @@ const AdminDashboard = ({
                           logClientActivity={logClientActivity}
                           canCompose={!isRestrictedStaff}
                         />
+                        {canBilling && (
+                          <ClientEmailHistory
+                            client={c}
+                            canCompose
+                            onCompose={(client) => {
+                              setEmailComposeDraft(null);
+                              setEmailComposeClient(client);
+                            }}
+                            onReply={(msg) => {
+                              setEmailComposeDraft({
+                                initialSubject: replySubject(msg.subject),
+                                initialTo: Array.isArray(msg.to) ? msg.to : [],
+                                initialBody: `\n\n---\nOn ${new Date(
+                                  Number(msg.sentAt || 0),
+                                ).toLocaleString()}, ${msg.actorEmail || 'staff'} wrote:\n${String(
+                                  msg.body || '',
+                                ).slice(0, 2000)}`,
+                                inReplyToId: msg.id,
+                              });
+                              setEmailComposeClient(c);
+                            }}
+                          />
+                        )}
                         <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
                           <ClientFilesPanel
                             client={c}
@@ -7665,7 +7697,14 @@ const AdminDashboard = ({
       {emailComposeClient && (
         <ClientEmailComposeModal
           client={emailComposeClient}
-          onClose={() => setEmailComposeClient(null)}
+          initialSubject={emailComposeDraft?.initialSubject || ''}
+          initialTo={emailComposeDraft?.initialTo || null}
+          initialBody={emailComposeDraft?.initialBody || ''}
+          inReplyToId={emailComposeDraft?.inReplyToId || null}
+          onClose={() => {
+            setEmailComposeClient(null);
+            setEmailComposeDraft(null);
+          }}
         />
       )}
 

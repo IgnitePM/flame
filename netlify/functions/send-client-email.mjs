@@ -1,11 +1,12 @@
 import { writeClientActivity } from './lib/clientActivity.mjs';
+import { writeClientEmailMessage } from './lib/clientEmailMessage.mjs';
 import { describeAuthError, requireStaffCaller } from './lib/requireAuth.mjs';
 import { sendDigestEmail } from './lib/mailer.mjs';
 import { fetchDoc, getDigestDb, mergeDoc } from './lib/firebaseDigestClient.mjs';
 
 /**
  * Admin/billing: send an email to client contacts via Workspace Gmail SMTP.
- * POST { clientId, to: string|string[], subject, body }
+ * POST { clientId, to: string|string[], subject, body, inReplyToId? }
  */
 export default async (req) => {
   if (req.method !== 'POST') {
@@ -36,6 +37,7 @@ export default async (req) => {
   const clientId = String(body?.clientId || '').trim();
   const subject = String(body?.subject || '').trim();
   const text = String(body?.body || body?.text || '').trim();
+  const inReplyToId = body?.inReplyToId ? String(body.inReplyToId).trim() : null;
   const toRaw = body?.to;
   const toList = [
     ...new Set(
@@ -81,7 +83,24 @@ export default async (req) => {
 
     await sendDigestEmail({ to: toList, subject, text, html });
 
-    const logId = `email_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const now = Date.now();
+    let emailRecord = null;
+    try {
+      emailRecord = await writeClientEmailMessage({
+        clientId,
+        clientName: client.name || '',
+        to: toList,
+        subject,
+        body: text,
+        actorEmail: caller.email,
+        inReplyToId,
+        at: now,
+      });
+    } catch (err) {
+      console.warn('[send-client-email] message store skipped:', err?.message || err);
+    }
+
+    const logId = `email_${now}_${Math.random().toString(36).slice(2, 8)}`;
     await mergeDoc(db, `auditLogs/${logId}`, {
       type: 'client_email_sent',
       clientId,
@@ -89,7 +108,8 @@ export default async (req) => {
       to: toList,
       subject,
       actorEmail: caller.email,
-      at: Date.now(),
+      emailMessageId: emailRecord?.id || null,
+      at: now,
     });
 
     try {
@@ -101,18 +121,29 @@ export default async (req) => {
         body: text.slice(0, 800),
         actorEmail: caller.email,
         source: 'system',
-        meta: { to: toList, subject },
+        meta: {
+          to: toList,
+          subject,
+          emailMessageId: emailRecord?.id || null,
+          inReplyToId,
+        },
+        at: now,
       });
     } catch (err) {
       console.warn('[send-client-email] activity log skipped:', err?.message || err);
     }
 
     await mergeDoc(db, `clients/${clientId}`, {
-      lastClientEmailAt: Date.now(),
+      lastClientEmailAt: now,
     });
 
     return new Response(
-      JSON.stringify({ ok: true, to: toList, subject }),
+      JSON.stringify({
+        ok: true,
+        to: toList,
+        subject,
+        emailMessageId: emailRecord?.id || null,
+      }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     );
   } catch (err) {
