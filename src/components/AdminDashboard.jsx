@@ -43,6 +43,7 @@ import {
 import { buildGlobalTodoRows } from '../utils/todoGlobalRows.js';
 import { isClientActiveForWork } from '../utils/clientActiveForWork.js';
 import { authedFetch } from '../utils/authedFetch.js';
+import { validatePortalEmailsExclusive } from '../utils/portalAccess.js';
 import {
   filterClientsForTeamMember,
   teamMemberCanViewClient,
@@ -3496,6 +3497,15 @@ const AdminDashboard = ({
                           .map((s) => s.trim().toLowerCase())
                           .filter(Boolean);
 
+                        const emailCheck = validatePortalEmailsExclusive(
+                          clients,
+                          clientEmails,
+                        );
+                        if (!emailCheck.ok) {
+                          window.alert(emailCheck.message);
+                          return;
+                        }
+
                         setAddClientSaving(true);
                         try {
                           await addDoc(collection('clients'), {
@@ -3505,7 +3515,7 @@ const AdminDashboard = ({
                             billingDay,
                             retainers: {},
                             retainerUnits: {},
-                            clientEmails,
+                            clientEmails: emailCheck.emails,
                             clientStartDate,
                           });
                           setAddClientModalOpen(false);

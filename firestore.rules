@@ -217,5 +217,21 @@ service cloud.firestore {
       allow read: if hasSalesFunnel() || isBilling();
       allow create, update, delete: if hasSalesFunnel();
     }
+
+    // Client portal invites — doc id is the invitee email (lowercase).
+    // Billing (digest bot) writes for invite + scheduled reminders.
+    // Portal users may only mark their own invite accepted after first login.
+    match /portalInvites/{emailId} {
+      allow read: if isAdmin() || isBilling() ||
+        (isSignedIn() && emailId == emailLower());
+      allow create: if isAdmin() || isBilling();
+      allow update: if isAdmin() || isBilling() ||
+        (isSignedIn() &&
+         emailId == emailLower() &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['status', 'acceptedAt', 'updatedAt']) &&
+         request.resource.data.status == 'accepted');
+      allow delete: if isAdmin();
+    }
   }
 }

@@ -64,6 +64,7 @@ import {
   setDoc,
   updateDoc,
   doc,
+  getDoc,
   deleteDoc,
   deleteField,
 } from './firebase';
@@ -97,6 +98,12 @@ import {
 } from './utils/perplexityCredits.js';
 import { buildTeamAccessMergeForTodoAssignees } from './utils/teamClientAccess.js';
 import { isClientActiveForWork } from './utils/clientActiveForWork.js';
+import {
+  normalizePortalEmail,
+  normalizePortalEmailList,
+  portalInviteStatusLabel,
+  validatePortalEmailsExclusive,
+} from './utils/portalAccess.js';
 import {
   filterClientsForTeamMember,
   teamMemberCanViewClient,
@@ -387,6 +394,8 @@ export default function App() {
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [archiveConfirm, setArchiveConfirm] = useState(null);
   const [editingClient, setEditingClient] = useState(null);
+  const [portalInvitesByEmail, setPortalInvitesByEmail] = useState({});
+  const [portalInviteBusyEmail, setPortalInviteBusyEmail] = useState('');
   const [clientLogoUploading, setClientLogoUploading] = useState(false);
   const [expenseModal, setExpenseModal] = useState(null);
   const [expenseValues, setExpenseValues] = useState({
@@ -963,6 +972,57 @@ export default function App() {
     else if (isUserAdmin && view === 'client_portal')
       setView(currentUserRole === 'kiosk' ? 'employee' : 'admin');
   }, [isClientUser, isUserAdmin, currentUserRole, view]);
+
+  // Portal users: mark invite accepted on first successful login.
+  useEffect(() => {
+    if (!isClientUser || !userEmailLower) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const ref = doc(db, 'portalInvites', userEmailLower);
+        const snap = await getDoc(ref);
+        if (cancelled || !snap.exists()) return;
+        const data = snap.data() || {};
+        if (data.status === 'accepted') return;
+        await setDoc(
+          ref,
+          { status: 'accepted', acceptedAt: Date.now(), updatedAt: Date.now() },
+          { merge: true },
+        );
+      } catch (err) {
+        console.warn('[portalInvite] accept mark skipped:', err?.message || err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isClientUser, userEmailLower]);
+
+  // Admin client editor: live invite status for this client's portal emails.
+  useEffect(() => {
+    if (!editingClient?.id || currentUserRole !== 'admin') {
+      setPortalInvitesByEmail({});
+      return undefined;
+    }
+    const q = query(
+      collection(db, 'portalInvites'),
+      where('clientId', '==', editingClient.id),
+    );
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const map = {};
+        snap.docs.forEach((d) => {
+          const data = d.data() || {};
+          const em = normalizePortalEmail(data.email || d.id);
+          if (em) map[em] = { id: d.id, ...data };
+        });
+        setPortalInvitesByEmail(map);
+      },
+      () => setPortalInvitesByEmail({}),
+    );
+    return () => unsub();
+  }, [editingClient?.id, currentUserRole]);
 
   // Portal users: per-client activity queries (tasks, expenses, projects,
   // addons stamped with their clientId). Security rules deny anything wider.
@@ -3002,7 +3062,7 @@ export default function App() {
 
           <div className="w-full space-y-3">
             <button onClick={loginWithGoogle} type="button" className="w-full bg-black text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-slate-800 transition-all shadow-lg active:scale-95">
-              Sign in with Google Workspace
+              Sign in with Google
             </button>
             {ENABLE_DEMOS && (
               <div className="flex gap-2">
@@ -4062,8 +4122,121 @@ export default function App() {
                 </div>
                 <div className="space-y-2 pt-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Authorized Emails (Comma separated)</label>
-                  <p className="text-xs text-slate-400 mb-2">These users can log in to the Client Portal.</p>
-                  <textarea value={(editingClient.clientEmails || []).join(', ')} onChange={e => setEditingClient({...editingClient, clientEmails: e.target.value.split(',').map(em => em.trim())})} className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[80px]" placeholder="ceo@client.com, cmo@client.com" />
+                  <p className="text-xs text-slate-400 mb-2">
+                    Each email can access only this client. Invite creates their login (individual password) and emails a set-password link; Google sign-in with the same address also works.
+                  </p>
+                  <textarea
+                    value={(editingClient.clientEmails || []).join(', ')}
+                    onChange={(e) =>
+                      setEditingClient({
+                        ...editingClient,
+                        clientEmails: e.target.value.split(',').map((em) => em.trim()),
+                      })
+                    }
+                    className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[80px]"
+                    placeholder="ceo@client.com, cmo@client.com"
+                  />
+                  {currentUserRole === 'admin' && (
+                    <div className="space-y-2 pt-2">
+                      {normalizePortalEmailList(editingClient.clientEmails).length === 0 ? (
+                        <p className="text-xs text-slate-400">Add emails above, Save Profile, then invite.</p>
+                      ) : (
+                        normalizePortalEmailList(editingClient.clientEmails).map((email) => {
+                          const invite = portalInvitesByEmail[email];
+                          const status = portalInviteStatusLabel(invite);
+                          const savedOnClient = normalizePortalEmailList(
+                            clients.find((c) => c.id === editingClient.id)?.clientEmails,
+                          ).includes(email);
+                          const busy = portalInviteBusyEmail === email;
+                          const pending = invite?.status === 'pending';
+                          const accepted = invite?.status === 'accepted';
+                          return (
+                            <div
+                              key={email}
+                              className="flex flex-col sm:flex-row sm:items-center gap-2 justify-between bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"
+                            >
+                              <div className="min-w-0">
+                                <div className="font-bold text-sm text-slate-800 truncate">{email}</div>
+                                <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                  {status}
+                                  {!savedOnClient ? ' · Save profile to authorize' : ''}
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap gap-2 shrink-0">
+                                <button
+                                  type="button"
+                                  disabled={busy || !savedOnClient}
+                                  onClick={async () => {
+                                    setPortalInviteBusyEmail(email);
+                                    try {
+                                      const resp = await authedFetch('/.netlify/functions/portal-invite', {
+                                        action: pending || accepted ? 'resend' : 'invite',
+                                        clientId: editingClient.id,
+                                        email,
+                                      });
+                                      const data = await resp.json().catch(() => ({}));
+                                      if (!resp.ok) throw new Error(data.error || 'Invite failed');
+                                      window.alert(
+                                        pending || accepted
+                                          ? `Resent set-password email to ${email}.`
+                                          : `Invite sent to ${email}. They’ll get a set-password email (and a short portal note).`,
+                                      );
+                                    } catch (err) {
+                                      window.alert(err?.message || String(err));
+                                    } finally {
+                                      setPortalInviteBusyEmail('');
+                                    }
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg text-xs font-black bg-black text-white disabled:opacity-40"
+                                >
+                                  {busy ? '…' : pending || accepted ? 'Resend' : 'Invite'}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={async () => {
+                                    if (
+                                      !window.confirm(
+                                        `Remove portal access for ${email}? Their login stays in Firebase Auth, but they can no longer open this client.`,
+                                      )
+                                    ) {
+                                      return;
+                                    }
+                                    setPortalInviteBusyEmail(email);
+                                    try {
+                                      const nextEmails = normalizePortalEmailList(
+                                        editingClient.clientEmails,
+                                      ).filter((e) => e !== email);
+                                      await updateDoc(doc(db, 'clients', editingClient.id), {
+                                        clientEmails: nextEmails,
+                                      });
+                                      setEditingClient({
+                                        ...editingClient,
+                                        clientEmails: nextEmails,
+                                      });
+                                      const resp = await authedFetch('/.netlify/functions/portal-invite', {
+                                        action: 'revoke',
+                                        email,
+                                      });
+                                      const data = await resp.json().catch(() => ({}));
+                                      if (!resp.ok) throw new Error(data.error || 'Revoke failed');
+                                    } catch (err) {
+                                      window.alert(err?.message || String(err));
+                                    } finally {
+                                      setPortalInviteBusyEmail('');
+                                    }
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg text-xs font-black bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 disabled:opacity-40"
+                                >
+                                  Remove access
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-4 pt-4 border-t border-slate-200">
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Company profile</p>
@@ -4595,6 +4768,18 @@ export default function App() {
               <button 
                 onClick={async () => {
                   const prevClient = clients.find((c) => c.id === editingClient.id);
+                  const emailCheck = validatePortalEmailsExclusive(
+                    clients,
+                    editingClient.clientEmails,
+                    editingClient.id,
+                  );
+                  if (!emailCheck.ok) {
+                    window.alert(emailCheck.message);
+                    return;
+                  }
+                  const nextEmails = emailCheck.emails;
+                  const prevEmails = normalizePortalEmailList(prevClient?.clientEmails);
+                  const removed = prevEmails.filter((e) => !nextEmails.includes(e));
                   const retainerCategoryStartDates = buildRetainerCategoryStartDates(
                     editingClient,
                     prevClient,
@@ -4603,9 +4788,7 @@ export default function App() {
                     retainers: editingClient.retainers,
                     retainerUnits: editingClient.retainerUnits || {},
                     hourlyRate: editingClient.hourlyRate || 0,
-                    clientEmails: (editingClient.clientEmails || [])
-                      .map((em) => String(em || '').trim().toLowerCase())
-                      .filter(Boolean),
+                    clientEmails: nextEmails,
                     billingDay: editingClient.billingDay || 1,
                     status: editingClient.status || 'active',
                     teamMemberAccessEmails:
@@ -4628,6 +4811,20 @@ export default function App() {
                     primaryContact: normalizePrimaryContact(editingClient.primaryContact),
                     contacts: normalizeClientContacts(editingClient.contacts),
                   });
+                  if (currentUserRole === 'admin' && removed.length) {
+                    await Promise.all(
+                      removed.map(async (email) => {
+                        try {
+                          await authedFetch('/.netlify/functions/portal-invite', {
+                            action: 'revoke',
+                            email,
+                          });
+                        } catch {
+                          /* best-effort */
+                        }
+                      }),
+                    );
+                  }
                   setEditingClient(null);
                 }} 
                 className="w-full bg-black hover:bg-slate-800 text-white p-5 rounded-2xl font-black text-lg shadow-xl flex items-center justify-center gap-3 transition-all active:scale-95"

@@ -6,6 +6,7 @@ import {
   resolvePipelineStages,
   staffDisplayFromEmail,
 } from '../../utils/salesPipeline.js';
+import { validatePortalEmailsExclusive } from '../../utils/portalAccess.js';
 import SalesFunnelBoard from './SalesFunnelBoard.jsx';
 import LeadsPanel from './LeadsPanel.jsx';
 import DealDetailDrawer, { NewDealModal } from './DealDetailDrawer.jsx';
@@ -18,6 +19,7 @@ function ConvertLeadModal({
   updateDoc,
   doc,
   deals,
+  clients,
 }) {
   const [values, setValues] = useState({
     name: lead?.companyName || lead?.name || '',
@@ -43,6 +45,12 @@ function ConvertLeadModal({
         .split(/[,\n;]/g)
         .map((s) => s.trim().toLowerCase())
         .filter(Boolean);
+      const emailCheck = validatePortalEmailsExclusive(clients, clientEmails);
+      if (!emailCheck.ok) {
+        window.alert(emailCheck.message);
+        setSaving(false);
+        return;
+      }
       const primaryContact = lead.primaryContact || {
         name: '',
         email: '',
@@ -56,7 +64,7 @@ function ConvertLeadModal({
         billingDay: Math.min(31, Math.max(1, Number(values.billingDay) || 1)),
         retainers: {},
         retainerUnits: {},
-        clientEmails,
+        clientEmails: emailCheck.emails,
         clientStartDate: Date.now(),
         primaryContact,
         contacts: Array.isArray(lead.contacts) && lead.contacts.length
@@ -415,6 +423,7 @@ export default function SalesFunnelPanel({
         <ConvertLeadModal
           lead={convertLead}
           deals={deals}
+          clients={clients}
           onClose={() => setConvertLead(null)}
           addDoc={addDoc}
           collection={collection}
