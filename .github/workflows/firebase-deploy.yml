@@ -40,12 +40,11 @@ jobs:
             echo "method=token" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "::error::No Firebase deploy credentials configured."
-          echo ""
-          echo "Option A (blocked by some org policies): GitHub secret FIREBASE_SERVICE_ACCOUNT = service account JSON."
-          echo "Option B (works when key creation is disabled): GitHub secret FIREBASE_TOKEN from 'firebase login:ci'."
-          echo "Option C: deploy manually — firebase login && firebase deploy --only firestore:rules,storage --project time-tracker-1f2af"
-          exit 1
+          echo "method=none" >> "$GITHUB_OUTPUT"
+          echo "::warning::No Firebase CI credentials in GitHub secrets — skipping deploy."
+          echo "Rules/indexes were likely deployed locally already."
+          echo "To enable this workflow later, add secret FIREBASE_TOKEN from: firebase login:ci"
+          echo "Or FIREBASE_SERVICE_ACCOUNT (service-account JSON) if your org allows key creation."
 
       - name: Write service account credentials
         if: steps.auth.outputs.method == 'service_account'
@@ -54,9 +53,11 @@ jobs:
         run: printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-sa.json"
 
       - name: Install function dependencies
+        if: steps.auth.outputs.method != 'none'
         run: npm ci --prefix functions || npm install --prefix functions
 
       - name: Deploy Firestore + Storage rules
+        if: steps.auth.outputs.method != 'none'
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
@@ -75,6 +76,7 @@ jobs:
           fi
 
       - name: Deploy Cloud Functions
+        if: steps.auth.outputs.method != 'none'
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
