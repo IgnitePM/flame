@@ -54,3 +54,25 @@ export function portalInviteStatusLabel(invite) {
   if (status === 'pending') return 'Invite pending';
   return 'Not invited';
 }
+
+/**
+ * Find portal emails that appear on more than one client (legacy data hygiene).
+ * Returns [{ email, clients: [{ id, name }] }, ...]
+ */
+export function findDuplicatePortalEmails(clients) {
+  const byEmail = new Map();
+  for (const c of clients || []) {
+    if (!c) continue;
+    const emails = Array.isArray(c.clientEmails) ? c.clientEmails : [];
+    for (const raw of emails) {
+      const email = normalizePortalEmail(raw);
+      if (!email) continue;
+      if (!byEmail.has(email)) byEmail.set(email, []);
+      byEmail.get(email).push({ id: c.id, name: c.name || c.id });
+    }
+  }
+  return [...byEmail.entries()]
+    .filter(([, list]) => list.length > 1)
+    .map(([email, list]) => ({ email, clients: list }))
+    .sort((a, b) => a.email.localeCompare(b.email));
+}

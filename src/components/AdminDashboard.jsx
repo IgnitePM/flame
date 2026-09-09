@@ -43,7 +43,10 @@ import {
 import { buildGlobalTodoRows } from '../utils/todoGlobalRows.js';
 import { isClientActiveForWork } from '../utils/clientActiveForWork.js';
 import { authedFetch } from '../utils/authedFetch.js';
-import { validatePortalEmailsExclusive } from '../utils/portalAccess.js';
+import {
+  findDuplicatePortalEmails,
+  validatePortalEmailsExclusive,
+} from '../utils/portalAccess.js';
 import {
   filterClientsForTeamMember,
   teamMemberCanViewClient,
@@ -1070,6 +1073,10 @@ const AdminDashboard = ({
     [isRestrictedStaff, teamAccessibleClients, clients],
   );
   const visibleClients = staffClientScope;
+  const duplicatePortalEmails = useMemo(
+    () => (isAdmin ? findDuplicatePortalEmails(clients) : []),
+    [isAdmin, clients],
+  );
   const clientsActiveForWork = useMemo(
     () => staffClientScope.filter(isClientActiveForWork),
     [staffClientScope],
@@ -3273,6 +3280,27 @@ const AdminDashboard = ({
       {/* Clients Tab */}
       {adminTab === 'clients' && (
         <div className="space-y-6">
+          {isAdmin && !clientId && duplicatePortalEmails.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-[28px] p-6 space-y-3">
+              <h3 className="font-black text-amber-900 text-lg">
+                Portal emails shared across clients
+              </h3>
+              <p className="text-sm text-amber-800 font-medium">
+                Each email can only access one client. Remove the address from all but one client, then invite from that client’s profile.
+              </p>
+              <ul className="space-y-2 text-sm text-amber-950">
+                {duplicatePortalEmails.map((row) => (
+                  <li key={row.email} className="font-bold">
+                    {row.email}
+                    <span className="font-medium text-amber-800">
+                      {' '}
+                      → {row.clients.map((c) => c.name).join(', ')}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {clientId && (
             <div className="flex flex-wrap items-center gap-3 justify-between w-full min-w-0">
               <div className="flex items-center gap-3 min-w-0">
