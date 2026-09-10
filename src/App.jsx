@@ -49,7 +49,6 @@ import {
   storageRef,
   uploadBytes,
   getDownloadURL,
-  deleteObject,
   GoogleAuthProvider,
   signInWithPopup,
   signOut,
@@ -129,17 +128,13 @@ import {
 import { canMarkParentTodoDone } from './utils/todoSubtasks.js';
 import {
   addAttachmentToItem,
-  buildClientDocumentRecord,
-  buildClientFileStoragePath,
+  buildDriveDocumentRecord,
   getTodoAttachments,
   MAX_TODO_ATTACHMENTS,
   newContactId,
-  newDocumentId,
   normalizeClientContacts,
   normalizePrimaryContact,
   removeDocumentFromTodoCycles,
-  validateClientUploadFile,
-  ensureStaffAdminDocForStorage,
 } from './utils/clientDocuments.js';
 import {
   getEnabledRetainerCategoryNames,
@@ -2768,13 +2763,10 @@ export default function App() {
     [resolveClient, newRecurringTodoRowId],
   );
 
-  const uploadClientDocument = useCallback(
-    async (client, file, options = {}) => {
-      if (!client?.id || !file) throw new Error('Missing client or file.');
-      const validationError = validateClientUploadFile(file);
-      if (validationError) throw new Error(validationError);
-
-      await ensureStaffAdminDocForStorage(db, user?.email || myAdminDoc?.email);
+  /** Attach a Google Drive file to a task (and optional legacy documents list). */
+  const attachClientDriveFile = useCallback(
+    async (client, driveFile, options = {}) => {
+      if (!client?.id || !driveFile?.id) throw new Error('Missing client or Drive file.');
 
       const {
         linkedTodoId = null,
@@ -2793,21 +2785,9 @@ export default function App() {
         }
       }
 
-      const documentId = newDocumentId();
-      const path = buildClientFileStoragePath(client.id, documentId, file.name);
-      const ref = storageRef(storage, path);
-      await uploadBytes(ref, file, {
-        contentType: file.type || 'application/octet-stream',
-      });
-      const url = await getDownloadURL(ref);
-      const record = buildClientDocumentRecord({
-        id: documentId,
-        name: file.name,
-        storagePath: path,
-        contentType: file.type,
-        sizeBytes: file.size,
+      const record = buildDriveDocumentRecord({
+        driveFile,
         uploadedBy: user?.email || myAdminDoc?.email || '',
-        url,
         linkedTodoId,
         linkedTodoText,
         linkedCategoryKey,
@@ -2815,7 +2795,12 @@ export default function App() {
       });
 
       const freshClient = clients.find((c) => c.id === client.id) || client;
-      const documents = [...(freshClient.documents || []), record];
+      const existingDocs = Array.isArray(freshClient.documents) ? freshClient.documents : [];
+      const documents = existingDocs.some(
+        (d) => d.id === record.id || d.driveFileId === record.driveFileId,
+      )
+        ? existingDocs
+        : [...existingDocs, record];
       const patch = { documents };
 
       if (linkedTodoId && linkedCategoryKey != null && linkedCycleStart != null) {
@@ -2823,9 +2808,13 @@ export default function App() {
         const cycleKey = String(linkedCycleStart);
         const catTodo = cycles[cycleKey]?.[linkedCategoryKey];
         if (catTodo?.items) {
-          const nextItems = catTodo.items.map((item) =>
-            item.id === linkedTodoId ? addAttachmentToItem(item, record) : item,
-          );
+          const nextItems = catTodo.items.map((item) => {
+            if (item.id !== linkedTodoId) return item;
+            const already = getTodoAttachments(item).some(
+              (a) => a.id === record.id || a.driveFileId === record.driveFileId,
+            );
+            return already ? item : addAttachmentToItem(item, record);
+          });
           cycles[cycleKey] = {
             ...cycles[cycleKey],
             [linkedCategoryKey]: { ...catTodo, items: nextItems },
@@ -2843,13 +2832,14 @@ export default function App() {
         clientId: client.id,
         clientName: client.name || '',
         type: 'file_upload',
-        title: `File uploaded: ${file.name}`,
+        title: `Drive file attached: ${record.name}`,
         body: linkedTodoText ? `Attached to task: ${linkedTodoText}` : '',
         source: 'system',
         meta: {
-          documentId,
-          fileName: file.name,
-          sizeBytes: file.size,
+          documentId: record.id,
+          driveFileId: record.driveFileId,
+          fileName: record.name,
+          sizeBytes: record.sizeBytes,
           linkedTodoId,
         },
       });
@@ -2858,25 +2848,16 @@ export default function App() {
     [clients, user?.email, myAdminDoc?.email, logClientActivity],
   );
 
+  /** Remove a task/client attachment record (does not delete the Drive file). */
   const removeClientDocument = useCallback(
     async (client, documentId) => {
       if (!client?.id || !documentId) return;
       const freshClient = clients.find((c) => c.id === client.id) || client;
-      const docRecord = (freshClient.documents || []).find((d) => d.id === documentId);
       const documents = (freshClient.documents || []).filter((d) => d.id !== documentId);
       const todoCycles = removeDocumentFromTodoCycles(
         freshClient.todoCycles || {},
         documentId,
       );
-
-      if (docRecord?.storagePath) {
-        try {
-          await deleteObject(storageRef(storage, docRecord.storagePath));
-        } catch {
-          // File may already be gone.
-        }
-      }
-
       await updateDoc(doc(db, 'clients', client.id), { documents, todoCycles });
     },
     [clients],
@@ -3355,7 +3336,7 @@ export default function App() {
     notifyTextMentions,
     currentUserRole,
     staffEmail: String(user?.email || myAdminDoc?.email || '').trim().toLowerCase(),
-    uploadClientDocument,
+    attachClientDriveFile,
     removeClientDocument,
     notifications: inboxNotifications,
     dismissNotification: dismissInboxNotification,
@@ -3456,7 +3437,7 @@ export default function App() {
     updateClientTodosBatch,
     setClientTodoItemDone,
     deleteClientTodoItem,
-    uploadClientDocument,
+    attachClientDriveFile,
     removeClientDocument,
     todoCategoryKey,
     userTodos,
@@ -4706,7 +4687,9 @@ export default function App() {
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Google Drive folder URL</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                      Google Drive folder URL
+                    </label>
                     <input
                       type="url"
                       value={editingClient.googleDriveFolderUrl || ''}
@@ -4719,6 +4702,10 @@ export default function App() {
                       className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
                       placeholder="https://drive.google.com/drive/folders/..."
                     />
+                    <p className="text-[10px] font-medium text-slate-400 ml-1">
+                      Prefer Create/Link folder on the client Files tab (sets folder ID for CRM browse).
+                      This URL is also updated automatically when you link Drive.
+                    </p>
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">HubSpot profile URL</label>

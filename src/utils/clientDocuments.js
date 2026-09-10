@@ -71,11 +71,13 @@ export function buildClientDocumentRecord({
   linkedTodoText = null,
   linkedCategoryKey = null,
   linkedCycleStart = null,
+  driveFileId = null,
+  source = null,
 }) {
   return {
     id: id || newDocumentId(),
     name: String(name || '').trim() || 'file',
-    storagePath,
+    storagePath: storagePath || null,
     contentType: contentType || 'application/octet-stream',
     sizeBytes: Number(sizeBytes) || 0,
     uploadedAt: Date.now(),
@@ -88,7 +90,40 @@ export function buildClientDocumentRecord({
       linkedCycleStart != null && linkedCycleStart !== ''
         ? Number(linkedCycleStart)
         : null,
+    driveFileId: driveFileId || null,
+    source: source || (driveFileId ? 'drive' : storagePath ? 'firebase' : null),
   };
+}
+
+/** Build an attachment / document record from a Google Drive file resource. */
+export function buildDriveDocumentRecord({
+  driveFile,
+  uploadedBy,
+  linkedTodoId = null,
+  linkedTodoText = null,
+  linkedCategoryKey = null,
+  linkedCycleStart = null,
+}) {
+  const driveFileId = String(driveFile?.id || '').trim();
+  if (!driveFileId) throw new Error('Missing Drive file id.');
+  const url =
+    driveFile.webViewLink ||
+    `https://drive.google.com/file/d/${driveFileId}/view`;
+  return buildClientDocumentRecord({
+    id: `drive_${driveFileId}`,
+    name: driveFile.name || 'file',
+    storagePath: null,
+    contentType: driveFile.mimeType || 'application/octet-stream',
+    sizeBytes: Number(driveFile.size || 0),
+    uploadedBy,
+    url,
+    linkedTodoId,
+    linkedTodoText,
+    linkedCategoryKey,
+    linkedCycleStart,
+    driveFileId,
+    source: 'drive',
+  });
 }
 
 export function getTodoAttachments(item) {

@@ -246,7 +246,7 @@ export default function KioskClientTodoItem({
   onAssigneesChange,
   onSubtaskAssigneesChange,
   onOpenOptions,
-  uploadClientDocument,
+  attachClientDriveFile,
   removeClientDocument,
   canAttachFiles = false,
   showPriorCycleBadge = false,
@@ -798,14 +798,14 @@ export default function KioskClientTodoItem({
           )}
         </div>
       )}
-      {canAttachFiles && uploadClientDocument && !item.done && (
+      {canAttachFiles && attachClientDriveFile && !item.done && (
         <TodoItemAttachments
           item={item}
           client={client}
           cycleStart={cycleStart}
           categoryKey={catKey}
           disabled={todoSaving || isCycleLocked}
-          onAttach={uploadClientDocument}
+          onAttachDriveFile={attachClientDriveFile}
           onRemove={removeClientDocument}
         />
       )}

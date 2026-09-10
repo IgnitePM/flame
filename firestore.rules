@@ -250,6 +250,13 @@ service cloud.firestore {
         emailLower().matches('digest-bot@.*');
     }
 
+    // Company Google Drive OAuth tokens (CRM file cabinet). Same lockdown —
+    // browsers never read tokens; Netlify status/list/upload APIs only.
+    match /driveConnections/{docId} {
+      allow read, write: if isSignedIn() &&
+        emailLower().matches('digest-bot@.*');
+    }
+
     // Client CRM activity timeline (HubSpot-style relationship history).
     // Staff read/create; portal may create a few system events they trigger;
     // portal cannot read the feed in v1.

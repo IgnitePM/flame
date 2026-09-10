@@ -146,7 +146,7 @@ const EmployeeKiosk = ({
   staffEmails = [],
   currentUserRole = null,
   staffEmail = '',
-  uploadClientDocument,
+  attachClientDriveFile,
   removeClientDocument,
   notifications = [],
   dismissNotification,
@@ -1762,7 +1762,7 @@ const EmployeeKiosk = ({
                                       })
                                     }
                                     defaultAssigneeEmail={meLower}
-                                    uploadClientDocument={uploadClientDocument}
+                                    attachClientDriveFile={attachClientDriveFile}
                                     removeClientDocument={removeClientDocument}
                                     canAttachFiles={
                                       !isCycleLocked(selectedClientObj, row.cycleStart) &&
@@ -2158,7 +2158,7 @@ const EmployeeKiosk = ({
                                       })
                                     }
                                     defaultAssigneeEmail={meLower}
-                                    uploadClientDocument={uploadClientDocument}
+                                    attachClientDriveFile={attachClientDriveFile}
                                     removeClientDocument={removeClientDocument}
                                     canAttachFiles={
                                       !isCycleLocked(selectedClientObj, row.cycleStart) &&

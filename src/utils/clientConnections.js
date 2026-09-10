@@ -24,6 +24,8 @@ export function normalizePinnedDocs(raw) {
 export function normalizeClientConnectionFields(client = {}) {
   return {
     googleDriveFolderUrl: String(client.googleDriveFolderUrl || '').trim(),
+    // Folder IDs are set by Netlify Drive APIs (ensure/link) — do not include here
+    // so client edit saves cannot wipe them.
     hubspotProfileUrl: String(client.hubspotProfileUrl || '').trim(),
     slackChannelUrl: String(client.slackChannelUrl || '').trim(),
     /** Optional incoming webhook for this client's Slack channel (Phase 3 posts). */

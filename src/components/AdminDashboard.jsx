@@ -95,6 +95,7 @@ import SlackNotificationsCard from './SlackNotificationsCard.jsx';
 import EmailDigestCard from './EmailDigestCard.jsx';
 import FxRatesCard from './FxRatesCard.jsx';
 import GmailConnectCard from './GmailConnectCard.jsx';
+import DriveConnectCard from './DriveConnectCard.jsx';
 import ClientEmailComposeModal, {
   replySubject,
 } from './ClientEmailComposeModal.jsx';
@@ -1046,7 +1047,7 @@ const AdminDashboard = ({
   updateClientTodosBatch,
   deleteClientTodoItem,
   setClientTodoItemDone,
-  uploadClientDocument,
+  attachClientDriveFile,
   removeClientDocument,
   todoCategoryKey,
   userTodos = [],
@@ -2941,7 +2942,7 @@ const AdminDashboard = ({
                         <div className={`text-[10px] font-bold ${styles.metaClass}`}>
                           Assigned: {assignees.join(', ') || 'Unassigned'}
                         </div>
-                        {rowClient && uploadClientDocument && (
+                        {rowClient && attachClientDriveFile && (
                           <TodoItemAttachments
                             item={row.item}
                             client={rowClient}
@@ -2951,7 +2952,7 @@ const AdminDashboard = ({
                               todoSaving ||
                               isCycleLocked(rowClient, row.cycleStart)
                             }
-                            onAttach={uploadClientDocument}
+                            onAttachDriveFile={attachClientDriveFile}
                             onRemove={removeClientDocument}
                             compact
                           />
@@ -4086,11 +4087,8 @@ const AdminDashboard = ({
                         <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
                           <ClientFilesPanel
                             client={c}
-                            documents={c.documents || []}
-                            onUpload={uploadClientDocument}
-                            onRemove={removeClientDocument}
-                            disabled={isCycleLocked(c, mStart) || !uploadClientDocument}
-                            canDelete={!isRestrictedStaff}
+                            disabled={isCycleLocked(c, mStart)}
+                            canShare={!isRestrictedStaff}
                           />
                         </div>
                         <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
@@ -5141,7 +5139,7 @@ const AdminDashboard = ({
                                           </button>
                                         )}
                                         </div>
-                                        {uploadClientDocument && (
+                                        {attachClientDriveFile && (
                                           <TodoItemAttachments
                                             item={item}
                                             client={c}
@@ -5150,7 +5148,7 @@ const AdminDashboard = ({
                                             disabled={
                                               todoSaving || isCycleLocked(c, cycleStart)
                                             }
-                                            onAttach={uploadClientDocument}
+                                            onAttachDriveFile={attachClientDriveFile}
                                             onRemove={removeClientDocument}
                                           />
                                         )}
@@ -6224,7 +6222,7 @@ const AdminDashboard = ({
                                                                 <Trash2 className="w-4 h-4" />
                                                               </button>
                                                               </div>
-                                                              {uploadClientDocument && (
+                                                              {attachClientDriveFile && (
                                                                 <TodoItemAttachments
                                                                   item={item}
                                                                   client={c}
@@ -6233,7 +6231,7 @@ const AdminDashboard = ({
                                                                   disabled={
                                                                     todoSaving || isCycleLocked(c, cycleStart)
                                                                   }
-                                                                  onAttach={uploadClientDocument}
+                                                                  onAttachDriveFile={attachClientDriveFile}
                                                                   onRemove={removeClientDocument}
                                                                 />
                                                               )}
@@ -7357,6 +7355,11 @@ const AdminDashboard = ({
           />
 
           <GmailConnectCard
+            canManage={canBilling}
+            onTabFocus={() => setAdminTab?.('tasks')}
+          />
+
+          <DriveConnectCard
             canManage={canBilling}
             onTabFocus={() => setAdminTab?.('tasks')}
           />
