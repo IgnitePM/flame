@@ -248,6 +248,19 @@ async function processMessageIds(accessToken, ids, ctx) {
   let skipped = 0;
   for (const id of ids) {
     try {
+      // Metadata first (cheap) — only pull full body when it matches a client.
+      const meta = await gmailGetMessage(accessToken, id, 'metadata');
+      const headers = meta?.payload?.headers || [];
+      const fromEmails = emailsFromHeader(headerValue(headers, 'From'));
+      const toEmails = [
+        ...emailsFromHeader(headerValue(headers, 'To')),
+        ...emailsFromHeader(headerValue(headers, 'Cc')),
+      ];
+      const match = matchClient(ctx.emailIndex, [...fromEmails, ...toEmails], ctx.selfEmail);
+      if (!match) {
+        skipped += 1;
+        continue;
+      }
       const message = await gmailGetMessage(accessToken, id, 'full');
       const result = await upsertGmailMessage({ message, ...ctx });
       if (result.upserted) upserted += 1;
@@ -279,8 +292,11 @@ export async function syncGmailConnection(uid) {
   let upserted = 0;
   let skipped = 0;
   let historyId = connection.historyId ? String(connection.historyId) : null;
+  const needsBackfill = !Number(connection.lastSyncAt || 0);
 
-  if (historyId) {
+  // Incremental history sync (skip on first run — OAuth stores a fresh historyId
+  // that would otherwise yield zero messages and never backfill).
+  if (historyId && !needsBackfill) {
     try {
       let pageToken = '';
       const ids = new Set();
@@ -299,16 +315,13 @@ export async function syncGmailConnection(uid) {
       upserted += result.upserted;
       skipped += result.skipped;
     } catch (err) {
-      // 404 = historyId too old — fall back to windowed list
-      if (err?.status === 404 || /history/i.test(err?.message || '')) {
-        historyId = null;
-      } else {
-        throw err;
-      }
+      console.warn('[gmailSync] history fallback:', err?.status, err?.message || err);
+      // Any history failure → windowed list
+      historyId = null;
     }
   }
 
-  if (!historyId) {
+  if (!historyId || needsBackfill) {
     const after = Math.floor((Date.now() - 30 * 24 * 60 * 60 * 1000) / 1000);
     let pageToken = '';
     const ids = [];
@@ -322,16 +335,20 @@ export async function syncGmailConnection(uid) {
         if (m.id) ids.push(m.id);
       }
       pageToken = list.nextPageToken || '';
-      // Cap initial sync volume
-      if (ids.length >= 200) break;
+      // Keep under Netlify function time limits
+      if (ids.length >= 80) break;
     } while (pageToken);
 
     const result = await processMessageIds(accessToken, ids, ctx);
     upserted += result.upserted;
     skipped += result.skipped;
 
-    const profile = await fetchGmailProfile(accessToken);
-    historyId = profile?.historyId ? String(profile.historyId) : historyId;
+    try {
+      const profile = await fetchGmailProfile(accessToken);
+      historyId = profile?.historyId ? String(profile.historyId) : historyId;
+    } catch (err) {
+      console.warn('[gmailSync] profile historyId:', err?.message || err);
+    }
   }
 
   const now = Date.now();

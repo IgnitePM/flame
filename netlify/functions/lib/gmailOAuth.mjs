@@ -281,8 +281,17 @@ export async function gmailSendMessage(accessToken, { raw, threadId = null }) {
 }
 
 export async function gmailGetMessage(accessToken, messageId, format = 'full') {
+  const params = new URLSearchParams({ format: String(format || 'full') });
+  if (format === 'metadata') {
+    params.append('metadataHeaders', 'From');
+    params.append('metadataHeaders', 'To');
+    params.append('metadataHeaders', 'Cc');
+    params.append('metadataHeaders', 'Subject');
+    params.append('metadataHeaders', 'Message-ID');
+    params.append('metadataHeaders', 'Date');
+  }
   const resp = await fetch(
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}?format=${format}`,
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}?${params}`,
     { headers: { Authorization: `Bearer ${accessToken}` } },
   );
   const data = await resp.json().catch(() => ({}));
