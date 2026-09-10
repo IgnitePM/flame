@@ -9,7 +9,7 @@ function activityTypeLabel(type) {
     note: 'Note',
     call: 'Call',
     meeting: 'Meeting',
-    email_sent: 'Email',
+    email_sent: 'Email sent',
     email_received: 'Email received',
     portal_invite: 'Portal invite',
     estimate_sent: 'Estimate sent',
@@ -17,6 +17,9 @@ function activityTypeLabel(type) {
     project_request: 'Project request',
     client_note_saved: 'Internal note',
     file_upload: 'File',
+    task_completed: 'Task completed',
+    tag: 'Tag',
+    meeting: 'Meeting',
   };
   return labels[type] || String(type || 'Activity');
 }

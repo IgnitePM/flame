@@ -2433,9 +2433,24 @@ export default function App() {
         todoCycles: cycles,
         ...teamAccessPatch,
       });
+      if (done) {
+        logClientActivity?.({
+          clientId: freshClient.id,
+          clientName: freshClient.name || '',
+          type: 'task_completed',
+          title: String(item.text || item.title || 'Task completed').trim() || 'Task completed',
+          body: categoryKey ? `Category: ${categoryKey}` : '',
+          source: 'system',
+          meta: {
+            todoId: item.id,
+            categoryKey,
+            cycleStart: Number(cycleStart) || null,
+          },
+        });
+      }
       return true;
     },
-    [resolveClient, newRecurringTodoRowId],
+    [resolveClient, newRecurringTodoRowId, logClientActivity],
   );
 
   // Batch update multiple to-do categories in a single Firestore write.

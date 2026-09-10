@@ -3,8 +3,8 @@
 export const CLIENT_ACTIVITY_TYPES = {
   note: { label: 'Note', group: 'notes' },
   call: { label: 'Call', group: 'notes' },
-  meeting: { label: 'Meeting', group: 'notes' },
-  email_sent: { label: 'Email', group: 'email' },
+  meeting: { label: 'Meeting', group: 'meetings' },
+  email_sent: { label: 'Email sent', group: 'email' },
   email_received: { label: 'Email received', group: 'email' },
   portal_invite: { label: 'Portal invite', group: 'portal' },
   estimate_sent: { label: 'Estimate sent', group: 'projects' },
@@ -12,18 +12,29 @@ export const CLIENT_ACTIVITY_TYPES = {
   project_request: { label: 'Project request', group: 'projects' },
   client_note_saved: { label: 'Internal note', group: 'notes' },
   file_upload: { label: 'File', group: 'files' },
+  task_completed: { label: 'Task completed', group: 'tasks' },
+  tag: { label: 'Tag', group: 'notes' },
 };
 
-export const MANUAL_ACTIVITY_TYPES = ['note', 'call', 'meeting'];
+export const MANUAL_ACTIVITY_TYPES = ['note', 'call', 'meeting', 'tag'];
 
 export const ACTIVITY_FILTER_GROUPS = [
   { id: 'all', label: 'All' },
   { id: 'notes', label: 'Notes' },
   { id: 'email', label: 'Email' },
+  { id: 'meetings', label: 'Meetings' },
+  { id: 'tasks', label: 'Tasks' },
   { id: 'portal', label: 'Portal' },
   { id: 'projects', label: 'Projects' },
   { id: 'files', label: 'Files' },
 ];
+
+/** Types that should stay collapsed in the feed until expanded. */
+export function activityIsCollapsible(type) {
+  return ['email_sent', 'email_received', 'meeting', 'client_note_saved'].includes(
+    String(type || ''),
+  );
+}
 
 export function activityTypeLabel(type) {
   return CLIENT_ACTIVITY_TYPES[type]?.label || String(type || 'Activity');

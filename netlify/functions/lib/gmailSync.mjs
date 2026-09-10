@@ -233,7 +233,7 @@ async function upsertGmailMessage({
         clientName: match.clientName || '',
         type: 'email_received',
         title: subject,
-        body: body.slice(0, 800),
+        body: body.slice(0, 280),
         actorEmail: fromEmails[0] || '',
         source: 'system',
         meta: {
@@ -654,10 +654,23 @@ export async function syncAllGmailConnections() {
     if (!conn.refreshToken && !conn.id) continue;
     try {
       const uid = conn.id || conn.uid;
-      // Continue an in-progress full history sync one step per schedule tick.
+    // Continue incomplete full syncs slowly (one step) so we don't burn Gmail quota.
+      // Prefer incremental/recent otherwise. Full sync is not exposed in the UI.
       if (conn.fullSync?.status === 'running') {
-        const r = await syncGmailFullHistoryStep(uid, { restart: false });
-        results.push({ uid, ...r });
+        // Mark abandoned full syncs idle after 24h without progress pressure
+        const updatedAt = Number(conn.fullSync.updatedAt || 0);
+        if (updatedAt && Date.now() - updatedAt > 24 * 60 * 60 * 1000) {
+          const { saveConnection } = await import('./gmailOAuth.mjs');
+          await saveConnection(uid, {
+            fullSync: { ...conn.fullSync, status: 'abandoned' },
+          });
+          const r = await syncGmailConnection(uid);
+          results.push({ uid, ...r });
+        } else {
+          // Skip full-sync continuation on schedule to avoid quota spikes
+          const r = await syncGmailConnection(uid);
+          results.push({ uid, ...r, fullSyncPaused: true });
+        }
       } else {
         const r = await syncGmailConnection(uid);
         results.push({ uid, ...r });

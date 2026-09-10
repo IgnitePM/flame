@@ -1,15 +1,99 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { ChevronDown, ChevronRight, ExternalLink, FileText } from 'lucide-react';
 import {
   ACTIVITY_FILTER_GROUPS,
   MANUAL_ACTIVITY_TYPES,
+  activityIsCollapsible,
   activityMatchesFilter,
   activityTypeLabel,
   formatActivityWhen,
 } from '../utils/clientActivity.js';
 import { db, collection, query, where, orderBy, onSnapshot, limit } from '../firebase';
 
+function ActivityRow({ activity: a }) {
+  const collapsible = activityIsCollapsible(a.type);
+  const hasBody = Boolean(String(a.body || '').trim());
+  const transcriptUrl =
+    a.meta?.transcriptUrl || a.meta?.googleDocUrl || a.meta?.docUrl || '';
+  const [open, setOpen] = useState(false);
+
+  const preview =
+    hasBody && !open && collapsible
+      ? `${String(a.body).replace(/\s+/g, ' ').trim().slice(0, 120)}${
+          String(a.body).trim().length > 120 ? '…' : ''
+        }`
+      : null;
+
+  return (
+    <li className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 space-y-1">
+      <div className="flex flex-wrap items-center gap-2 justify-between">
+        <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-slate-600">
+          {activityTypeLabel(a.type)}
+        </span>
+        <span className="text-[10px] font-bold text-slate-400">
+          {formatActivityWhen(a.at)}
+        </span>
+      </div>
+      <div className="flex items-start gap-1.5">
+        {collapsible && (hasBody || transcriptUrl) ? (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="mt-0.5 p-0.5 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-50"
+            aria-label={open ? 'Collapse' : 'Expand'}
+          >
+            {open ? (
+              <ChevronDown className="w-3.5 h-3.5" />
+            ) : (
+              <ChevronRight className="w-3.5 h-3.5" />
+            )}
+          </button>
+        ) : null}
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-bold text-slate-800">{a.title}</div>
+          {preview && !open ? (
+            <p className="text-xs font-medium text-slate-400 mt-0.5">{preview}</p>
+          ) : null}
+          {hasBody && (!collapsible || open) ? (
+            <p className="text-xs font-medium text-slate-500 whitespace-pre-wrap mt-1">
+              {a.body}
+            </p>
+          ) : null}
+          {open && transcriptUrl ? (
+            <a
+              href={transcriptUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 mt-2 text-[10px] font-black uppercase tracking-widest text-[#fd7414] hover:underline"
+            >
+              <FileText className="w-3 h-3" />
+              Meeting transcript
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          ) : null}
+          {!open && collapsible && transcriptUrl ? (
+            <button
+              type="button"
+              onClick={() => setOpen(true)}
+              className="inline-flex items-center gap-1 mt-1 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-[#fd7414]"
+            >
+              <FileText className="w-3 h-3" />
+              Transcript available
+            </button>
+          ) : null}
+        </div>
+      </div>
+      <div className="text-[10px] font-bold text-slate-400">
+        {a.actorEmail || 'system'}
+        {a.source === 'manual' ? ' · logged' : ''}
+      </div>
+    </li>
+  );
+}
+
 /**
  * HubSpot-style per-client activity feed (manual notes + system events).
+ * Emails / long notes stay collapsed until expanded.
  */
 export default function ClientActivityTimeline({
   client,
@@ -21,6 +105,7 @@ export default function ClientActivityTimeline({
   const [composeType, setComposeType] = useState('note');
   const [composeTitle, setComposeTitle] = useState('');
   const [composeBody, setComposeBody] = useState('');
+  const [composeTranscriptUrl, setComposeTranscriptUrl] = useState('');
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState('');
 
@@ -64,6 +149,7 @@ export default function ClientActivityTimeline({
     const title = composeTitle.trim() || activityTypeLabel(composeType);
     setSaving(true);
     try {
+      const transcript = String(composeTranscriptUrl || '').trim();
       await logClientActivity({
         clientId: client.id,
         clientName: client.name || '',
@@ -71,9 +157,14 @@ export default function ClientActivityTimeline({
         title,
         body: composeBody.trim(),
         source: 'manual',
+        meta:
+          composeType === 'meeting' && transcript
+            ? { transcriptUrl: transcript, googleDocUrl: transcript }
+            : {},
       });
       setComposeTitle('');
       setComposeBody('');
+      setComposeTranscriptUrl('');
     } catch (err) {
       window.alert(err?.message || 'Could not save activity.');
     } finally {
@@ -132,9 +223,24 @@ export default function ClientActivityTimeline({
           <textarea
             value={composeBody}
             onChange={(e) => setComposeBody(e.target.value)}
-            placeholder="Log a note, call, or meeting…"
+            placeholder={
+              composeType === 'tag'
+                ? 'Tag note (e.g. VIP, renewal risk)…'
+                : composeType === 'meeting'
+                  ? 'Meeting notes…'
+                  : 'Log a note, call, or meeting…'
+            }
             className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[72px]"
           />
+          {composeType === 'meeting' ? (
+            <input
+              type="url"
+              value={composeTranscriptUrl}
+              onChange={(e) => setComposeTranscriptUrl(e.target.value)}
+              placeholder="Transcript Google Doc URL (optional)"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-[#fd7414]"
+            />
+          ) : null}
           <div className="flex justify-end">
             <button
               type="button"
@@ -159,29 +265,7 @@ export default function ClientActivityTimeline({
       ) : (
         <ul className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
           {filtered.map((a) => (
-            <li
-              key={a.id}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 space-y-1"
-            >
-              <div className="flex flex-wrap items-center gap-2 justify-between">
-                <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-slate-600">
-                  {activityTypeLabel(a.type)}
-                </span>
-                <span className="text-[10px] font-bold text-slate-400">
-                  {formatActivityWhen(a.at)}
-                </span>
-              </div>
-              <div className="text-sm font-bold text-slate-800">{a.title}</div>
-              {a.body ? (
-                <p className="text-xs font-medium text-slate-500 whitespace-pre-wrap">
-                  {a.body}
-                </p>
-              ) : null}
-              <div className="text-[10px] font-bold text-slate-400">
-                {a.actorEmail || 'system'}
-                {a.source === 'manual' ? ' · logged' : ''}
-              </div>
-            </li>
+            <ActivityRow key={a.id} activity={a} />
           ))}
         </ul>
       )}
