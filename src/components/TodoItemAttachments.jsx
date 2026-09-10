@@ -31,6 +31,7 @@ export default function TodoItemAttachments({
   const [folderId, setFolderId] = React.useState('');
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState('');
+  const [pickerSearch, setPickerSearch] = React.useState('');
 
   const attachments = getTodoAttachments(item);
   const atLimit = attachments.length >= MAX_TODO_ATTACHMENTS;
@@ -45,6 +46,7 @@ export default function TodoItemAttachments({
     }
     setPickerOpen(true);
     setFolderId(clientFolderId);
+    setPickerSearch('');
     setError('');
     setLoading(true);
     try {
@@ -60,6 +62,7 @@ export default function TodoItemAttachments({
 
   const browseFolder = async (id) => {
     setFolderId(id);
+    setPickerSearch('');
     setLoading(true);
     setError('');
     try {
@@ -112,14 +115,22 @@ export default function TodoItemAttachments({
 
   if (!onAttachDriveFile && attachments.length === 0) return null;
 
-  const sorted = [...files].sort((a, b) => {
-    const af = isDriveFolder(a) ? 0 : 1;
-    const bf = isDriveFolder(b) ? 0 : 1;
-    if (af !== bf) return af - bf;
-    return String(a.name || '').localeCompare(String(b.name || ''), undefined, {
-      sensitivity: 'base',
+  const sorted = [...files]
+    .filter((f) => {
+      const q = pickerSearch.trim().toLowerCase();
+      if (!q) return true;
+      return String(f?.name || '')
+        .toLowerCase()
+        .includes(q);
+    })
+    .sort((a, b) => {
+      const af = isDriveFolder(a) ? 0 : 1;
+      const bf = isDriveFolder(b) ? 0 : 1;
+      if (af !== bf) return af - bf;
+      return String(a.name || '').localeCompare(String(b.name || ''), undefined, {
+        sensitivity: 'base',
+      });
     });
-  });
 
   return (
     <div
@@ -206,6 +217,13 @@ export default function TodoItemAttachments({
                   ← Client folder
                 </button>
               ) : null}
+              <input
+                type="search"
+                value={pickerSearch}
+                onChange={(e) => setPickerSearch(e.target.value)}
+                placeholder="Filter by name…"
+                className="flex-1 min-w-[140px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+              />
               <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-[9px] font-black uppercase tracking-widest text-slate-700">
                 <Upload className="h-3.5 w-3.5" />
                 Upload new
@@ -227,7 +245,11 @@ export default function TodoItemAttachments({
               ) : error ? (
                 <p className="text-xs text-red-600 font-bold">{error}</p>
               ) : sorted.length === 0 ? (
-                <p className="text-xs text-slate-400 italic">No files in this folder.</p>
+                <p className="text-xs text-slate-400 italic">
+                  {pickerSearch.trim()
+                    ? 'No files match this filter.'
+                    : 'No files in this folder.'}
+                </p>
               ) : (
                 sorted.map((file) => {
                   const folder = isDriveFolder(file);

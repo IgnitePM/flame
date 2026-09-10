@@ -272,7 +272,100 @@ async function driveJson(accessToken, url, { method = 'GET', body = null, header
 }
 
 const FILE_FIELDS =
-  'id,name,mimeType,size,modifiedTime,webViewLink,iconLink,parents,driveId,shortcutDetails';
+  'id,name,mimeType,size,modifiedTime,webViewLink,iconLink,thumbnailLink,parents,driveId,shortcutDetails';
+
+function escapeDriveQueryValue(value) {
+  return String(value || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'");
+}
+
+/**
+ * Walk parents until rootFolderId is found (or give up). Uses a shared cache map.
+ */
+async function fileIsUnderRoot(accessToken, file, rootFolderId, cache) {
+  const root = String(rootFolderId || '').trim();
+  if (!root || !file?.id) return false;
+  if (file.id === root) return true;
+
+  let parents = Array.isArray(file.parents) ? [...file.parents] : [];
+  const seen = new Set([file.id]);
+  let guard = 0;
+  while (parents.length && guard < 30) {
+    guard += 1;
+    if (parents.includes(root)) return true;
+    const next = [];
+    for (const pid of parents) {
+      if (!pid || seen.has(pid)) continue;
+      seen.add(pid);
+      if (pid === root) return true;
+      let meta = cache.get(pid);
+      if (!meta) {
+        try {
+          meta = await driveGetFile(accessToken, pid);
+          cache.set(pid, meta);
+        } catch {
+          cache.set(pid, null);
+          continue;
+        }
+      }
+      if (!meta) continue;
+      if (meta.id === root) return true;
+      const p = Array.isArray(meta.parents) ? meta.parents : [];
+      for (const x of p) {
+        if (x && !seen.has(x)) next.push(x);
+      }
+    }
+    parents = next;
+  }
+  return false;
+}
+
+/**
+ * Search Drive for files under a client folder tree (name + fullText), capped.
+ */
+export async function driveSearchInTree(
+  accessToken,
+  { rootFolderId, query, pageSize = 50 } = {},
+) {
+  const root = String(rootFolderId || '').trim();
+  const raw = String(query || '').trim();
+  if (!root) throw new Error('rootFolderId required');
+  if (!raw) return { files: [] };
+
+  const escaped = escapeDriveQueryValue(raw);
+  const q =
+    `trashed = false and (name contains '${escaped}' or fullText contains '${escaped}')`;
+  const params = new URLSearchParams({
+    q,
+    corpora: 'allDrives',
+    includeItemsFromAllDrives: 'true',
+    supportsAllDrives: 'true',
+    pageSize: String(Math.min(100, Math.max(pageSize * 2, 40))),
+    fields: `nextPageToken,files(${FILE_FIELDS})`,
+  });
+
+  const data = await driveJson(
+    accessToken,
+    `https://www.googleapis.com/drive/v3/files?${params}`,
+  );
+  const candidates = Array.isArray(data.files) ? data.files : [];
+  const cache = new Map();
+  const matched = [];
+  for (const file of candidates) {
+    if (matched.length >= pageSize) break;
+    // Direct children of root are always in-tree; shortcut for speed.
+    const parents = Array.isArray(file.parents) ? file.parents : [];
+    if (parents.includes(root) || file.id === root) {
+      matched.push(file);
+      continue;
+    }
+    if (await fileIsUnderRoot(accessToken, file, root, cache)) {
+      matched.push(file);
+    }
+  }
+  return { files: matched };
+}
 
 export async function driveGetFile(accessToken, fileId) {
   const id = String(fileId || '').trim();

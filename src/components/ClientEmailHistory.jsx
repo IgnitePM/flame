@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Mail, Reply } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Mail, Reply, Search } from 'lucide-react';
 import {
   db,
   collection,
@@ -26,6 +26,16 @@ function formatWhen(ms) {
   }
 }
 
+function messageMatchesSearch(m, raw) {
+  const q = String(raw || '').trim().toLowerCase();
+  if (!q) return true;
+  const to = Array.isArray(m?.to) ? m.to.join(' ') : String(m?.to || '');
+  const hay = [m?.subject, m?.from, to, m?.body, m?.actorEmail]
+    .map((v) => String(v || '').toLowerCase())
+    .join(' ');
+  return hay.includes(q);
+}
+
 /**
  * CRM email history for a client or lead (outbound sends + synced inbound).
  * Prefer `entity` + `entityKind`; legacy `client` prop still works.
@@ -43,6 +53,7 @@ export default function ClientEmailHistory({
   const [messages, setMessages] = useState([]);
   const [expandedId, setExpandedId] = useState(null);
   const [loadError, setLoadError] = useState('');
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     if (!resolved?.id) {
@@ -75,13 +86,22 @@ export default function ClientEmailHistory({
     return () => unsub();
   }, [resolved?.id, kind]);
 
+  const filtered = useMemo(
+    () => messages.filter((m) => messageMatchesSearch(m, search)),
+    [messages, search],
+  );
+
   if (!resolved?.id) return null;
 
   return (
     <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-          Emails ({messages.length})
+          Emails ({filtered.length}
+          {search.trim() && filtered.length !== messages.length
+            ? ` of ${messages.length}`
+            : ''}
+          )
         </h5>
         {canCompose && onCompose && (
           <button
@@ -95,17 +115,31 @@ export default function ClientEmailHistory({
         )}
       </div>
 
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search subject, from, to, body…"
+          className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+        />
+      </div>
+
       {loadError ? (
         <p className="text-xs font-bold text-amber-700">{loadError}</p>
       ) : null}
 
       {!loadError && messages.length === 0 ? (
         <p className="text-xs italic text-slate-400">
-          No emails yet. Compose from Ignite or sync Gmail (matches CRM emails and website domain).
+          No emails yet. Compose from Ignite or sync Gmail (matches CRM emails and website
+          domain).
         </p>
+      ) : !loadError && filtered.length === 0 ? (
+        <p className="text-xs italic text-slate-400">No emails match your search.</p>
       ) : (
         <ul className="space-y-2 max-h-[360px] overflow-y-auto">
-          {messages.map((m) => {
+          {filtered.map((m) => {
             const open = expandedId === m.id;
             const inbound = m.direction === 'inbound';
             return (

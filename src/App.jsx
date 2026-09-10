@@ -206,7 +206,15 @@ function RedirectStaffWorkspaceClientToAdmin() {
 }
 
 // Use `custom_projects` (not `projects`) for ?tab= to avoid clashes with routers/proxies treating "projects" specially.
-const CLIENT_PAGE_TABS = ['summary', 'tasks', 'custom_projects', 'timesheets'];
+const CLIENT_PAGE_TABS = [
+  'summary',
+  'emails',
+  'files',
+  'cycle_activity',
+  'tasks',
+  'custom_projects',
+  'timesheets',
+];
 
 /** `<input type="datetime-local">` uses local wall time — never use `toISOString().slice(0,16)` (that is UTC). */
 function formatMsForDatetimeLocal(ms) {

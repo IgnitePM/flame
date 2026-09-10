@@ -120,6 +120,8 @@ function parseClientSubTabFromSearch(search) {
   if (t === 'tasks') return 'tasks';
   if (t === 'timesheets') return 'timesheets';
   if (t === 'cycle_activity' || t === 'activity') return 'cycle_activity';
+  if (t === 'emails' || t === 'email') return 'emails';
+  if (t === 'files' || t === 'drive') return 'files';
   return 'summary';
 }
 
@@ -3675,6 +3677,10 @@ const AdminDashboard = ({
               const isClientPage = !!clientId;
               const showClientSummary =
                 !isClientPage || clientDetailSubTab === 'summary';
+              const showClientEmails =
+                isClientPage && clientDetailSubTab === 'emails';
+              const showClientFiles =
+                isClientPage && clientDetailSubTab === 'files';
               const showClientTasks =
                 !isClientPage || clientDetailSubTab === 'tasks';
               const showClientProjectsTab =
@@ -3964,6 +3970,8 @@ const AdminDashboard = ({
                       >
                         {[
                           { id: 'summary', label: 'Summary' },
+                          { id: 'emails', label: 'Emails' },
+                          { id: 'files', label: 'Files' },
                           { id: 'cycle_activity', label: 'Cycle activity' },
                           { id: 'tasks', label: 'Tasks' },
                           { id: 'custom_projects', label: 'Custom projects' },
@@ -4051,46 +4059,6 @@ const AdminDashboard = ({
                           logClientActivity={logClientActivity}
                           canCompose={!isRestrictedStaff}
                         />
-                        {canBilling && (
-                          <ClientEmailHistory
-                            client={c}
-                            canCompose
-                            onCompose={(client) => {
-                              setEmailComposeDraft(null);
-                              setEmailComposeClient(client);
-                            }}
-                            onReply={(msg) => {
-                              const inbound = msg.direction === 'inbound';
-                              const replyTo = inbound
-                                ? [String(msg.from || msg.actorEmail || '')
-                                    .trim()
-                                    .toLowerCase()].filter((e) => e.includes('@'))
-                                : Array.isArray(msg.to)
-                                  ? msg.to
-                                  : [];
-                              setEmailComposeDraft({
-                                initialSubject: replySubject(msg.subject),
-                                initialTo: replyTo,
-                                initialBody: `\n\n---\nOn ${new Date(
-                                  Number(msg.sentAt || 0),
-                                ).toLocaleString()}, ${
-                                  inbound
-                                    ? msg.from || msg.actorEmail || 'client'
-                                    : msg.actorEmail || 'staff'
-                                } wrote:\n${String(msg.body || '').slice(0, 2000)}`,
-                                inReplyToId: msg.id,
-                              });
-                              setEmailComposeClient(c);
-                            }}
-                          />
-                        )}
-                        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
-                          <ClientFilesPanel
-                            client={c}
-                            disabled={isCycleLocked(c, mStart)}
-                            canShare={!isRestrictedStaff}
-                          />
-                        </div>
                         <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
                           <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
                             Client notes
@@ -4581,6 +4549,61 @@ const AdminDashboard = ({
                     </div>
                       </div>
                     )}
+
+                    {showClientEmails && (
+                      <div className="space-y-4">
+                        {canBilling ? (
+                          <ClientEmailHistory
+                            client={c}
+                            canCompose
+                            onCompose={(client) => {
+                              setEmailComposeDraft(null);
+                              setEmailComposeClient(client);
+                            }}
+                            onReply={(msg) => {
+                              const inbound = msg.direction === 'inbound';
+                              const replyTo = inbound
+                                ? [
+                                    String(msg.from || msg.actorEmail || '')
+                                      .trim()
+                                      .toLowerCase(),
+                                  ].filter((e) => e.includes('@'))
+                                : Array.isArray(msg.to)
+                                  ? msg.to
+                                  : [];
+                              setEmailComposeDraft({
+                                initialSubject: replySubject(msg.subject),
+                                initialTo: replyTo,
+                                initialBody: `\n\n---\nOn ${new Date(
+                                  Number(msg.sentAt || 0),
+                                ).toLocaleString()}, ${
+                                  inbound
+                                    ? msg.from || msg.actorEmail || 'client'
+                                    : msg.actorEmail || 'staff'
+                                } wrote:\n${String(msg.body || '').slice(0, 2000)}`,
+                                inReplyToId: msg.id,
+                              });
+                              setEmailComposeClient(c);
+                            }}
+                          />
+                        ) : (
+                          <p className="text-sm font-bold text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                            Email history is available to billing and admin roles.
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {showClientFiles && (
+                      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                        <ClientFilesPanel
+                          client={c}
+                          disabled={isCycleLocked(c, mStart)}
+                          canShare={!isRestrictedStaff}
+                        />
+                      </div>
+                    )}
+
                     {isClientPage && showClientCycleActivity && (
                       <ClientCycleActivityPanel
                         client={c}

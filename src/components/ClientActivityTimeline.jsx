@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, ExternalLink, FileText } from 'lucide-react';
+import { ChevronDown, ChevronRight, ExternalLink, FileText, Search } from 'lucide-react';
 import {
   ACTIVITY_FILTER_GROUPS,
   MANUAL_ACTIVITY_TYPES,
@@ -108,6 +108,7 @@ export default function ClientActivityTimeline({
   const logger = logActivity || logClientActivity;
   const [activities, setActivities] = useState([]);
   const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
   const [composeType, setComposeType] = useState('note');
   const [composeTitle, setComposeTitle] = useState('');
   const [composeBody, setComposeBody] = useState('');
@@ -146,10 +147,22 @@ export default function ClientActivityTimeline({
     return () => unsub();
   }, [resolved?.id, kind]);
 
-  const filtered = useMemo(
-    () => activities.filter((a) => activityMatchesFilter(a, filter)),
-    [activities, filter],
-  );
+  const filtered = useMemo(() => {
+    const q = String(search || '').trim().toLowerCase();
+    return activities.filter((a) => {
+      if (!activityMatchesFilter(a, filter)) return false;
+      if (!q) return true;
+      const hay = [
+        a?.title,
+        a?.body,
+        activityTypeLabel(a?.type),
+        a?.actorEmail,
+      ]
+        .map((v) => String(v || '').toLowerCase())
+        .join(' ');
+      return hay.includes(q);
+    });
+  }, [activities, filter, search]);
 
   const submit = async () => {
     if (!resolved?.id || !logger || saving) return;
@@ -218,6 +231,17 @@ export default function ClientActivityTimeline({
         </div>
       </div>
 
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search activity title, notes, type…"
+          className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+        />
+      </div>
+
       {canCompose && logger && (
         <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
           <div className="grid gap-2 sm:grid-cols-[140px_1fr]">
@@ -280,7 +304,9 @@ export default function ClientActivityTimeline({
 
       {filtered.length === 0 && !loadError ? (
         <p className="text-xs italic text-slate-400">
-          No activity yet — log a call or send an email.
+          {search.trim()
+            ? 'No activity matches your search.'
+            : 'No activity yet — log a call or send an email.'}
         </p>
       ) : (
         <ul className="space-y-2 max-h-[420px] overflow-y-auto pr-1">

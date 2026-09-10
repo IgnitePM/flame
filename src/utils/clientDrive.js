@@ -91,4 +91,14 @@ export async function shareClientDriveFolder(client, emails, role = 'reader') {
   return data;
 }
 
+export async function searchClientDriveFolder(folderId, query) {
+  const resp = await authedFetch('/.netlify/functions/drive-search', {
+    folderId,
+    query,
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(data.error || 'Drive search failed.');
+  return data;
+}
+
 export { MAX_CLIENT_FILE_BYTES, FOLDER_MIME };
