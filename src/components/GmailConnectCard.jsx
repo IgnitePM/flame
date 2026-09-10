@@ -124,13 +124,21 @@ export default function GmailConnectCard({ canManage = false, onTabFocus }) {
       if (!resp.ok) {
         throw new Error(
           data.error ||
-            `Sync failed (HTTP ${resp.status}). Check Netlify function logs for sync-gmail-clients.`,
+            `Sync failed (HTTP ${resp.status}). Check Netlify function logs for sync-gmail-clients-http.`,
         );
       }
-      setBanner(
-        `Synced — ${data.upserted || 0} new message${data.upserted === 1 ? '' : 's'} matched to clients` +
-          (data.skipped ? ` (${data.skipped} skipped).` : '.'),
-      );
+      if (data.upserted > 0) {
+        setBanner(
+          `Synced — ${data.upserted} new message${data.upserted === 1 ? '' : 's'} matched to clients` +
+            (data.scanned ? ` (scanned ${data.scanned}).` : '.'),
+        );
+      } else {
+        setBanner(
+          data.hint ||
+            `Synced — 0 matched` +
+              (data.scanned != null ? ` after scanning ${data.scanned} message(s).` : '.'),
+        );
+      }
       await refresh();
     } catch (err) {
       setBanner(err?.message || String(err));

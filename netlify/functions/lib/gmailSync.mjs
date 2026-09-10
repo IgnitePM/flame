@@ -246,7 +246,9 @@ async function upsertGmailMessage({
 async function processMessageIds(accessToken, ids, ctx) {
   let upserted = 0;
   let skipped = 0;
+  let scanned = 0;
   for (const id of ids) {
+    scanned += 1;
     try {
       // Metadata first (cheap) — only pull full body when it matches a client.
       const meta = await gmailGetMessage(accessToken, id, 'metadata');
@@ -270,13 +272,16 @@ async function processMessageIds(accessToken, ids, ctx) {
       skipped += 1;
     }
   }
-  return { upserted, skipped };
+  return { upserted, skipped, scanned };
 }
 
 /**
  * Sync one staff Gmail connection into clientEmailMessages.
+ * @param {string} uid
+ * @param {{ forceBackfill?: boolean }} [opts]
  */
-export async function syncGmailConnection(uid) {
+export async function syncGmailConnection(uid, opts = {}) {
+  const forceBackfill = Boolean(opts.forceBackfill);
   const connection = await loadConnection(uid);
   if (!connection?.refreshToken) {
     return { ok: false, error: 'Gmail is not connected.' };
@@ -284,6 +289,10 @@ export async function syncGmailConnection(uid) {
 
   const db = await getDigestDb();
   const emailIndex = await buildClientEmailIndex(db);
+  const indexStats = {
+    clientEmails: emailIndex.byEmail.size,
+    clientDomains: emailIndex.byDomain.size,
+  };
   const accessToken = await getValidAccessToken(connection);
   const selfEmail = String(connection.gmailEmail || '').toLowerCase();
   const staffEmail = String(connection.staffEmail || '').toLowerCase();
@@ -291,11 +300,12 @@ export async function syncGmailConnection(uid) {
 
   let upserted = 0;
   let skipped = 0;
+  let scanned = 0;
+  let mode = 'incremental';
   let historyId = connection.historyId ? String(connection.historyId) : null;
-  const needsBackfill = !Number(connection.lastSyncAt || 0);
+  const needsBackfill = forceBackfill || !Number(connection.lastSyncAt || 0);
 
-  // Incremental history sync (skip on first run — OAuth stores a fresh historyId
-  // that would otherwise yield zero messages and never backfill).
+  // Incremental history sync (skip when forcing / first backfill).
   if (historyId && !needsBackfill) {
     try {
       let pageToken = '';
@@ -314,14 +324,16 @@ export async function syncGmailConnection(uid) {
       const result = await processMessageIds(accessToken, [...ids], ctx);
       upserted += result.upserted;
       skipped += result.skipped;
+      scanned += result.scanned;
+      mode = 'incremental';
     } catch (err) {
       console.warn('[gmailSync] history fallback:', err?.status, err?.message || err);
-      // Any history failure → windowed list
       historyId = null;
     }
   }
 
   if (!historyId || needsBackfill) {
+    mode = 'backfill_30d';
     const after = Math.floor((Date.now() - 30 * 24 * 60 * 60 * 1000) / 1000);
     let pageToken = '';
     const ids = [];
@@ -335,13 +347,13 @@ export async function syncGmailConnection(uid) {
         if (m.id) ids.push(m.id);
       }
       pageToken = list.nextPageToken || '';
-      // Keep under Netlify function time limits
       if (ids.length >= 80) break;
     } while (pageToken);
 
     const result = await processMessageIds(accessToken, ids, ctx);
     upserted += result.upserted;
     skipped += result.skipped;
+    scanned += result.scanned;
 
     try {
       const profile = await fetchGmailProfile(accessToken);
@@ -358,7 +370,29 @@ export async function syncGmailConnection(uid) {
     updatedAt: now,
   });
 
-  return { ok: true, upserted, skipped, lastSyncAt: now, gmailEmail: selfEmail };
+  let hint = '';
+  if (upserted === 0) {
+    if (indexStats.clientEmails === 0 && indexStats.clientDomains === 0) {
+      hint =
+        'No client emails or website domains in CRM yet — add a website or contact email, then Sync now again.';
+    } else if (scanned === 0) {
+      hint = 'No Gmail messages found in the sync window.';
+    } else {
+      hint = `Scanned ${scanned} message(s) against ${indexStats.clientEmails} CRM email(s) and ${indexStats.clientDomains} domain(s); none matched.`;
+    }
+  }
+
+  return {
+    ok: true,
+    upserted,
+    skipped,
+    scanned,
+    mode,
+    indexStats,
+    hint,
+    lastSyncAt: now,
+    gmailEmail: selfEmail,
+  };
 }
 
 export async function syncAllGmailConnections() {

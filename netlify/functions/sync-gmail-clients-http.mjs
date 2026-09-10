@@ -26,7 +26,7 @@ export default async (req) => {
   }
 
   try {
-    const result = await syncGmailConnection(caller.uid);
+    const result = await syncGmailConnection(caller.uid, { forceBackfill: true });
     if (!result.ok) {
       return new Response(JSON.stringify({ error: result.error || 'Sync failed.' }), {
         status: 400,
