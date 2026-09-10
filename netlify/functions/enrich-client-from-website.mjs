@@ -55,15 +55,52 @@ function extractFirstJsonObject(text) {
 }
 
 function collectCandidateText(data) {
-  const parts = data?.candidates?.[0]?.content?.parts;
-  if (Array.isArray(parts) && parts.length) {
-    return parts
-      .map((p) => (typeof p === 'string' ? p : typeof p?.text === 'string' ? p.text : ''))
-      .filter(Boolean)
-      .join('\n')
-      .trim();
+  const candidates = Array.isArray(data?.candidates) ? data.candidates : [];
+  const bits = [];
+  for (const cand of candidates) {
+    const parts = cand?.content?.parts;
+    if (!Array.isArray(parts)) continue;
+    for (const p of parts) {
+      if (typeof p === 'string' && p.trim()) bits.push(p.trim());
+      else if (typeof p?.text === 'string' && p.text.trim()) bits.push(p.text.trim());
+    }
   }
-  return '';
+  return bits.join('\n').trim();
+}
+
+async function callGeminiJson({ apiKey, model, prompt, useSearch = false }) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    model,
+  )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  // Google Search grounding often breaks responseMimeType=application/json
+  // (empty/non-JSON candidates). Prefer plain JSON mode; optional search without mime.
+  const generationConfig = useSearch
+    ? {
+        temperature: 0.2,
+        topP: 0.9,
+        maxOutputTokens: 4096,
+      }
+    : {
+        temperature: 0.2,
+        topP: 0.9,
+        maxOutputTokens: 4096,
+        responseMimeType: 'application/json',
+      };
+
+  const body = {
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig,
+  };
+  if (useSearch) body.tools = [{ google_search: {} }];
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await resp.json().catch(() => ({}));
+  return { resp, data };
 }
 
 function normalizeWebsite(raw) {
@@ -237,22 +274,6 @@ Homepage text snippet (${site.ok ? 'fetched' : 'fetch failed'}):
 ${site.snippet || '(unavailable — enrich from public knowledge of this domain only; leave unknowns empty)'}
 `.trim();
 
-  const requestBody = {
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    generationConfig: {
-      temperature: 0.2,
-      topP: 0.9,
-      maxOutputTokens: 2048,
-      responseMimeType: 'application/json',
-    },
-  };
-
-  // Prefer models that support Google Search grounding when available.
-  const withSearch = {
-    ...requestBody,
-    tools: [{ google_search: {} }],
-  };
-
   const preferredModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
   const modelCandidates = Array.from(
     new Set([
@@ -265,68 +286,76 @@ ${site.snippet || '(unavailable — enrich from public knowledge of this domain 
     ]),
   );
 
+  // 1) JSON mode without search (reliable parse)
+  // 2) Same models with Google Search but no JSON mime (then extract object)
+  const attempts = [
+    { useSearch: false },
+    { useSearch: true },
+  ];
+
   let data = null;
-  let resp = null;
   let lastError = null;
   let usedSearch = false;
+  let text = '';
+  let parsed = null;
+  let finishReason = '';
 
-  for (const model of modelCandidates) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-      model,
-    )}:generateContent?key=${encodeURIComponent(apiKey)}`;
-
-    // Try with Google Search grounding first; fall back without tools.
-    for (const bodyVariant of [withSearch, requestBody]) {
-      resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bodyVariant),
+  outer: for (const model of modelCandidates) {
+    for (const attempt of attempts) {
+      const { resp, data: payload } = await callGeminiJson({
+        apiKey,
+        model,
+        prompt,
+        useSearch: attempt.useSearch,
       });
-      data = await resp.json().catch(() => ({}));
-      if (resp.ok) {
-        usedSearch = bodyVariant === withSearch;
-        lastError = null;
-        break;
+      data = payload;
+      if (!resp.ok) {
+        lastError = data?.error?.message || data?.message || 'Gemini request failed';
+        const msg = String(lastError || '').toLowerCase();
+        const toolIssue =
+          attempt.useSearch &&
+          (msg.includes('tool') ||
+            msg.includes('google_search') ||
+            msg.includes('not supported') ||
+            msg.includes('unknown'));
+        if (toolIssue) continue;
+        const shouldTryNextModel =
+          msg.includes('not found') ||
+          msg.includes('not supported') ||
+          msg.includes('unsupported') ||
+          msg.includes('no longer available') ||
+          msg.includes('deprecated');
+        if (shouldTryNextModel) break; // next model
+        // Hard API error — stop
+        return new Response(JSON.stringify({ error: lastError }), {
+          status: resp.status || 500,
+          headers: { 'Content-Type': 'application/json' },
+        });
       }
-      lastError = data?.error?.message || data?.message || 'Gemini request failed';
-      const msg = String(lastError || '').toLowerCase();
-      const toolIssue =
-        msg.includes('tool') ||
-        msg.includes('google_search') ||
-        msg.includes('not supported') ||
-        msg.includes('unknown');
-      if (bodyVariant === withSearch && toolIssue) continue;
-      break;
-    }
-    if (resp?.ok) break;
 
-    const msg = String(lastError || '').toLowerCase();
-    const shouldTryNext =
-      msg.includes('not found') ||
-      msg.includes('not supported') ||
-      msg.includes('unsupported') ||
-      msg.includes('no longer available') ||
-      msg.includes('deprecated');
-    if (!shouldTryNext) {
-      return new Response(JSON.stringify({ error: lastError }), {
-        status: resp?.status || 500,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      usedSearch = attempt.useSearch;
+      finishReason = String(data?.candidates?.[0]?.finishReason || '');
+      text = collectCandidateText(data);
+      parsed = text ? extractFirstJsonObject(text) : null;
+      if (parsed && typeof parsed === 'object') break outer;
+      lastError = text
+        ? `Model returned non-JSON (finishReason=${finishReason || 'unknown'}).`
+        : `Empty model response (finishReason=${finishReason || 'unknown'}).`;
     }
   }
 
-  if (!resp?.ok) {
-    return new Response(
-      JSON.stringify({ error: lastError || 'No compatible Gemini model was available.' }),
-      { status: resp?.status || 500, headers: { 'Content-Type': 'application/json' } },
-    );
-  }
-
-  const text = collectCandidateText(data);
-  const parsed = text ? extractFirstJsonObject(text) : null;
   if (!parsed) {
+    console.error('[enrich-client-from-website] parse failed', {
+      finishReason,
+      textPreview: String(text || '').slice(0, 400),
+      lastError,
+    });
     return new Response(
-      JSON.stringify({ error: 'Could not parse enrichment result. Try again.' }),
+      JSON.stringify({
+        error:
+          lastError ||
+          'Could not parse enrichment result. Try again, or check GEMINI_API_KEY / model access.',
+      }),
       { status: 502, headers: { 'Content-Type': 'application/json' } },
     );
   }
