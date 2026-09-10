@@ -167,3 +167,110 @@ exports.longShiftSweep = onSchedule(
     }
   },
 );
+
+/**
+ * Auto clock-out abandoned shifts using lastActivityAt heartbeats from the app.
+ * Runs even when the browser is closed — the client failsafe cannot.
+ * Uses settings/policy idleFailsafeMinutes (+ confirm seconds) with a floor of 2h.
+ */
+exports.idleShiftSweep = onSchedule(
+  { schedule: 'every 5 minutes', timeZone: 'America/Toronto' },
+  async () => {
+    const policySnap = await db.doc('settings/policy').get();
+    const policy = policySnap.exists ? policySnap.data() : {};
+    const failsafeMin = Number(policy.idleFailsafeMinutes);
+    if (!Number.isFinite(failsafeMin) || failsafeMin <= 0) {
+      logger.info('idleShiftSweep: failsafe disabled (idleFailsafeMinutes <= 0)');
+      return;
+    }
+    const confirmSec = Math.max(10, Number(policy.idleFailsafeConfirmSeconds) || 300);
+    // Require at least the configured idle window + confirm, with a small grace
+    // so a missed heartbeat (tab backgrounded) does not cut people off early.
+    const maxIdleMs = failsafeMin * 60 * 1000 + confirmSec * 1000 + 3 * 60 * 1000;
+    const now = Date.now();
+    const IDLE_TAG =
+      '[Clock stopped automatically: session was idle — Ignite PM server]';
+
+    const snap = await db
+      .collection('timesheets')
+      .where('status', 'in', ['active', 'break'])
+      .get();
+
+    let stopped = 0;
+    for (const docSnap of snap.docs) {
+      const shift = docSnap.data();
+      const lastActivity = Number(
+        shift.lastActivityAt ||
+          shift.lastResumeTime ||
+          shift.clockInTime ||
+          0,
+      );
+      if (!lastActivity || now - lastActivity < maxIdleMs) continue;
+
+      const endTime = Math.min(lastActivity + maxIdleMs - 3 * 60 * 1000, now);
+      try {
+        const tasksSnap = await db
+          .collection('taskLogs')
+          .where('shiftId', '==', docSnap.id)
+          .where('status', '==', 'active')
+          .get();
+
+        for (const taskDoc of tasksSnap.docs) {
+          const task = taskDoc.data();
+          const segment = Math.max(
+            0,
+            endTime - Number(task.lastResumeTime || task.clockInTime || endTime),
+          );
+          const newTotal = Number(task.totalSavedDuration || 0) + segment;
+          const base = String(task.notes || '').trim();
+          await taskDoc.ref.update({
+            clockOutTime: endTime,
+            status: 'completed',
+            totalSavedDuration: newTotal,
+            duration: newTotal,
+            notes: base ? `${base}\n\n${IDLE_TAG}` : IDLE_TAG,
+            autoStoppedReason: 'idle_timeout',
+            autoStoppedAt: endTime,
+            autoStoppedSource: 'server',
+          });
+        }
+
+        let newTotal = Number(shift.totalSavedDuration || 0);
+        if (shift.status === 'active') {
+          newTotal += Math.max(
+            0,
+            endTime - Number(shift.lastResumeTime || shift.clockInTime || endTime),
+          );
+        }
+        await docSnap.ref.update({
+          clockOutTime: endTime,
+          status: 'completed',
+          totalSavedDuration: newTotal,
+          duration: newTotal,
+          autoStoppedReason: 'idle_timeout',
+          autoStoppedAt: endTime,
+          autoStoppedSource: 'server',
+          shiftNote: IDLE_TAG,
+        });
+        stopped += 1;
+        logger.info(
+          `idleShiftSweep: stopped shift ${docSnap.id} for ${shift.employeeName || shift.userId}`,
+        );
+      } catch (err) {
+        logger.error(`idleShiftSweep failed for ${docSnap.id}`, err);
+      }
+    }
+
+    if (stopped) {
+      const cfg = await getNotifyConfig();
+      if (cfg.notifyIdleClockOut && cfg.slackWebhookUrl) {
+        await postToSlack(
+          cfg.slackWebhookUrl,
+          `:warning: *Server auto clock-out* — stopped ${stopped} abandoned shift${
+            stopped === 1 ? '' : 's'
+          } with no activity heartbeat (browser likely closed). Verify in Timesheets.`,
+        );
+      }
+    }
+  },
+);

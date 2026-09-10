@@ -7307,7 +7307,7 @@ const AdminDashboard = ({
                   Idle failsafe — prompt after no activity (minutes, 0 = off)
                 </label>
                 <p className="text-xs text-slate-500 font-medium">
-                  After this many minutes without keyboard, mouse, or scroll, the kiosk asks if you are still there. If you do not respond in time, your shift and any running task end automatically and the timesheet is annotated.
+                  After this many minutes without keyboard, mouse, or scroll anywhere in the app, staff are asked if they are still working. If they do not respond in time, the shift and any running task end automatically (hours freeze at that moment). A server check also stops abandoned shifts when the browser was closed.
                 </p>
                 <input
                   type="number"
@@ -7325,15 +7325,18 @@ const AdminDashboard = ({
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
                   Idle failsafe — seconds to respond
                 </label>
+                <p className="text-xs text-slate-500 font-medium">
+                  Countdown on the &quot;Still working?&quot; popup. Default 300 (5 minutes) so people have time to notice before hours are frozen.
+                </p>
                 <input
                   type="number"
                   min="10"
-                  value={policy?.idleFailsafeConfirmSeconds ?? 120}
+                  value={policy?.idleFailsafeConfirmSeconds ?? 300}
                   onChange={(e) =>
                     updatePolicy?.({
                       idleFailsafeConfirmSeconds: Math.max(
                         10,
-                        Number(e.target.value) || 120,
+                        Number(e.target.value) || 300,
                       ),
                     })
                   }

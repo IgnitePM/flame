@@ -110,6 +110,7 @@ import { buildClientActivityDoc } from './utils/clientActivity.js';
 import { normalizeClientConnectionFields } from './utils/clientConnections.js';
 import { normalizeCompanyProfileFields } from './utils/clientCompanyProfile.js';
 import ClientEnrichPreviewModal from './components/ClientEnrichPreviewModal.jsx';
+import IdleFailsafeGuard from './components/IdleFailsafeGuard.jsx';
 import {
   filterClientsForTeamMember,
   teamMemberCanViewClient,
@@ -448,6 +449,8 @@ export default function App() {
     activeTaskNotes: '',
   });
   const idleAutoClockOutLockRef = useRef(false);
+  const [idleClockOutNotice, setIdleClockOutNotice] = useState(null);
+  const seenIdleNoticeShiftIdsRef = useRef(new Set());
 
   // Client Portal State
   const [portalOffset, setPortalOffset] = useState(0);
@@ -460,9 +463,10 @@ export default function App() {
   const POLICY_DEFAULTS = {
     requireClockOutNote: false,
     idleReminderMinutes: 0,
-    // Idle failsafe defaults ON: prompt after 2 hours of no kiosk activity.
+    // Idle failsafe defaults ON: prompt after 2 hours of no activity.
     idleFailsafeMinutes: 120,
-    idleFailsafeConfirmSeconds: 120,
+    // Give enough time to notice the prompt (was too easy to miss at 2m).
+    idleFailsafeConfirmSeconds: 300,
     // Payroll (Wagepoint) export settings.
     payrollFrequency: 'biweekly',
     payrollAnchorDate: '',
@@ -1389,6 +1393,7 @@ export default function App() {
       employeeName: user.displayName || user.email,
       clockInTime: Date.now(),
       lastResumeTime: Date.now(),
+      lastActivityAt: Date.now(),
       totalSavedDuration: 0,
       status: 'active',
       userId: user.uid,
@@ -1666,13 +1671,13 @@ export default function App() {
     [taskLogs, timesheets, user?.email, logAudit],
   );
 
-  const handleIdleAutoClockOut = useCallback(async ({ endTime: endTimeArg } = {}) => {
+  const handleIdleAutoClockOut = useCallback(async ({ endTime: endTimeArg, source = 'confirm_expired' } = {}) => {
     if (idleAutoClockOutLockRef.current) return;
     idleAutoClockOutLockRef.current = true;
     const { activeTask: task, activeShift: shift, activeTaskNotes: notes } =
       idleShutdownRef.current;
     const IDLE_TAG =
-      '[Clock stopped automatically: session was idle — Ignite PM kiosk]';
+      '[Clock stopped automatically: session was idle — Ignite PM]';
     // Backdate the clock-out to when the idle deadline expired (e.g. the
     // laptop slept overnight) so idle hours are not recorded as work time.
     const endTime = Math.min(
@@ -1680,6 +1685,8 @@ export default function App() {
       Date.now(),
     );
     let shiftUpdateError = null;
+    let shiftDurationMs = null;
+    let taskDurationMs = null;
     try {
       if (task?.id) {
         try {
@@ -1688,6 +1695,7 @@ export default function App() {
             endTime - (task.lastResumeTime || task.clockInTime),
           );
           const newTotal = (task.totalSavedDuration || 0) + segment;
+          taskDurationMs = newTotal;
           const base = String(notes || '').trim() || String(task.notes || '').trim();
           const finalNotes = base ? `${base}\n\n${IDLE_TAG}` : IDLE_TAG;
           await updateDoc(doc(db, 'taskLogs', task.id), {
@@ -1696,6 +1704,9 @@ export default function App() {
             totalSavedDuration: newTotal,
             duration: newTotal,
             notes: finalNotes,
+            autoStoppedReason: 'idle_timeout',
+            autoStoppedAt: endTime,
+            autoStoppedSource: source || 'client',
           });
           setActiveTaskNotes('');
         } catch (err) {
@@ -1711,6 +1722,7 @@ export default function App() {
               endTime - (shift.lastResumeTime || shift.clockInTime),
             );
           }
+          shiftDurationMs = newTotal;
           await updateDoc(doc(db, 'timesheets', shift.id), {
             clockOutTime: endTime,
             status: 'completed',
@@ -1718,7 +1730,19 @@ export default function App() {
             duration: newTotal,
             autoStoppedReason: 'idle_timeout',
             autoStoppedAt: endTime,
+            autoStoppedSource: source || 'client',
             shiftNote: IDLE_TAG,
+          });
+          seenIdleNoticeShiftIdsRef.current.add(shift.id);
+          setIdleClockOutNotice({
+            shiftId: shift.id,
+            endTime,
+            shiftDurationMs: newTotal,
+            taskLabel: task
+              ? `${task.clientName || 'Client'} · ${task.projectName || 'Task'}`
+              : null,
+            taskDurationMs,
+            source: source === 'deep_idle' ? 'deep_idle' : 'client',
           });
           const recipient = String(user?.email || '').trim().toLowerCase();
           if (recipient) {
@@ -1728,8 +1752,8 @@ export default function App() {
                 type: NOTIFICATION_TYPES.FORGOT_CLOCK_OUT,
                 title: 'You were auto clocked out after being idle',
                 body: task?.clientName
-                  ? `Your ${task.projectName || 'task'} on ${task.clientName} was stopped so idle time was not billed.`
-                  : 'Your shift was ended automatically. Check the kiosk next time you step away.',
+                  ? `Your ${task.projectName || 'task'} on ${task.clientName} was stopped so idle time was not billed. Ended at ${new Date(endTime).toLocaleString()}.`
+                  : `Your shift was ended automatically at ${new Date(endTime).toLocaleString()}. Check Timesheets if hours need correcting.`,
                 actorEmail: recipient,
                 actorName: staffDisplayName({
                   email: user?.email,
@@ -1754,7 +1778,74 @@ export default function App() {
         'Could not end your shift automatically after idle timeout. Please clock out manually or try again.',
       );
     }
-  }, []);
+  }, [user?.email, user?.displayName]);
+
+  const writeShiftActivityHeartbeat = useCallback(
+    async (at, { force = false } = {}) => {
+      const shift = idleShutdownRef.current?.activeShift;
+      if (!shift?.id) return;
+      const now = Number(at) || Date.now();
+      try {
+        await updateDoc(doc(db, 'timesheets', shift.id), {
+          lastActivityAt: now,
+          ...(force ? { lastActivityForceAt: now } : {}),
+        });
+      } catch (err) {
+        console.warn('[idle heartbeat]', err?.message || err);
+      }
+    },
+    [],
+  );
+
+  // If the server (or another tab) auto-stopped this user's shift, show the same notice.
+  useEffect(() => {
+    if (!user?.uid) return;
+    let dismissed = new Set();
+    try {
+      dismissed = new Set(
+        JSON.parse(sessionStorage.getItem('ignite_idle_notice_seen') || '[]'),
+      );
+    } catch {
+      dismissed = new Set();
+    }
+    for (const id of seenIdleNoticeShiftIdsRef.current) dismissed.add(id);
+
+    const mine = (timesheets || [])
+      .filter((s) => s.userId === user.uid && s.autoStoppedReason === 'idle_timeout')
+      .sort(
+        (a, b) =>
+          (b.autoStoppedAt || b.clockOutTime || 0) -
+          (a.autoStoppedAt || a.clockOutTime || 0),
+      );
+    const latest = mine[0];
+    if (!latest?.id || dismissed.has(latest.id)) return;
+    const endedAt = Number(latest.autoStoppedAt || latest.clockOutTime || 0);
+    // Only surface recent auto-stops (last 12h) so old history doesn't pop on login.
+    if (!endedAt || Date.now() - endedAt > 12 * 60 * 60 * 1000) return;
+    seenIdleNoticeShiftIdsRef.current.add(latest.id);
+    dismissed.add(latest.id);
+    try {
+      sessionStorage.setItem(
+        'ignite_idle_notice_seen',
+        JSON.stringify([...dismissed].slice(-40)),
+      );
+    } catch {
+      /* ignore */
+    }
+    const stoppedTask = (taskLogs || []).find(
+      (t) => t.shiftId === latest.id && t.autoStoppedReason === 'idle_timeout',
+    );
+    setIdleClockOutNotice({
+      shiftId: latest.id,
+      endTime: endedAt,
+      shiftDurationMs: latest.duration ?? latest.totalSavedDuration ?? null,
+      taskLabel: stoppedTask
+        ? `${stoppedTask.clientName || 'Client'} · ${stoppedTask.projectName || 'Task'}`
+        : null,
+      taskDurationMs: stoppedTask?.duration ?? stoppedTask?.totalSavedDuration ?? null,
+      source: latest.autoStoppedSource === 'server' ? 'server' : 'client',
+    });
+  }, [timesheets, taskLogs, user?.uid]);
 
   // Smart Extract from HubSpot Notes
   const extractFromNotes = () => {
@@ -3266,7 +3357,6 @@ export default function App() {
     staffEmail: String(user?.email || myAdminDoc?.email || '').trim().toLowerCase(),
     uploadClientDocument,
     removeClientDocument,
-    handleIdleAutoClockOut,
     notifications: inboxNotifications,
     dismissNotification: dismissInboxNotification,
     dismissAllNotifications: dismissAllInboxNotifications,
@@ -3590,6 +3680,30 @@ export default function App() {
         </nav>
 
         <main className="mx-auto w-full max-w-[min(1720px,calc(100vw-1.5rem))] px-4 py-6 pb-24 sm:px-6 sm:py-8">
+          <IdleFailsafeGuard
+            activeShift={activeShift}
+            policy={policy}
+            handleIdleAutoClockOut={handleIdleAutoClockOut}
+            onActivityHeartbeat={writeShiftActivityHeartbeat}
+            idleClockOutNotice={idleClockOutNotice}
+            onDismissIdleClockOutNotice={() => {
+              if (idleClockOutNotice?.shiftId) {
+                try {
+                  const prev = JSON.parse(
+                    sessionStorage.getItem('ignite_idle_notice_seen') || '[]',
+                  );
+                  const next = Array.from(
+                    new Set([...(Array.isArray(prev) ? prev : []), idleClockOutNotice.shiftId]),
+                  ).slice(-40);
+                  sessionStorage.setItem('ignite_idle_notice_seen', JSON.stringify(next));
+                } catch {
+                  /* ignore */
+                }
+                seenIdleNoticeShiftIdsRef.current.add(idleClockOutNotice.shiftId);
+              }
+              setIdleClockOutNotice(null);
+            }}
+          />
           <Routes>
             <Route path="/" element={<Navigate to="/kiosk" replace />} />
             <Route
