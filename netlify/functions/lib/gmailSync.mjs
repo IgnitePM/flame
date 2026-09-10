@@ -114,6 +114,15 @@ export async function buildClientEmailIndex(db) {
       addEmailToMap(byEmail, primary.email, id, name);
       addDomainToMap(byDomain, domainFromEmail(primary.email), id, name);
     }
+    // Legacy / alternate single-email fields some imports used
+    if (c.email) {
+      addEmailToMap(byEmail, c.email, id, name);
+      addDomainToMap(byDomain, domainFromEmail(c.email), id, name);
+    }
+    if (c.contactEmail) {
+      addEmailToMap(byEmail, c.contactEmail, id, name);
+      addDomainToMap(byDomain, domainFromEmail(c.contactEmail), id, name);
+    }
     const contacts = Array.isArray(c.contacts) ? c.contacts : [];
     for (const ct of contacts) {
       if (ct?.email) {
@@ -276,24 +285,30 @@ async function processMessageIds(accessToken, ids, ctx) {
 }
 
 /**
- * Build Gmail search queries targeting CRM emails + website domains (all time).
+ * Build Gmail search queries targeting CRM emails + website domains.
  * Chunked to stay under Gmail query length limits.
+ * @param {{ byEmail: Map, byDomain: Map }} emailIndex
+ * @param {{ maxLen?: number, afterEpochSec?: number|null }} [opts]
  */
-export function buildGmailQueryChunks(emailIndex, maxLen = 450) {
+export function buildGmailQueryChunks(emailIndex, opts = {}) {
+  const maxLen = Number(opts.maxLen) || 450;
+  const afterEpochSec = opts.afterEpochSec != null ? Number(opts.afterEpochSec) : null;
+  const afterClause =
+    Number.isFinite(afterEpochSec) && afterEpochSec > 0 ? ` after:${Math.floor(afterEpochSec)}` : '';
+
   const terms = [];
   const byEmail = emailIndex?.byEmail;
   const byDomain = emailIndex?.byDomain;
   if (byEmail instanceof Map) {
     for (const email of byEmail.keys()) {
-      terms.push(`from:${email}`, `to:${email}`);
+      terms.push(`from:${email}`, `to:${email}`, `cc:${email}`);
     }
   }
   if (byDomain instanceof Map) {
     for (const domain of byDomain.keys()) {
-      terms.push(`from:${domain}`, `to:${domain}`);
+      terms.push(`from:${domain}`, `to:${domain}`, `cc:${domain}`);
     }
   }
-  // Dedupe while preserving order
   const seen = new Set();
   const unique = [];
   for (const t of terms) {
@@ -303,13 +318,15 @@ export function buildGmailQueryChunks(emailIndex, maxLen = 450) {
   }
   if (!unique.length) return [];
 
+  // Reserve room for after: clause inside each chunk
+  const budget = Math.max(80, maxLen - afterClause.length);
   const chunks = [];
   let buf = [];
   let len = 0;
   for (const t of unique) {
     const add = (buf.length ? 4 : 0) + t.length; // " OR "
-    if (buf.length && len + add > maxLen) {
-      chunks.push(`{${buf.join(' ')}}`);
+    if (buf.length && len + add > budget) {
+      chunks.push(`(${buf.join(' OR ')})${afterClause}`.trim());
       buf = [t];
       len = t.length;
     } else {
@@ -317,11 +334,41 @@ export function buildGmailQueryChunks(emailIndex, maxLen = 450) {
       len += add;
     }
   }
-  if (buf.length) chunks.push(`{${buf.join(' ')}}`);
+  if (buf.length) chunks.push(`(${buf.join(' OR ')})${afterClause}`.trim());
   return chunks;
 }
 
 const FULL_SYNC_PAGE_SIZE = 40;
+const RECENT_SYNC_MAX_IDS = 120;
+
+/**
+ * Run CRM-targeted list queries (optional after:) and process message ids.
+ */
+async function runTargetedQueryPass(accessToken, chunks, ctx, { maxIds = 120 } = {}) {
+  const ids = [];
+  const seen = new Set();
+  for (const q of chunks) {
+    let pageToken = '';
+    do {
+      const list = await gmailListMessages(accessToken, {
+        q,
+        pageToken,
+        maxResults: 50,
+      });
+      for (const m of list.messages || []) {
+        if (!m.id || seen.has(m.id)) continue;
+        seen.add(m.id);
+        ids.push(m.id);
+        if (ids.length >= maxIds) break;
+      }
+      pageToken = list.nextPageToken || '';
+      if (ids.length >= maxIds) break;
+    } while (pageToken);
+    if (ids.length >= maxIds) break;
+  }
+  const result = await processMessageIds(accessToken, ids, ctx);
+  return { ...result, listed: ids.length, queries: chunks.length };
+}
 
 /**
  * One chunked step of an all-time full history sync (resumable).
@@ -526,27 +573,38 @@ export async function syncGmailConnection(uid, opts = {}) {
   }
 
   if (!historyId || needsBackfill) {
-    mode = 'backfill_30d';
-    const after = Math.floor((Date.now() - 30 * 24 * 60 * 60 * 1000) / 1000);
-    let pageToken = '';
-    const ids = [];
-    do {
-      const list = await gmailListMessages(accessToken, {
-        q: `after:${after}`,
-        pageToken,
-        maxResults: 50,
+    mode = 'targeted_30d';
+    // IMPORTANT: do not scan the newest N inbox messages — those are often
+    // internal and never reach client threads. Search Gmail for CRM emails/domains.
+    if (indexStats.clientEmails === 0 && indexStats.clientDomains === 0) {
+      const nowTs = Date.now();
+      await saveConnection(uid, {
+        historyId: historyId || connection.historyId || null,
+        lastSyncAt: nowTs,
+        updatedAt: nowTs,
       });
-      for (const m of list.messages || []) {
-        if (m.id) ids.push(m.id);
-      }
-      pageToken = list.nextPageToken || '';
-      if (ids.length >= 80) break;
-    } while (pageToken);
+      return {
+        ok: true,
+        upserted: 0,
+        skipped: 0,
+        scanned: 0,
+        mode,
+        indexStats,
+        hint:
+          'No client emails or website domains in CRM yet — add a website or contact email on clients, then Sync now again.',
+        lastSyncAt: nowTs,
+        gmailEmail: selfEmail,
+      };
+    }
 
-    const result = await processMessageIds(accessToken, ids, ctx);
-    upserted += result.upserted;
-    skipped += result.skipped;
-    scanned += result.scanned;
+    const after = Math.floor((Date.now() - 30 * 24 * 60 * 60 * 1000) / 1000);
+    const chunks = buildGmailQueryChunks(emailIndex, { afterEpochSec: after });
+    const pass = await runTargetedQueryPass(accessToken, chunks, ctx, {
+      maxIds: RECENT_SYNC_MAX_IDS,
+    });
+    upserted += pass.upserted;
+    skipped += pass.skipped;
+    scanned += pass.scanned;
 
     try {
       const profile = await fetchGmailProfile(accessToken);
@@ -569,9 +627,9 @@ export async function syncGmailConnection(uid, opts = {}) {
       hint =
         'No client emails or website domains in CRM yet — add a website or contact email, then Sync now again.';
     } else if (scanned === 0) {
-      hint = 'No Gmail messages found in the sync window.';
+      hint = `CRM has ${indexStats.clientEmails} email(s) and ${indexStats.clientDomains} domain(s), but Gmail returned 0 messages for those in the last 30 days. Try Full history sync, or confirm the addresses on the client match the ones in Gmail.`;
     } else {
-      hint = `Scanned ${scanned} message(s) against ${indexStats.clientEmails} CRM email(s) and ${indexStats.clientDomains} domain(s); none matched.`;
+      hint = `Scanned ${scanned} CRM-targeted message(s) against ${indexStats.clientEmails} email(s) / ${indexStats.clientDomains} domain(s); none new to import (may already be synced).`;
     }
   }
 
