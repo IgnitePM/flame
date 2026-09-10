@@ -119,7 +119,7 @@ export default function GmailConnectCard({ canManage = false, onTabFocus }) {
     setBusy('sync');
     setBanner('');
     try {
-      const resp = await authedFetch('/.netlify/functions/sync-gmail-clients', {});
+      const resp = await authedFetch('/.netlify/functions/sync-gmail-clients-http', {});
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) {
         throw new Error(
