@@ -234,11 +234,19 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // Outbound client emails (CRM send history). Staff only; digest bot writes.
+    // Outbound + synced Gmail client emails (CRM history). Staff only; digest bot writes.
     match /clientEmailMessages/{messageId} {
       allow read: if isAnyStaff();
       allow create: if isAnyStaff() || isBilling();
       allow update, delete: if isAdmin();
+    }
+
+    // Per-staff Gmail OAuth tokens. Browser clients must never read these —
+    // status/send/sync go through Netlify. Only the digest-bot Firebase user
+    // (email starting with digest-bot@) used by Functions may read/write.
+    match /gmailConnections/{userId} {
+      allow read, write: if isSignedIn() &&
+        emailLower().matches('digest-bot@.*');
     }
 
     // Client CRM activity timeline (HubSpot-style relationship history).

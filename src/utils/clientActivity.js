@@ -5,6 +5,7 @@ export const CLIENT_ACTIVITY_TYPES = {
   call: { label: 'Call', group: 'notes' },
   meeting: { label: 'Meeting', group: 'notes' },
   email_sent: { label: 'Email', group: 'email' },
+  email_received: { label: 'Email received', group: 'email' },
   portal_invite: { label: 'Portal invite', group: 'portal' },
   estimate_sent: { label: 'Estimate sent', group: 'projects' },
   estimate_decision: { label: 'Estimate decision', group: 'projects' },

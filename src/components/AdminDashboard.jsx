@@ -94,6 +94,7 @@ import PayrollView from './PayrollView.jsx';
 import SlackNotificationsCard from './SlackNotificationsCard.jsx';
 import EmailDigestCard from './EmailDigestCard.jsx';
 import FxRatesCard from './FxRatesCard.jsx';
+import GmailConnectCard from './GmailConnectCard.jsx';
 import ClientEmailComposeModal, {
   replySubject,
 } from './ClientEmailComposeModal.jsx';
@@ -1304,6 +1305,19 @@ const AdminDashboard = ({
     // Kiosk staff in Admin shell: timesheets only.
     if (adminTab !== 'timesheets') setAdminTab('timesheets');
   }, [isRestrictedStaff, adminTab, setAdminTab, lockedTab]);
+
+  // OAuth callback lands on /admin?gmail=connected|error — open Config tab.
+  useEffect(() => {
+    if (lockedTab || isRestrictedStaff) return;
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      if (!params.get('gmail')) return;
+      if (adminTab !== 'tasks') setAdminTab('tasks');
+    } catch {
+      /* ignore */
+    }
+  }, [lockedTab, isRestrictedStaff, adminTab, setAdminTab]);
+
   const [estimateModal, setEstimateModal] = useState(null);
   const [emailComposeClient, setEmailComposeClient] = useState(null);
   const [emailComposeDraft, setEmailComposeDraft] = useState(null);
@@ -4044,14 +4058,24 @@ const AdminDashboard = ({
                               setEmailComposeClient(client);
                             }}
                             onReply={(msg) => {
+                              const inbound = msg.direction === 'inbound';
+                              const replyTo = inbound
+                                ? [String(msg.from || msg.actorEmail || '')
+                                    .trim()
+                                    .toLowerCase()].filter((e) => e.includes('@'))
+                                : Array.isArray(msg.to)
+                                  ? msg.to
+                                  : [];
                               setEmailComposeDraft({
                                 initialSubject: replySubject(msg.subject),
-                                initialTo: Array.isArray(msg.to) ? msg.to : [],
+                                initialTo: replyTo,
                                 initialBody: `\n\n---\nOn ${new Date(
                                   Number(msg.sentAt || 0),
-                                ).toLocaleString()}, ${msg.actorEmail || 'staff'} wrote:\n${String(
-                                  msg.body || '',
-                                ).slice(0, 2000)}`,
+                                ).toLocaleString()}, ${
+                                  inbound
+                                    ? msg.from || msg.actorEmail || 'client'
+                                    : msg.actorEmail || 'staff'
+                                } wrote:\n${String(msg.body || '').slice(0, 2000)}`,
                                 inReplyToId: msg.id,
                               });
                               setEmailComposeClient(c);
@@ -7293,6 +7317,11 @@ const AdminDashboard = ({
           <EmailDigestCard
             notifySettings={notifySettings}
             updateNotifySettings={updateNotifySettings}
+          />
+
+          <GmailConnectCard
+            canManage={canBilling}
+            onTabFocus={() => setAdminTab?.('tasks')}
           />
 
           <FxRatesCard

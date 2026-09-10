@@ -1,9 +1,13 @@
-import { ExternalLink, Mail, Phone, User } from 'lucide-react';
+import { ExternalLink, Mail, MapPin, Phone, User } from 'lucide-react';
 import {
   normalizePrimaryContact,
   normalizeClientContacts,
 } from '../utils/clientDocuments.js';
 import { clientConnectionLinks } from '../utils/clientConnections.js';
+import {
+  formatCompanyAddress,
+  normalizeCompanyProfileFields,
+} from '../utils/clientCompanyProfile.js';
 
 function LinkChip({ href, label }) {
   if (!href) return null;
@@ -63,24 +67,41 @@ export default function ClientProfileSummary({ client, onComposeEmail = null }) 
   const primary = normalizePrimaryContact(client?.primaryContact);
   const contacts = normalizeClientContacts(client?.contacts);
   const connectionLinks = clientConnectionLinks(client);
+  const profile = normalizeCompanyProfileFields(client);
+  const addressLine = formatCompanyAddress(client);
 
-  const hasLinks = connectionLinks.length > 0 || phone;
+  const hasLinks = connectionLinks.length > 0 || phone || addressLine;
   const hasContacts =
     primary.name ||
     primary.email ||
     primary.phone ||
     contacts.length > 0;
+  const hasAbout = Boolean(profile.companyDescription || profile.industry);
 
-  if (!hasLinks && !hasContacts && !onComposeEmail) {
+  if (!hasLinks && !hasContacts && !hasAbout && !onComposeEmail) {
     return (
       <p className="text-xs italic text-slate-400">
-        No company profile yet. Open client settings to add website, contacts, and links.
+        No company profile yet. Open client settings to add website, contacts, and links — or use Enrich.
       </p>
     );
   }
 
   return (
     <div className="space-y-3">
+      {hasAbout && (
+        <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-1">
+          {profile.industry ? (
+            <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">
+              {profile.industry}
+            </div>
+          ) : null}
+          {profile.companyDescription ? (
+            <p className="text-sm font-medium text-slate-700 whitespace-pre-wrap">
+              {profile.companyDescription}
+            </p>
+          ) : null}
+        </div>
+      )}
       {(hasLinks || onComposeEmail) && (
         <div className="flex flex-wrap gap-2 items-center">
           {connectionLinks.map((link) => (
@@ -95,6 +116,12 @@ export default function ClientProfileSummary({ client, onComposeEmail = null }) 
               {phone}
             </a>
           )}
+          {addressLine ? (
+            <span className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-600 max-w-full">
+              <MapPin className="w-3 h-3 shrink-0" />
+              <span className="truncate">{addressLine}</span>
+            </span>
+          ) : null}
           {onComposeEmail && (
             <button
               type="button"

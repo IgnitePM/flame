@@ -40,6 +40,7 @@ import {
   ShoppingCart,
   CheckSquare,
   MessageSquare,
+  Sparkles,
 } from 'lucide-react';
 import {
   auth,
@@ -107,6 +108,8 @@ import {
 } from './utils/portalAccess.js';
 import { buildClientActivityDoc } from './utils/clientActivity.js';
 import { normalizeClientConnectionFields } from './utils/clientConnections.js';
+import { normalizeCompanyProfileFields } from './utils/clientCompanyProfile.js';
+import ClientEnrichPreviewModal from './components/ClientEnrichPreviewModal.jsx';
 import {
   filterClientsForTeamMember,
   teamMemberCanViewClient,
@@ -389,6 +392,8 @@ export default function App() {
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [archiveConfirm, setArchiveConfirm] = useState(null);
   const [editingClient, setEditingClient] = useState(null);
+  const [clientEnrichBusy, setClientEnrichBusy] = useState(false);
+  const [clientEnrichPreview, setClientEnrichPreview] = useState(null);
   const [portalInvitesByEmail, setPortalInvitesByEmail] = useState({});
   const [portalInviteBusyEmail, setPortalInviteBusyEmail] = useState('');
   const [clientLogoUploading, setClientLogoUploading] = useState(false);
@@ -4368,23 +4373,208 @@ export default function App() {
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Company profile & connections</p>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Website</label>
-                    <input
-                      type="url"
-                      value={editingClient.website || ''}
-                      onChange={(e) => setEditingClient({ ...editingClient, website: e.target.value })}
-                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
-                      placeholder="https://example.com"
-                    />
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="url"
+                        value={editingClient.website || ''}
+                        onChange={(e) => setEditingClient({ ...editingClient, website: e.target.value })}
+                        className="flex-1 bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                        placeholder="https://example.com"
+                      />
+                      <button
+                        type="button"
+                        disabled={clientEnrichBusy || !String(editingClient.website || '').trim()}
+                        onClick={async () => {
+                          if (clientEnrichBusy) return;
+                          setClientEnrichBusy(true);
+                          try {
+                            const resp = await authedFetch(
+                              '/.netlify/functions/enrich-client-from-website',
+                              {
+                                website: editingClient.website,
+                                companyName: editingClient.name,
+                              },
+                            );
+                            const data = await resp.json().catch(() => ({}));
+                            if (!resp.ok) throw new Error(data.error || 'Enrichment failed');
+                            setClientEnrichPreview({
+                              suggestion: data.suggestion,
+                              meta: data.meta || null,
+                            });
+                          } catch (err) {
+                            window.alert(err?.message || String(err));
+                          } finally {
+                            setClientEnrichBusy(false);
+                          }
+                        }}
+                        className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-black text-sm bg-[#fd7414] text-white disabled:opacity-40 shrink-0"
+                        title="Auto-fill company details from the website"
+                      >
+                        <Sparkles className={`w-4 h-4 ${clientEnrichBusy ? 'animate-pulse' : ''}`} />
+                        {clientEnrichBusy ? 'Enriching…' : 'Enrich'}
+                      </button>
+                    </div>
+                    <p className="text-[10px] font-bold text-slate-400">
+                      Enrich pulls public company info (phone, about, address, Google Business, socials) into empty fields for review.
+                    </p>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Phone</label>
-                    <input
-                      type="tel"
-                      value={editingClient.phone || ''}
-                      onChange={(e) => setEditingClient({ ...editingClient, phone: e.target.value })}
-                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
-                      placeholder="+1 (555) 555-5555"
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">About</label>
+                    <textarea
+                      value={editingClient.companyDescription || ''}
+                      onChange={(e) =>
+                        setEditingClient({
+                          ...editingClient,
+                          companyDescription: e.target.value,
+                        })
+                      }
+                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[88px]"
+                      placeholder="Short company description…"
                     />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Industry</label>
+                      <input
+                        type="text"
+                        value={editingClient.industry || ''}
+                        onChange={(e) =>
+                          setEditingClient({ ...editingClient, industry: e.target.value })
+                        }
+                        className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                        placeholder="e.g. Dental clinic"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Phone</label>
+                      <input
+                        type="tel"
+                        value={editingClient.phone || ''}
+                        onChange={(e) => setEditingClient({ ...editingClient, phone: e.target.value })}
+                        className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                        placeholder="+1 (555) 555-5555"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Street address</label>
+                    <input
+                      type="text"
+                      value={editingClient.address || ''}
+                      onChange={(e) =>
+                        setEditingClient({ ...editingClient, address: e.target.value })
+                      }
+                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      placeholder="123 Main St"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="space-y-2 col-span-2 sm:col-span-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">City</label>
+                      <input
+                        type="text"
+                        value={editingClient.city || ''}
+                        onChange={(e) =>
+                          setEditingClient({ ...editingClient, city: e.target.value })
+                        }
+                        className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Province</label>
+                      <input
+                        type="text"
+                        value={editingClient.region || ''}
+                        onChange={(e) =>
+                          setEditingClient({ ...editingClient, region: e.target.value })
+                        }
+                        className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Postal</label>
+                      <input
+                        type="text"
+                        value={editingClient.postalCode || ''}
+                        onChange={(e) =>
+                          setEditingClient({ ...editingClient, postalCode: e.target.value })
+                        }
+                        className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Country</label>
+                      <input
+                        type="text"
+                        value={editingClient.country || ''}
+                        onChange={(e) =>
+                          setEditingClient({ ...editingClient, country: e.target.value })
+                        }
+                        className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Google Business Profile URL</label>
+                    <input
+                      type="url"
+                      value={editingClient.googleBusinessProfileUrl || ''}
+                      onChange={(e) =>
+                        setEditingClient({
+                          ...editingClient,
+                          googleBusinessProfileUrl: e.target.value,
+                        })
+                      }
+                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      placeholder="https://maps.google.com/… or GBP share link"
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">LinkedIn</label>
+                      <input
+                        type="url"
+                        value={editingClient.linkedinUrl || ''}
+                        onChange={(e) =>
+                          setEditingClient({ ...editingClient, linkedinUrl: e.target.value })
+                        }
+                        className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                        placeholder="https://linkedin.com/company/..."
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Facebook</label>
+                      <input
+                        type="url"
+                        value={editingClient.facebookUrl || ''}
+                        onChange={(e) =>
+                          setEditingClient({ ...editingClient, facebookUrl: e.target.value })
+                        }
+                        className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Instagram</label>
+                      <input
+                        type="url"
+                        value={editingClient.instagramUrl || ''}
+                        onChange={(e) =>
+                          setEditingClient({ ...editingClient, instagramUrl: e.target.value })
+                        }
+                        className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">X / Twitter</label>
+                      <input
+                        type="url"
+                        value={editingClient.twitterUrl || ''}
+                        onChange={(e) =>
+                          setEditingClient({ ...editingClient, twitterUrl: e.target.value })
+                        }
+                        className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      />
+                    </div>
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Google Drive folder URL</label>
@@ -5052,6 +5242,7 @@ export default function App() {
                     logoUrl: editingClient.logoUrl || null,
                     website: String(editingClient.website || '').trim(),
                     phone: String(editingClient.phone || '').trim(),
+                    ...normalizeCompanyProfileFields(editingClient),
                     ...normalizeClientConnectionFields(editingClient),
                     retainerCategoryEnabled: normalizeRetainerCategoryEnabled(
                       editingClient.retainerCategoryEnabled,
@@ -5082,6 +5273,19 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {clientEnrichPreview && editingClient && (
+        <ClientEnrichPreviewModal
+          client={editingClient}
+          suggestion={clientEnrichPreview.suggestion}
+          meta={clientEnrichPreview.meta}
+          onClose={() => setClientEnrichPreview(null)}
+          onApply={(next) => {
+            setEditingClient(next);
+            setClientEnrichPreview(null);
+          }}
+        />
       )}
 
       {/* Addon Modal */}

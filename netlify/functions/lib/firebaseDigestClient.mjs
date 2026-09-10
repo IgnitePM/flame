@@ -26,7 +26,17 @@
 
 import { getApps, initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
-import { collection, doc, getDoc, getDocs, getFirestore, query, setDoc, where } from 'firebase/firestore';
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  getFirestore,
+  query,
+  setDoc,
+  where,
+} from 'firebase/firestore';
 
 function getFirebaseConfig() {
   const config = {
@@ -87,4 +97,9 @@ export async function fetchDoc(db, path) {
 /** Merge-write a document by full path (e.g. digest cursor). */
 export async function mergeDoc(db, path, data) {
   await setDoc(doc(db, path), data, { merge: true });
+}
+
+/** Delete a document by full path. */
+export async function removeDoc(db, path) {
+  await deleteDoc(doc(db, path));
 }

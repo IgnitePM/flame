@@ -1,0 +1,362 @@
+/**
+ * Match Gmail messages to clients and upsert clientEmailMessages.
+ *
+ * Matching:
+ * 1. Exact CRM addresses (primary, contacts, portal emails)
+ * 2. Same registrable domain as the client's website (and CRM email domains
+ *    that are not free webmail hosts)
+ */
+
+import { fetchCollection, fetchDoc, getDigestDb, mergeDoc } from './firebaseDigestClient.mjs';
+import { writeClientActivity } from './clientActivity.mjs';
+import {
+  emailsFromHeader,
+  extractPlainBody,
+  fetchGmailProfile,
+  getValidAccessToken,
+  gmailGetMessage,
+  gmailHistoryList,
+  gmailListMessages,
+  headerValue,
+  loadConnection,
+  saveConnection,
+} from './gmailOAuth.mjs';
+
+/** Free / consumer mail hosts — never treat as a client company domain. */
+const PUBLIC_MAIL_DOMAINS = new Set([
+  'gmail.com',
+  'googlemail.com',
+  'yahoo.com',
+  'yahoo.ca',
+  'hotmail.com',
+  'outlook.com',
+  'outlook.ca',
+  'live.com',
+  'msn.com',
+  'icloud.com',
+  'me.com',
+  'mac.com',
+  'aol.com',
+  'protonmail.com',
+  'proton.me',
+  'pm.me',
+  'mail.com',
+  'gmx.com',
+  'gmx.net',
+  'yandex.com',
+  'zoho.com',
+]);
+
+function addEmailToMap(map, email, clientId, clientName) {
+  const em = String(email || '').trim().toLowerCase();
+  if (!em || !em.includes('@') || !clientId) return;
+  if (!map.has(em)) map.set(em, { clientId, clientName });
+}
+
+function addDomainToMap(map, domain, clientId, clientName) {
+  const d = String(domain || '').trim().toLowerCase().replace(/^\.+|\.+$/g, '');
+  if (!d || !d.includes('.') || !clientId) return;
+  if (PUBLIC_MAIL_DOMAINS.has(d)) return;
+  if (!map.has(d)) map.set(d, { clientId, clientName });
+}
+
+/** Hostname from website URL or bare domain (strips www.). */
+export function domainFromWebsite(raw) {
+  let s = String(raw || '').trim().toLowerCase();
+  if (!s) return '';
+  if (!/^https?:\/\//i.test(s)) s = `https://${s}`;
+  try {
+    const host = new URL(s).hostname.replace(/^www\./, '');
+    if (!host || !host.includes('.') || PUBLIC_MAIL_DOMAINS.has(host)) return '';
+    return host;
+  } catch {
+    return '';
+  }
+}
+
+export function domainFromEmail(email) {
+  const em = String(email || '').trim().toLowerCase();
+  const at = em.lastIndexOf('@');
+  if (at < 0) return '';
+  const domain = em.slice(at + 1).replace(/^\.+|\.+$/g, '');
+  if (!domain.includes('.') || PUBLIC_MAIL_DOMAINS.has(domain)) return '';
+  return domain;
+}
+
+/**
+ * Match address domain to a client domain: exact or subdomain
+ * (e.g. mail.acme.com → acme.com).
+ */
+function matchDomainMap(domainMap, emailDomain) {
+  const d = String(emailDomain || '').toLowerCase();
+  if (!d) return null;
+  const exact = domainMap.get(d);
+  if (exact) return exact;
+  for (const [clientDomain, hit] of domainMap) {
+    if (d.endsWith(`.${clientDomain}`)) return hit;
+  }
+  return null;
+}
+
+/**
+ * Build indexes: exact emails + company domains from website / CRM emails.
+ * @returns {{ byEmail: Map, byDomain: Map }}
+ */
+export async function buildClientEmailIndex(db) {
+  const clients = await fetchCollection(db, 'clients');
+  const byEmail = new Map();
+  const byDomain = new Map();
+  for (const c of clients) {
+    const name = c.name || '';
+    const id = c.id;
+    const primary = c.primaryContact;
+    if (primary?.email) {
+      addEmailToMap(byEmail, primary.email, id, name);
+      addDomainToMap(byDomain, domainFromEmail(primary.email), id, name);
+    }
+    const contacts = Array.isArray(c.contacts) ? c.contacts : [];
+    for (const ct of contacts) {
+      if (ct?.email) {
+        addEmailToMap(byEmail, ct.email, id, name);
+        addDomainToMap(byDomain, domainFromEmail(ct.email), id, name);
+      }
+    }
+    const portal = Array.isArray(c.clientEmails)
+      ? c.clientEmails
+      : String(c.clientEmails || '')
+          .split(/[,\n;]/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+    for (const em of portal) {
+      addEmailToMap(byEmail, em, id, name);
+      addDomainToMap(byDomain, domainFromEmail(em), id, name);
+    }
+    const siteDomain = domainFromWebsite(c.website);
+    if (siteDomain) addDomainToMap(byDomain, siteDomain, id, name);
+  }
+  return { byEmail, byDomain };
+}
+
+function matchClient(index, addresses, selfEmail) {
+  const self = String(selfEmail || '').toLowerCase();
+  const byEmail = index?.byEmail || index;
+  const byDomain = index?.byDomain;
+
+  // Prefer exact CRM address matches.
+  for (const em of addresses) {
+    if (em === self) continue;
+    const hit = byEmail instanceof Map ? byEmail.get(em) : null;
+    if (hit) return { ...hit, matchedEmail: em, matchType: 'email' };
+  }
+
+  // Then company / website domain (skips free webmail).
+  if (byDomain instanceof Map) {
+    for (const em of addresses) {
+      if (em === self) continue;
+      const at = String(em).lastIndexOf('@');
+      const rawDomain = at >= 0 ? String(em).slice(at + 1).toLowerCase() : '';
+      if (!rawDomain || PUBLIC_MAIL_DOMAINS.has(rawDomain)) continue;
+      const hit = matchDomainMap(byDomain, rawDomain);
+      if (hit) return { ...hit, matchedEmail: em, matchType: 'domain' };
+    }
+  }
+  return null;
+}
+
+async function upsertGmailMessage({
+  message,
+  emailIndex,
+  selfEmail,
+  staffEmail,
+}) {
+  const headers = message?.payload?.headers || [];
+  const fromHeader = headerValue(headers, 'From');
+  const toHeader = headerValue(headers, 'To');
+  const ccHeader = headerValue(headers, 'Cc');
+  const subject = headerValue(headers, 'Subject') || '(no subject)';
+  const messageIdHeader = headerValue(headers, 'Message-ID') || headerValue(headers, 'Message-Id');
+  const fromEmails = emailsFromHeader(fromHeader);
+  const toEmails = [...emailsFromHeader(toHeader), ...emailsFromHeader(ccHeader)];
+  const all = [...fromEmails, ...toEmails];
+  const match = matchClient(emailIndex, all, selfEmail);
+  if (!match) return { skipped: true };
+
+  const self = String(selfEmail || '').toLowerCase();
+  const fromIsSelf = fromEmails.some((e) => e === self);
+  const direction = fromIsSelf ? 'outbound' : 'inbound';
+  const gmailMessageId = String(message.id || '');
+  if (!gmailMessageId) return { skipped: true };
+
+  const docId = `gmail_${gmailMessageId}`;
+  const db = await getDigestDb();
+  const existing = await fetchDoc(db, `clientEmailMessages/${docId}`);
+  if (existing) return { skipped: true, duplicate: true };
+
+  const body = extractPlainBody(message);
+  const sentAt = Number(message.internalDate || Date.now());
+  const to = direction === 'outbound' ? toEmails : fromEmails.length ? fromEmails : toEmails;
+
+  const doc = {
+    clientId: match.clientId,
+    clientName: match.clientName || '',
+    direction,
+    to,
+    from: fromEmails[0] || fromHeader || '',
+    subject,
+    body,
+    actorEmail: direction === 'outbound' ? String(staffEmail || self).toLowerCase() : fromEmails[0] || '',
+    gmailMessageId,
+    gmailThreadId: message.threadId || null,
+    gmailRfc822MessageId: messageIdHeader || null,
+    inReplyToId: null,
+    sentAt,
+    createdAt: Date.now(),
+    source: 'gmail_sync',
+    matchedEmail: match.matchedEmail,
+    matchType: match.matchType || 'email',
+  };
+  await mergeDoc(db, `clientEmailMessages/${docId}`, doc);
+
+  if (direction === 'inbound') {
+    try {
+      await writeClientActivity({
+        clientId: match.clientId,
+        clientName: match.clientName || '',
+        type: 'email_received',
+        title: subject,
+        body: body.slice(0, 800),
+        actorEmail: fromEmails[0] || '',
+        source: 'system',
+        meta: {
+          gmailMessageId,
+          gmailThreadId: message.threadId || null,
+          emailMessageId: docId,
+          direction: 'inbound',
+        },
+        at: sentAt,
+      });
+    } catch (err) {
+      console.warn('[gmailSync] activity skipped:', err?.message || err);
+    }
+  }
+
+  return { upserted: true, direction, clientId: match.clientId, docId };
+}
+
+async function processMessageIds(accessToken, ids, ctx) {
+  let upserted = 0;
+  let skipped = 0;
+  for (const id of ids) {
+    try {
+      const message = await gmailGetMessage(accessToken, id, 'full');
+      const result = await upsertGmailMessage({ message, ...ctx });
+      if (result.upserted) upserted += 1;
+      else skipped += 1;
+    } catch (err) {
+      console.warn('[gmailSync] message', id, err?.message || err);
+      skipped += 1;
+    }
+  }
+  return { upserted, skipped };
+}
+
+/**
+ * Sync one staff Gmail connection into clientEmailMessages.
+ */
+export async function syncGmailConnection(uid) {
+  const connection = await loadConnection(uid);
+  if (!connection?.refreshToken) {
+    return { ok: false, error: 'Gmail is not connected.' };
+  }
+
+  const db = await getDigestDb();
+  const emailIndex = await buildClientEmailIndex(db);
+  const accessToken = await getValidAccessToken(connection);
+  const selfEmail = String(connection.gmailEmail || '').toLowerCase();
+  const staffEmail = String(connection.staffEmail || '').toLowerCase();
+  const ctx = { emailIndex, selfEmail, staffEmail };
+
+  let upserted = 0;
+  let skipped = 0;
+  let historyId = connection.historyId ? String(connection.historyId) : null;
+
+  if (historyId) {
+    try {
+      let pageToken = '';
+      const ids = new Set();
+      do {
+        const hist = await gmailHistoryList(accessToken, historyId, pageToken);
+        for (const h of hist.history || []) {
+          for (const added of h.messagesAdded || []) {
+            if (added.message?.id) ids.add(added.message.id);
+          }
+        }
+        if (hist.historyId) historyId = String(hist.historyId);
+        pageToken = hist.nextPageToken || '';
+      } while (pageToken);
+
+      const result = await processMessageIds(accessToken, [...ids], ctx);
+      upserted += result.upserted;
+      skipped += result.skipped;
+    } catch (err) {
+      // 404 = historyId too old — fall back to windowed list
+      if (err?.status === 404 || /history/i.test(err?.message || '')) {
+        historyId = null;
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  if (!historyId) {
+    const after = Math.floor((Date.now() - 30 * 24 * 60 * 60 * 1000) / 1000);
+    let pageToken = '';
+    const ids = [];
+    do {
+      const list = await gmailListMessages(accessToken, {
+        q: `after:${after}`,
+        pageToken,
+        maxResults: 50,
+      });
+      for (const m of list.messages || []) {
+        if (m.id) ids.push(m.id);
+      }
+      pageToken = list.nextPageToken || '';
+      // Cap initial sync volume
+      if (ids.length >= 200) break;
+    } while (pageToken);
+
+    const result = await processMessageIds(accessToken, ids, ctx);
+    upserted += result.upserted;
+    skipped += result.skipped;
+
+    const profile = await fetchGmailProfile(accessToken);
+    historyId = profile?.historyId ? String(profile.historyId) : historyId;
+  }
+
+  const now = Date.now();
+  await saveConnection(uid, {
+    historyId: historyId || connection.historyId || null,
+    lastSyncAt: now,
+    updatedAt: now,
+  });
+
+  return { ok: true, upserted, skipped, lastSyncAt: now, gmailEmail: selfEmail };
+}
+
+export async function syncAllGmailConnections() {
+  const db = await getDigestDb();
+  const connections = await fetchCollection(db, 'gmailConnections');
+  const results = [];
+  for (const conn of connections) {
+    if (!conn.refreshToken && !conn.id) continue;
+    try {
+      const r = await syncGmailConnection(conn.id || conn.uid);
+      results.push({ uid: conn.id || conn.uid, ...r });
+    } catch (err) {
+      console.error('[gmailSync] connection', conn.id, err);
+      results.push({ uid: conn.id || conn.uid, ok: false, error: err?.message || String(err) });
+    }
+  }
+  return { ok: true, connections: results.length, results };
+}

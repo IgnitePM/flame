@@ -31,7 +31,7 @@ function replySubject(subject) {
 }
 
 /**
- * Admin/billing compose modal — sends via Workspace Gmail (Netlify mailer).
+ * Admin/billing compose modal — sends via the caller's connected Gmail (OAuth).
  * Supports reply drafts via initialSubject / initialTo / initialBody / inReplyToId.
  */
 export default function ClientEmailComposeModal({
@@ -48,8 +48,33 @@ export default function ClientEmailComposeModal({
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [gmail, setGmail] = useState({ loading: true, connected: false, email: '' });
 
   const initialToKey = Array.isArray(initialTo) ? initialTo.join(',') : '';
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await authedFetch('/.netlify/functions/gmail-oauth-status', {});
+        const data = await resp.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!resp.ok) throw new Error(data.error || 'Could not check Gmail');
+        setGmail({
+          loading: false,
+          connected: Boolean(data.connected),
+          email: data.gmailEmail || '',
+        });
+      } catch (err) {
+        if (!cancelled) {
+          setGmail({ loading: false, connected: false, email: '', error: err?.message });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!client) return;
@@ -84,6 +109,10 @@ export default function ClientEmailComposeModal({
 
   const send = async () => {
     if (busy) return;
+    if (!gmail.connected) {
+      setError('Connect Gmail in Admin → Config before sending.');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
@@ -114,7 +143,8 @@ export default function ClientEmailComposeModal({
               {inReplyToId ? 'Reply to client' : 'Email client'}
             </h3>
             <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-1">
-              {client.name} · via Google Workspace
+              {client.name}
+              {gmail.connected && gmail.email ? ` · from ${gmail.email}` : ' · via your Gmail'}
             </p>
           </div>
           <button
@@ -126,6 +156,11 @@ export default function ClientEmailComposeModal({
           </button>
         </div>
         <div className="p-6 space-y-4 overflow-y-auto">
+          {!gmail.loading && !gmail.connected ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900">
+              Connect your Gmail in Admin → Config before sending client email.
+            </div>
+          ) : null}
           {options.length === 0 ? (
             <p className="text-sm text-slate-500 font-medium">
               No email addresses on this client yet. Add a primary contact or authorized portal emails first.
@@ -186,7 +221,14 @@ export default function ClientEmailComposeModal({
           </button>
           <button
             type="button"
-            disabled={busy || !selected.length || !subject.trim() || !body.trim()}
+            disabled={
+              busy ||
+              gmail.loading ||
+              !gmail.connected ||
+              !selected.length ||
+              !subject.trim() ||
+              !body.trim()
+            }
             onClick={send}
             className="px-8 py-3 rounded-2xl font-black bg-black text-white disabled:opacity-40"
           >

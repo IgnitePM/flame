@@ -10,6 +10,7 @@ function activityTypeLabel(type) {
     call: 'Call',
     meeting: 'Meeting',
     email_sent: 'Email',
+    email_received: 'Email received',
     portal_invite: 'Portal invite',
     estimate_sent: 'Estimate sent',
     estimate_decision: 'Estimate decision',

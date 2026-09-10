@@ -27,7 +27,7 @@ function formatWhen(ms) {
 }
 
 /**
- * CRM outbound email history for a client (full message bodies).
+ * CRM email history for a client (outbound sends + synced inbound).
  */
 export default function ClientEmailHistory({
   client,
@@ -95,12 +95,13 @@ export default function ClientEmailHistory({
 
       {!loadError && messages.length === 0 ? (
         <p className="text-xs italic text-slate-400">
-          No emails sent from Ignite yet. Compose to log a full send history here.
+          No emails yet. Compose from Ignite or sync Gmail (matches CRM emails and the client website domain).
         </p>
       ) : (
         <ul className="space-y-2 max-h-[360px] overflow-y-auto">
           {messages.map((m) => {
             const open = expandedId === m.id;
+            const inbound = m.direction === 'inbound';
             return (
               <li
                 key={m.id}
@@ -113,11 +114,24 @@ export default function ClientEmailHistory({
                 >
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <div className="text-sm font-bold text-slate-800 truncate">
-                        {m.subject || '(no subject)'}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={`text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded ${
+                            inbound
+                              ? 'bg-sky-50 text-sky-700'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          {inbound ? 'In' : 'Out'}
+                        </span>
+                        <div className="text-sm font-bold text-slate-800 truncate">
+                          {m.subject || '(no subject)'}
+                        </div>
                       </div>
                       <div className="text-[10px] font-bold text-slate-400 mt-0.5">
-                        To {(m.to || []).join(', ')} · {m.actorEmail || 'staff'}
+                        {inbound
+                          ? `From ${m.from || m.actorEmail || 'client'}`
+                          : `To ${(m.to || []).join(', ')} · ${m.actorEmail || 'staff'}`}
                       </div>
                     </div>
                     <span className="text-[10px] font-bold text-slate-400 shrink-0">

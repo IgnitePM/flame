@@ -1,11 +1,18 @@
 import { writeClientActivity } from './lib/clientActivity.mjs';
 import { writeClientEmailMessage } from './lib/clientEmailMessage.mjs';
 import { describeAuthError, requireStaffCaller } from './lib/requireAuth.mjs';
-import { sendDigestEmail } from './lib/mailer.mjs';
 import { fetchDoc, getDigestDb, mergeDoc } from './lib/firebaseDigestClient.mjs';
+import {
+  buildRawMimeMessage,
+  getValidAccessToken,
+  gmailGetMessage,
+  gmailSendMessage,
+  headerValue,
+  loadConnection,
+} from './lib/gmailOAuth.mjs';
 
 /**
- * Admin/billing: send an email to client contacts via Workspace Gmail SMTP.
+ * Admin/billing: send an email to client contacts via the caller's connected Gmail.
  * POST { clientId, to: string|string[], subject, body, inReplyToId? }
  */
 export default async (req) => {
@@ -67,6 +74,17 @@ export default async (req) => {
   }
 
   try {
+    const connection = await loadConnection(caller.uid);
+    if (!connection?.refreshToken) {
+      return new Response(
+        JSON.stringify({
+          error: 'Connect Gmail in Config before sending client email.',
+          code: 'gmail_not_connected',
+        }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+
     const db = await getDigestDb();
     const client = await fetchDoc(db, `clients/${clientId}`);
     if (!client) {
@@ -76,24 +94,69 @@ export default async (req) => {
       });
     }
 
-    const html = `<html><body style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#0f172a;line-height:1.5;padding:24px;white-space:pre-wrap;">${text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')}</body></html>`;
+    let threadId = null;
+    let inReplyToHeader = null;
+    let referencesHeader = null;
+    if (inReplyToId) {
+      const prior = await fetchDoc(db, `clientEmailMessages/${inReplyToId}`);
+      if (prior?.gmailThreadId) threadId = prior.gmailThreadId;
+      if (prior?.gmailRfc822MessageId) {
+        inReplyToHeader = prior.gmailRfc822MessageId;
+        referencesHeader = prior.gmailRfc822MessageId;
+      } else if (prior?.gmailMessageId) {
+        try {
+          const accessForLookup = await getValidAccessToken(connection);
+          const priorMsg = await gmailGetMessage(accessForLookup, prior.gmailMessageId, 'metadata');
+          const mid = headerValue(priorMsg?.payload?.headers || [], 'Message-ID');
+          if (mid) {
+            inReplyToHeader = mid;
+            referencesHeader = mid;
+          }
+          if (priorMsg?.threadId) threadId = priorMsg.threadId;
+        } catch (err) {
+          console.warn('[send-client-email] reply headers lookup:', err?.message || err);
+        }
+      }
+    }
 
-    await sendDigestEmail({ to: toList, subject, text, html });
+    const accessToken = await getValidAccessToken(connection);
+    const fromAddr = connection.gmailEmail || caller.email;
+    const raw = buildRawMimeMessage({
+      from: fromAddr,
+      to: toList,
+      subject,
+      text,
+      inReplyTo: inReplyToHeader,
+      references: referencesHeader,
+    });
+
+    const sent = await gmailSendMessage(accessToken, { raw, threadId });
+    let rfc822Id = null;
+    try {
+      const full = await gmailGetMessage(accessToken, sent.id, 'metadata');
+      rfc822Id = headerValue(full?.payload?.headers || [], 'Message-ID') || null;
+    } catch {
+      /* optional */
+    }
 
     const now = Date.now();
     let emailRecord = null;
     try {
       emailRecord = await writeClientEmailMessage({
+        id: sent.id ? `gmail_${sent.id}` : null,
         clientId,
         clientName: client.name || '',
         to: toList,
+        from: fromAddr,
         subject,
         body: text,
         actorEmail: caller.email,
         inReplyToId,
+        direction: 'outbound',
+        gmailMessageId: sent.id || null,
+        gmailThreadId: sent.threadId || threadId || null,
+        gmailRfc822MessageId: rfc822Id,
+        source: 'ignite_send',
         at: now,
       });
     } catch (err) {
@@ -109,6 +172,7 @@ export default async (req) => {
       subject,
       actorEmail: caller.email,
       emailMessageId: emailRecord?.id || null,
+      gmailMessageId: sent.id || null,
       at: now,
     });
 
@@ -125,6 +189,7 @@ export default async (req) => {
           to: toList,
           subject,
           emailMessageId: emailRecord?.id || null,
+          gmailMessageId: sent.id || null,
           inReplyToId,
         },
         at: now,
@@ -143,6 +208,7 @@ export default async (req) => {
         to: toList,
         subject,
         emailMessageId: emailRecord?.id || null,
+        gmailMessageId: sent.id || null,
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     );

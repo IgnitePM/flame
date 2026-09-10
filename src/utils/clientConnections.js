@@ -30,6 +30,11 @@ export function normalizeClientConnectionFields(client = {}) {
     slackWebhookUrl: String(client.slackWebhookUrl || '').trim(),
     googleCalendarUrl: String(client.googleCalendarUrl || '').trim(),
     perplexityUrl: String(client.perplexityUrl || '').trim(),
+    googleBusinessProfileUrl: String(client.googleBusinessProfileUrl || '').trim(),
+    linkedinUrl: String(client.linkedinUrl || '').trim(),
+    facebookUrl: String(client.facebookUrl || '').trim(),
+    instagramUrl: String(client.instagramUrl || '').trim(),
+    twitterUrl: String(client.twitterUrl || '').trim(),
     pinnedDocs: normalizePinnedDocs(client.pinnedDocs),
   };
 }
@@ -38,6 +43,15 @@ export function clientConnectionLinks(client) {
   const c = normalizeClientConnectionFields(client || {});
   const links = [
     { key: 'website', label: 'Website', href: normalizeExternalUrl(client?.website) },
+    {
+      key: 'gmb',
+      label: 'Google Business',
+      href: normalizeExternalUrl(c.googleBusinessProfileUrl),
+    },
+    { key: 'linkedin', label: 'LinkedIn', href: normalizeExternalUrl(c.linkedinUrl) },
+    { key: 'facebook', label: 'Facebook', href: normalizeExternalUrl(c.facebookUrl) },
+    { key: 'instagram', label: 'Instagram', href: normalizeExternalUrl(c.instagramUrl) },
+    { key: 'twitter', label: 'X', href: normalizeExternalUrl(c.twitterUrl) },
     { key: 'drive', label: 'Google Drive', href: normalizeExternalUrl(c.googleDriveFolderUrl) },
     { key: 'hubspot', label: 'HubSpot', href: normalizeExternalUrl(c.hubspotProfileUrl) },
     { key: 'slack', label: 'Slack', href: normalizeExternalUrl(c.slackChannelUrl) },
