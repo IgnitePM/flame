@@ -27,26 +27,32 @@ function formatWhen(ms) {
 }
 
 /**
- * CRM email history for a client (outbound sends + synced inbound).
+ * CRM email history for a client or lead (outbound sends + synced inbound).
+ * Prefer `entity` + `entityKind`; legacy `client` prop still works.
  */
 export default function ClientEmailHistory({
   client,
+  entity,
+  entityKind = 'client',
   onCompose,
   onReply,
   canCompose = false,
 }) {
+  const resolved = entity || client;
+  const kind = entity ? entityKind : 'client';
   const [messages, setMessages] = useState([]);
   const [expandedId, setExpandedId] = useState(null);
   const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
-    if (!client?.id) {
+    if (!resolved?.id) {
       setMessages([]);
       return undefined;
     }
+    const isLead = kind === 'lead';
     const q = query(
       collection(db, 'clientEmailMessages'),
-      where('clientId', '==', client.id),
+      where(isLead ? 'leadId' : 'clientId', '==', resolved.id),
       orderBy('sentAt', 'desc'),
       limit(50),
     );
@@ -67,9 +73,9 @@ export default function ClientEmailHistory({
       },
     );
     return () => unsub();
-  }, [client?.id]);
+  }, [resolved?.id, kind]);
 
-  if (!client?.id) return null;
+  if (!resolved?.id) return null;
 
   return (
     <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
@@ -80,7 +86,7 @@ export default function ClientEmailHistory({
         {canCompose && onCompose && (
           <button
             type="button"
-            onClick={() => onCompose(client)}
+            onClick={() => onCompose(resolved)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black text-white text-[10px] font-black uppercase tracking-widest"
           >
             <Mail className="w-3.5 h-3.5" />
@@ -95,7 +101,7 @@ export default function ClientEmailHistory({
 
       {!loadError && messages.length === 0 ? (
         <p className="text-xs italic text-slate-400">
-          No emails yet. Compose from Ignite or sync Gmail (matches CRM emails and the client website domain).
+          No emails yet. Compose from Ignite or sync Gmail (matches CRM emails and website domain).
         </p>
       ) : (
         <ul className="space-y-2 max-h-[360px] overflow-y-auto">
@@ -130,7 +136,7 @@ export default function ClientEmailHistory({
                       </div>
                       <div className="text-[10px] font-bold text-slate-400 mt-0.5">
                         {inbound
-                          ? `From ${m.from || m.actorEmail || 'client'}`
+                          ? `From ${m.from || m.actorEmail || (kind === 'lead' ? 'lead' : 'client')}`
                           : `To ${(m.to || []).join(', ')} · ${m.actorEmail || 'staff'}`}
                       </div>
                     </div>

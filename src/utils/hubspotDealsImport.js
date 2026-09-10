@@ -152,6 +152,65 @@ export function parseAmount(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
+export function normalizeCompanyKey(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/**
+ * Find an open lead that matches a deal/company name (exact or containment).
+ * Prefers the longest company/name key match.
+ */
+export function findOpenLeadIdForDealName(dealName, leads = []) {
+  const deal = normalizeCompanyKey(dealName);
+  if (!deal) return null;
+  let bestId = null;
+  let bestLen = 0;
+  for (const lead of leads || []) {
+    if (!lead?.id) continue;
+    if (lead.status === 'archived' || lead.status === 'converted') continue;
+    for (const candidate of [lead.companyName, lead.name]) {
+      const key = normalizeCompanyKey(candidate);
+      if (key.length < 3) continue;
+      if (deal === key || deal.includes(key) || key.includes(deal)) {
+        if (key.length > bestLen) {
+          bestId = lead.id;
+          bestLen = key.length;
+        }
+      }
+    }
+  }
+  return bestId;
+}
+
+/**
+ * Group open leads that share the same normalized company/name key.
+ * Returns groups with 2+ leads, each sorted oldest-first.
+ */
+export function findDuplicateLeadGroups(leads = []) {
+  const byKey = new Map();
+  for (const lead of leads || []) {
+    if (!lead?.id) continue;
+    if (lead.status === 'archived' || lead.status === 'converted') continue;
+    const key = normalizeCompanyKey(lead.companyName || lead.name);
+    if (key.length < 3) continue;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(lead);
+  }
+  const groups = [];
+  for (const [key, group] of byKey) {
+    if (group.length < 2) continue;
+    group.sort(
+      (a, b) =>
+        (a.createdAt || a.updatedAt || 0) - (b.createdAt || b.updatedAt || 0),
+    );
+    groups.push({ key, leads: group });
+  }
+  return groups;
+}
+
 export function hubspotDealDocId(recordId) {
   return `hs_${String(recordId || '').trim()}`;
 }

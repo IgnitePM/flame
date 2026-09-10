@@ -2121,6 +2121,7 @@ const AdminDashboard = ({
           setDoc={setDoc}
           setDeleteConfirm={setDeleteConfirm}
           generateSalesCoach={generateSalesCoach}
+          canComposeEmail={!isRestrictedStaff && (isAdmin || canBilling)}
         />
       )}
 

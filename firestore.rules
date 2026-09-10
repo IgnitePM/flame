@@ -234,11 +234,12 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // Outbound + synced Gmail client emails (CRM history). Staff only; digest bot writes.
+    // Outbound + synced Gmail CRM emails (client or lead). Staff only; digest bot writes.
     match /clientEmailMessages/{messageId} {
       allow read: if isAnyStaff();
       allow create: if isAnyStaff() || isBilling();
-      allow update, delete: if isAdmin();
+      allow update: if isAnyStaff() || isBilling();
+      allow delete: if isAdmin();
     }
 
     // Per-staff Gmail OAuth tokens. Browser clients must never read these —
@@ -263,6 +264,14 @@ service cloud.firestore {
          request.resource.data.source == 'system');
       allow update: if false;
       allow delete: if isAdmin();
+    }
+
+    // Lead CRM activity timeline — sales-funnel staff + digest bot (billing) for sync.
+    match /leadActivities/{activityId} {
+      allow read: if hasSalesFunnel() || isBilling();
+      allow create: if hasSalesFunnel() || isBilling();
+      allow update: if false;
+      allow delete: if hasSalesFunnel() && isAdmin();
     }
   }
 }

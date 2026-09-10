@@ -1,9 +1,16 @@
 import { describeAuthError, requireStaffCaller } from './lib/requireAuth.mjs';
+import {
+  collectGeminiText,
+  geminiJsonGenerationConfig,
+  geminiModelCandidates,
+  shouldTryNextGeminiModel,
+} from './lib/geminiModels.mjs';
 
 /**
  * Admin/billing: enrich a client company profile from its website.
- * Grounded in fetched page HTML (home + about/contact) with deterministic
- * extraction first; Gemini only summarizes/structures that content — no web search.
+ * Prefer fetched page HTML (home + about/contact) with deterministic
+ * extraction; Gemini structures that content. If the site blocks our
+ * fetch (common WAF 403), fall back to Gemini URL-context tooling.
  *
  * POST { website, companyName? }
  */
@@ -55,17 +62,7 @@ function extractFirstJsonObject(text) {
 }
 
 function collectCandidateText(data) {
-  const candidates = Array.isArray(data?.candidates) ? data.candidates : [];
-  const bits = [];
-  for (const cand of candidates) {
-    const parts = cand?.content?.parts;
-    if (!Array.isArray(parts)) continue;
-    for (const p of parts) {
-      if (typeof p === 'string' && p.trim()) bits.push(p.trim());
-      else if (typeof p?.text === 'string' && p.text.trim()) bits.push(p.text.trim());
-    }
-  }
-  return bits.join('\n').trim();
+  return collectGeminiText(data);
 }
 
 function normalizeWebsite(raw) {
@@ -218,30 +215,80 @@ function registrableHint(hostname) {
 
 async function fetchHtml(url) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12000);
+  const timer = setTimeout(() => controller.abort(), 15000);
   try {
     const resp = await fetch(url, {
       method: 'GET',
       redirect: 'follow',
       signal: controller.signal,
       headers: {
+        // Real browser UA — many sites (incl. nginx WAF) block bot-style agents
+        // and some datacenter IPs with soft/hard 403 pages.
         'User-Agent':
-          'Mozilla/5.0 (compatible; IgnitePM-CRM-Enrichment/1.1; +https://ignitetimetracker.netlify.app)',
-        Accept: 'text/html,application/xhtml+xml',
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        Accept:
+          'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-CA,en-US;q=0.9,en;q=0.8',
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+        'Upgrade-Insecure-Requests': '1',
       },
     });
-    if (!resp.ok) return { ok: false, status: resp.status, html: '', finalUrl: url };
+    const finalUrl = resp.url || url;
     const ctype = String(resp.headers.get('content-type') || '');
     if (ctype && !/html|text|xml/i.test(ctype)) {
-      return { ok: false, status: resp.status, html: '', finalUrl: resp.url || url };
+      return { ok: false, status: resp.status, html: '', finalUrl };
     }
     const html = await resp.text();
-    return { ok: true, status: resp.status, html, finalUrl: resp.url || url };
+    if (looksLikeBlockedPage(html, resp.status)) {
+      return {
+        ok: false,
+        status: resp.status || 403,
+        html: '',
+        finalUrl,
+        blocked: true,
+        error: `Could not fetch website (HTTP ${resp.status || 403}).`,
+      };
+    }
+    // Some WAFs return a soft non-2xx with a usable HTML body; accept it.
+    if (!resp.ok && !html) {
+      return { ok: false, status: resp.status, html: '', finalUrl };
+    }
+    if (!html || html.length < 80) {
+      return { ok: false, status: resp.status, html: '', finalUrl };
+    }
+    return { ok: true, status: resp.status, html, finalUrl };
   } catch (err) {
     return { ok: false, error: err?.message || String(err), html: '', finalUrl: url };
   } finally {
     clearTimeout(timer);
   }
+}
+
+function looksLikeBlockedPage(html, status) {
+  const raw = String(html || '');
+  const title = (raw.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '';
+  const text = raw
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  if (/just a moment|cf-browser-verification|challenge-platform|attention required/i.test(raw)) {
+    return true;
+  }
+  if (/403\s*-\s*forbidden|access to this page is forbidden|access denied/i.test(title)) {
+    return true;
+  }
+  if (
+    (status === 401 || status === 403 || status === 429) &&
+    text.length < 400 &&
+    /forbidden|access denied|blocked|bot|captcha|cloudflare/i.test(text)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 async function gatherSiteCorpus(website) {
@@ -412,25 +459,113 @@ function mergeExtractedOverModel(extracted, modelSuggestion, website) {
   return out;
 }
 
-async function callGeminiJson({ apiKey, model, prompt }) {
+async function callGeminiJson({ apiKey, model, prompt, tools = null }) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model,
   )}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const resp = await fetch(url, {
+  const makeBody = (withThinking) => {
+    const body = {
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: withThinking
+        ? geminiJsonGenerationConfig({
+            temperature: 0.1,
+            topP: 0.8,
+            maxOutputTokens: 4096,
+          })
+        : {
+            temperature: 0.1,
+            topP: 0.8,
+            maxOutputTokens: 4096,
+            responseMimeType: 'application/json',
+          },
+    };
+    if (tools) body.tools = tools;
+    return body;
+  };
+
+  let resp = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.1,
-        topP: 0.8,
-        maxOutputTokens: 4096,
-        responseMimeType: 'application/json',
-      },
-    }),
+    body: JSON.stringify(makeBody(true)),
   });
-  const data = await resp.json().catch(() => ({}));
+  let data = await resp.json().catch(() => ({}));
+  if (
+    !resp.ok &&
+    /thinking|unknown name|invalid.*argument/i.test(
+      String(data?.error?.message || data?.message || ''),
+    )
+  ) {
+    resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(makeBody(false)),
+    });
+    data = await resp.json().catch(() => ({}));
+  }
   return { resp, data };
+}
+
+async function enrichViaUrlContext({ apiKey, website, companyName }) {
+  const prompt = `
+You extract a CRM company profile for this business website.
+Website: ${website}
+${companyName ? `CRM record name (may be informal): "${companyName}"` : ''}
+
+Use the URL context tool to read the website (and about/contact pages if linked).
+
+HARD RULES:
+- Use ONLY facts present on the website pages you retrieved.
+- Do NOT invent phone numbers, emails, addresses, or social URLs.
+- If a field is not clearly supported, return an empty string.
+- companyDescription: 1–3 sentences about THIS business only.
+- industry: short label only if obvious.
+- primaryContact: only if a real person is clearly listed; otherwise empty strings.
+- website must stay on the same company domain.
+- Respond with one JSON object only:
+{
+  "name": "",
+  "website": "",
+  "phone": "",
+  "companyDescription": "",
+  "industry": "",
+  "address": "",
+  "city": "",
+  "region": "",
+  "postalCode": "",
+  "country": "",
+  "googleBusinessProfileUrl": "",
+  "linkedinUrl": "",
+  "facebookUrl": "",
+  "instagramUrl": "",
+  "twitterUrl": "",
+  "primaryContact": { "name": "", "email": "", "phone": "", "title": "" },
+  "confidenceNotes": "what came from the pages vs left blank"
+}
+`.trim();
+
+  let lastError = null;
+  for (const model of geminiModelCandidates()) {
+    const { resp, data } = await callGeminiJson({
+      apiKey,
+      model,
+      prompt,
+      tools: [{ url_context: {} }],
+    });
+    if (!resp.ok) {
+      lastError = data?.error?.message || data?.message || 'Gemini request failed';
+      if (shouldTryNextGeminiModel(lastError)) continue;
+      // Some models reject url_context — try next
+      if (/url.?context|tool/i.test(String(lastError))) continue;
+      break;
+    }
+    const text = collectCandidateText(data);
+    const parsed = text ? extractFirstJsonObject(text) : null;
+    if (parsed) {
+      return { ok: true, suggestion: cleanSuggestion(parsed), model, lastError: null };
+    }
+    lastError = 'Model returned non-JSON enrichment output.';
+  }
+  return { ok: false, error: lastError || 'URL-context enrichment failed.' };
 }
 
 export default async (req) => {
@@ -479,10 +614,38 @@ export default async (req) => {
 
   const gathered = await gatherSiteCorpus(website);
   if (!gathered.ok) {
+    // Direct fetch blocked (common WAF 403 from Netlify IPs) — use Gemini URL context.
+    const viaUrl = await enrichViaUrlContext({ apiKey, website, companyName });
+    if (viaUrl.ok) {
+      const suggestion = viaUrl.suggestion;
+      if (!suggestion.website) suggestion.website = website;
+      if (!suggestion.name && companyName) suggestion.name = companyName;
+      if (!suggestion.confidenceNotes) {
+        suggestion.confidenceNotes =
+          'Fetched via Gemini URL context because the site blocked a direct server fetch.';
+      }
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          suggestion,
+          meta: {
+            websiteFetched: false,
+            usedUrlContext: true,
+            usedGoogleSearch: false,
+            pagesFetched: [],
+            fetchError: gathered.error || null,
+            confidenceNotes: suggestion.confidenceNotes,
+            model: viaUrl.model || null,
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
     return new Response(
       JSON.stringify({
         error:
           gathered.error ||
+          viaUrl.error ||
           'Could not load that website. Check the URL is public and try again.',
       }),
       { status: 422, headers: { 'Content-Type': 'application/json' } },
@@ -558,17 +721,7 @@ PAGE TEXT:
 ${pageCorpus || '(empty)'}
 `.trim();
 
-  const preferredModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-  const modelCandidates = Array.from(
-    new Set([
-      preferredModel,
-      'gemini-2.5-flash',
-      'gemini-2.5-flash-lite',
-      'gemini-2.0-flash',
-      'gemini-1.5-flash-latest',
-      'gemini-1.5-flash',
-    ]),
-  );
+  const modelCandidates = geminiModelCandidates();
 
   let parsed = null;
   let lastError = null;
@@ -576,18 +729,9 @@ ${pageCorpus || '(empty)'}
     const { resp, data } = await callGeminiJson({ apiKey, model, prompt });
     if (!resp.ok) {
       lastError = data?.error?.message || data?.message || 'Gemini request failed';
-      const msg = String(lastError || '').toLowerCase();
-      const shouldTryNext =
-        msg.includes('not found') ||
-        msg.includes('not supported') ||
-        msg.includes('unsupported') ||
-        msg.includes('no longer available') ||
-        msg.includes('deprecated');
-      if (shouldTryNext) continue;
-      return new Response(JSON.stringify({ error: lastError }), {
-        status: resp.status || 500,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      if (shouldTryNextGeminiModel(lastError)) continue;
+      // Still return deterministic HTML extraction below
+      break;
     }
     const text = collectCandidateText(data);
     parsed = text ? extractFirstJsonObject(text) : null;

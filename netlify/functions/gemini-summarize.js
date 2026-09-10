@@ -236,26 +236,24 @@ ${JSON.stringify(context).slice(0, 120000)}
 
     const prompt = kind === 'sales' ? salesPrompt : opsPrompt;
 
+    const preferredModel = process.env.GEMINI_MODEL || 'gemini-flash-latest';
+    const {
+      collectGeminiText,
+      geminiJsonGenerationConfig,
+      geminiModelCandidates,
+      shouldTryNextGeminiModel,
+    } = await import('./lib/geminiModels.mjs');
+
     const requestBody = {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
+      generationConfig: geminiJsonGenerationConfig({
         temperature: kind === 'sales' ? 0.35 : 0.3,
         topP: 0.9,
-        maxOutputTokens: kind === 'sales' ? 4096 : 900,
-        responseMimeType: 'application/json',
-      },
+        maxOutputTokens: kind === 'sales' ? 8192 : 4096,
+      }),
     };
 
-    const preferredModel = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
-    const modelCandidates = Array.from(
-      new Set([
-        preferredModel,
-        'gemini-2.5-flash-lite',
-        'gemini-2.5-flash',
-        'gemini-1.5-flash-latest',
-        'gemini-1.5-flash',
-      ]),
-    );
+    const modelCandidates = geminiModelCandidates(preferredModel);
 
     let data = null;
     let resp = null;
@@ -273,20 +271,32 @@ ${JSON.stringify(context).slice(0, 120000)}
       data = await resp.json().catch(() => ({}));
       if (resp.ok) break;
       lastError = data?.error?.message || data?.message || 'Gemini request failed';
-      const msg = String(lastError || '').toLowerCase();
-      const shouldTryNext =
-        msg.includes('not found') ||
-        msg.includes('not supported') ||
-        msg.includes('unsupported') ||
-        msg.includes('no longer available') ||
-        msg.includes('deprecated');
-      if (!shouldTryNext) {
-        return {
-          statusCode: resp.status || 500,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ error: lastError }),
+      if (shouldTryNextGeminiModel(lastError)) continue;
+      if (/thinking|unknown name|invalid.*argument/i.test(String(lastError))) {
+        const fallbackBody = {
+          ...requestBody,
+          generationConfig: {
+            temperature: kind === 'sales' ? 0.35 : 0.3,
+            topP: 0.9,
+            maxOutputTokens: kind === 'sales' ? 8192 : 4096,
+            responseMimeType: 'application/json',
+          },
         };
+        resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(fallbackBody),
+        });
+        data = await resp.json().catch(() => ({}));
+        if (resp.ok) break;
+        lastError = data?.error?.message || data?.message || lastError;
+        if (shouldTryNextGeminiModel(lastError)) continue;
       }
+      return {
+        statusCode: resp.status || 500,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: lastError }),
+      };
     }
 
     if (!resp?.ok) {
@@ -305,7 +315,7 @@ ${JSON.stringify(context).slice(0, 120000)}
         data?.candidates?.[0]?.finishMessage ||
         '',
     );
-    const text = collectCandidateText(data);
+    const text = collectGeminiText(data);
     const parsed = text ? extractFirstJsonObject(text) : null;
 
     if (kind === 'sales') {

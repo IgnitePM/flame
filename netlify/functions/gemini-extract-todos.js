@@ -2,10 +2,19 @@
 
 const extractFirstJsonObject = (text) => {
   if (typeof text !== 'string') return null;
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
+  const cleaned = String(text || '')
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    /* fall through */
+  }
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
   if (start === -1 || end === -1 || end <= start) return null;
-  const slice = text.slice(start, end + 1);
+  const slice = cleaned.slice(start, end + 1);
   try {
     return JSON.parse(slice);
   } catch {
@@ -27,6 +36,13 @@ exports.handler = async (event) => {
     // or ESM. Runs before the Gemini key is read so anonymous callers cannot
     // reach the paid API at all.
     const { requireStaffCaller, describeAuthError } = await import('./lib/requireAuth.mjs');
+    const {
+      collectGeminiText,
+      geminiJsonGenerationConfig,
+      geminiModelCandidates,
+      shouldTryNextGeminiModel,
+    } = await import('./lib/geminiModels.mjs');
+
     try {
       await requireStaffCaller(event.headers);
     } catch (err) {
@@ -49,8 +65,6 @@ exports.handler = async (event) => {
         }),
       };
     }
-
-    const preferredModel = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
 
     const payload = JSON.parse(event.body || '{}');
     const transcript = String(payload.transcript || '').trim();
@@ -125,24 +139,14 @@ ${trimmedTranscript}
 
     const requestBody = {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
+      generationConfig: geminiJsonGenerationConfig({
         temperature: 0.2,
         topP: 0.9,
-        maxOutputTokens: 900,
-        responseMimeType: 'application/json',
-      },
+        maxOutputTokens: 8192,
+      }),
     };
 
-    // Try preferred model first, then fall back to known low-cost options.
-    const modelCandidates = Array.from(
-      new Set([
-        preferredModel,
-        'gemini-2.5-flash-lite',
-        'gemini-2.5-flash',
-        'gemini-1.5-flash-latest',
-        'gemini-1.5-flash',
-      ]),
-    );
+    const modelCandidates = geminiModelCandidates();
 
     let data = null;
     let resp = null;
@@ -164,16 +168,28 @@ ${trimmedTranscript}
       lastError =
         data?.error?.message || data?.message || 'Gemini request failed';
 
-      // Retry on model-not-found / unsupported-model errors only.
-      const msg = String(lastError || '').toLowerCase();
-      const shouldTryNextModel =
-        msg.includes('not found') ||
-        msg.includes('not supported for generatecontent') ||
-        msg.includes('unsupported') ||
-        msg.includes('no longer available') ||
-        msg.includes('deprecated');
-
-      if (!shouldTryNextModel) {
+      if (!shouldTryNextGeminiModel(lastError)) {
+        // Unknown thinkingConfig field on older models — retry without it once.
+        if (/thinking|unknown name|invalid.*argument/i.test(String(lastError))) {
+          const fallbackBody = {
+            ...requestBody,
+            generationConfig: {
+              temperature: 0.2,
+              topP: 0.9,
+              maxOutputTokens: 8192,
+              responseMimeType: 'application/json',
+            },
+          };
+          resp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(fallbackBody),
+          });
+          data = await resp.json().catch(() => ({}));
+          if (resp.ok) break;
+          lastError = data?.error?.message || data?.message || lastError;
+          if (shouldTryNextGeminiModel(lastError)) continue;
+        }
         return {
           statusCode: resp.status || 500,
           headers: { 'Content-Type': 'application/json' },
@@ -194,13 +210,9 @@ ${trimmedTranscript}
       };
     }
 
-    const text =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-      data?.candidates?.[0]?.content?.parts?.[0] ||
-      '';
-
+    const text = collectGeminiText(data);
     let parsed = null;
-    if (typeof text === 'object') {
+    if (typeof text === 'object' && text) {
       parsed = text;
     } else {
       parsed = extractFirstJsonObject(text);
@@ -210,6 +222,8 @@ ${trimmedTranscript}
       console.error(
         '[gemini-extract-todos] unparseable model output:',
         typeof text === 'string' ? text.slice(0, 2000) : text,
+        'finishReason=',
+        data?.candidates?.[0]?.finishReason,
       );
       return {
         statusCode: 502,
@@ -220,12 +234,22 @@ ${trimmedTranscript}
       };
     }
 
+    const normalizeCategory = (raw) => {
+      const cat = String(raw || '').trim();
+      if (!cat) return generalCategoryLabel;
+      if (allowedCategories.includes(cat)) return cat;
+      const lower = cat.toLowerCase();
+      const hit = allowedCategories.find((c) => c.toLowerCase() === lower);
+      if (hit) return hit;
+      return generalCategoryLabel;
+    };
+
     const todos = parsed.todos
       .map((t) => ({
         text: String(t.text || '').trim(),
-        category: String(t.category || '').trim(),
+        category: normalizeCategory(t.category),
       }))
-      .filter((t) => t.text && allowedCategories.includes(t.category))
+      .filter((t) => t.text)
       .slice(0, 15);
 
     return {
@@ -243,4 +267,3 @@ ${trimmedTranscript}
     };
   }
 };
-

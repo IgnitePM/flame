@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Upload, X } from 'lucide-react';
-import { parseHubspotDealsCsv } from '../../utils/hubspotDealsImport.js';
+import { parseHubspotDealsCsv, findOpenLeadIdForDealName } from '../../utils/hubspotDealsImport.js';
 import {
   formatDealAmount,
   staffDisplayFromEmail,
@@ -12,10 +12,12 @@ export default function HubspotImportModal({
   onClose,
   stages = [],
   deals = [],
+  leads = [],
   clients = [],
   adminUsers = [],
   user,
   setDoc,
+  updateDoc,
   doc,
 }) {
   const me = String(user?.email || '').trim().toLowerCase();
@@ -86,28 +88,53 @@ export default function HubspotImportModal({
     try {
       const now = Date.now();
       let created = 0;
+      let reusedLeads = 0;
+      // Mutable open-lead list so later rows in this CSV reuse leads created above.
+      const openLeadsForMatch = (leads || []).filter(
+        (l) => l.status !== 'archived' && l.status !== 'converted',
+      );
+
       for (const row of toImport) {
-        const assoc = row.clientId
-          ? { leadId: null, clientId: row.clientId }
-          : { leadId: row.leadDocId, clientId: null };
-        if (!row.clientId) {
-          await setDoc(doc('leads', row.leadDocId), {
-            name: row.name,
-            companyName: row.name,
-            website: '',
-            phone: '',
-            notes: `Imported from HubSpot (Record ID ${row.recordId}).`,
-            ownerEmail: row.ownerEmail || me,
-            primaryContact: { name: '', email: '', phone: '', title: '' },
-            contacts: [],
-            status: 'open',
-            convertedClientId: null,
-            hubspotRecordId: row.recordId,
-            createdAt: now,
-            updatedAt: now,
-            lastActivityAt: now,
-          });
+        let leadId = null;
+        let clientId = row.clientId || null;
+        if (!clientId) {
+          leadId = findOpenLeadIdForDealName(row.name, openLeadsForMatch);
+
+          if (!leadId) {
+            leadId = row.leadDocId;
+            const leadDoc = {
+              name: row.name,
+              companyName: row.name,
+              website: '',
+              phone: '',
+              notes: `Imported from HubSpot (Record ID ${row.recordId}).`,
+              ownerEmail: row.ownerEmail || me,
+              primaryContact: { name: '', email: '', phone: '', title: '' },
+              contacts: [],
+              status: 'open',
+              convertedClientId: null,
+              hubspotRecordId: row.recordId,
+              createdAt: now,
+              updatedAt: now,
+              lastActivityAt: now,
+            };
+            await setDoc(doc('leads', leadId), leadDoc);
+            openLeadsForMatch.push({ id: leadId, ...leadDoc });
+          } else {
+            reusedLeads += 1;
+            if (typeof updateDoc === 'function') {
+              try {
+                await updateDoc(doc('leads', leadId), {
+                  updatedAt: now,
+                  lastActivityAt: now,
+                });
+              } catch {
+                /* non-fatal */
+              }
+            }
+          }
         }
+
         await setDoc(doc('deals', row.dealDocId), {
           name: row.name,
           amount: row.amount || 0,
@@ -115,8 +142,8 @@ export default function HubspotImportModal({
           ownerEmail: row.ownerEmail || me,
           closeDate: row.closeDate,
           createDate: todayYmd(),
-          leadId: assoc.leadId,
-          clientId: assoc.clientId,
+          leadId,
+          clientId,
           lostReason: '',
           notes: [],
           hubspotRecordId: row.recordId,
@@ -127,7 +154,7 @@ export default function HubspotImportModal({
         });
         created += 1;
       }
-      setResult({ created, skipped: skipCount });
+      setResult({ created, skipped: skipCount, reusedLeads });
     } catch (err) {
       setError(err?.message || String(err));
     } finally {
@@ -180,6 +207,11 @@ export default function HubspotImportModal({
               Imported {result.created} deal{result.created === 1 ? '' : 's'}
               {result.skipped
                 ? ` · skipped ${result.skipped} already in Sales`
+                : ''}
+              {result.reusedLeads
+                ? ` · reused ${result.reusedLeads} existing lead${
+                    result.reusedLeads === 1 ? '' : 's'
+                  }`
                 : ''}
               .
             </p>

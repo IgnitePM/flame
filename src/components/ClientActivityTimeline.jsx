@@ -92,14 +92,20 @@ function ActivityRow({ activity: a }) {
 }
 
 /**
- * HubSpot-style per-client activity feed (manual notes + system events).
- * Emails / long notes stay collapsed until expanded.
+ * HubSpot-style activity feed for a client or lead.
+ * Prefer `entity` + `entityKind` + `logActivity`; legacy `client` + `logClientActivity` still work.
  */
 export default function ClientActivityTimeline({
   client,
+  entity,
+  entityKind = 'client',
   logClientActivity,
+  logActivity,
   canCompose = true,
 }) {
+  const resolved = entity || client;
+  const kind = entity ? entityKind : 'client';
+  const logger = logActivity || logClientActivity;
   const [activities, setActivities] = useState([]);
   const [filter, setFilter] = useState('all');
   const [composeType, setComposeType] = useState('note');
@@ -110,13 +116,14 @@ export default function ClientActivityTimeline({
   const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
-    if (!client?.id) {
+    if (!resolved?.id) {
       setActivities([]);
       return undefined;
     }
+    const isLead = kind === 'lead';
     const q = query(
-      collection(db, 'clientActivities'),
-      where('clientId', '==', client.id),
+      collection(db, isLead ? 'leadActivities' : 'clientActivities'),
+      where(isLead ? 'leadId' : 'clientId', '==', resolved.id),
       orderBy('at', 'desc'),
       limit(100),
     );
@@ -137,7 +144,7 @@ export default function ClientActivityTimeline({
       },
     );
     return () => unsub();
-  }, [client?.id]);
+  }, [resolved?.id, kind]);
 
   const filtered = useMemo(
     () => activities.filter((a) => activityMatchesFilter(a, filter)),
@@ -145,23 +152,36 @@ export default function ClientActivityTimeline({
   );
 
   const submit = async () => {
-    if (!client?.id || !logClientActivity || saving) return;
+    if (!resolved?.id || !logger || saving) return;
     const title = composeTitle.trim() || activityTypeLabel(composeType);
     setSaving(true);
     try {
       const transcript = String(composeTranscriptUrl || '').trim();
-      await logClientActivity({
-        clientId: client.id,
-        clientName: client.name || '',
-        type: composeType,
-        title,
-        body: composeBody.trim(),
-        source: 'manual',
-        meta:
-          composeType === 'meeting' && transcript
-            ? { transcriptUrl: transcript, googleDocUrl: transcript }
-            : {},
-      });
+      const meta =
+        composeType === 'meeting' && transcript
+          ? { transcriptUrl: transcript, googleDocUrl: transcript }
+          : {};
+      if (kind === 'lead') {
+        await logger({
+          leadId: resolved.id,
+          leadName: resolved.name || resolved.companyName || '',
+          type: composeType,
+          title,
+          body: composeBody.trim(),
+          source: 'manual',
+          meta,
+        });
+      } else {
+        await logger({
+          clientId: resolved.id,
+          clientName: resolved.name || '',
+          type: composeType,
+          title,
+          body: composeBody.trim(),
+          source: 'manual',
+          meta,
+        });
+      }
       setComposeTitle('');
       setComposeBody('');
       setComposeTranscriptUrl('');
@@ -172,7 +192,7 @@ export default function ClientActivityTimeline({
     }
   };
 
-  if (!client?.id) return null;
+  if (!resolved?.id) return null;
 
   return (
     <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-4">
@@ -198,7 +218,7 @@ export default function ClientActivityTimeline({
         </div>
       </div>
 
-      {canCompose && logClientActivity && (
+      {canCompose && logger && (
         <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
           <div className="grid gap-2 sm:grid-cols-[140px_1fr]">
             <select

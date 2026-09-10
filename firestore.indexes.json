@@ -9,10 +9,26 @@
       ]
     },
     {
+      "collectionGroup": "leadActivities",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "leadId", "order": "ASCENDING" },
+        { "fieldPath": "at", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "clientEmailMessages",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "clientId", "order": "ASCENDING" },
+        { "fieldPath": "sentAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "clientEmailMessages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "leadId", "order": "ASCENDING" },
         { "fieldPath": "sentAt", "order": "DESCENDING" }
       ]
     }

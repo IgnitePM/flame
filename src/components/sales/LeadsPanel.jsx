@@ -1,10 +1,18 @@
 import React, { useMemo, useState } from 'react';
-import { Mail, Trash2, UserPlus, X } from 'lucide-react';
+import { Mail, Sparkles, Trash2, UserPlus, X } from 'lucide-react';
 import {
   formatRelativeActivity,
   staffDisplayFromEmail,
 } from '../../utils/salesPipeline.js';
+import { findDuplicateLeadGroups } from '../../utils/hubspotDealsImport.js';
 import MentionTextarea from '../MentionTextarea.jsx';
+import ClientActivityTimeline from '../ClientActivityTimeline.jsx';
+import ClientEmailHistory from '../ClientEmailHistory.jsx';
+import ClientEmailComposeModal from '../ClientEmailComposeModal.jsx';
+import ClientEnrichPreviewModal from '../ClientEnrichPreviewModal.jsx';
+import { buildLeadActivityDoc } from '../../utils/leadActivity.js';
+import { authedFetch } from '../../utils/authedFetch.js';
+import { db, addDoc as fbAddDoc, collection as fbCollection } from '../../firebase.js';
 
 function emptyLeadForm(ownerEmail = '') {
   return {
@@ -21,6 +29,12 @@ function emptyLeadForm(ownerEmail = '') {
   };
 }
 
+function replySubject(subject) {
+  const s = String(subject || '').trim();
+  if (!s) return 'Re:';
+  return /^re:/i.test(s) ? s : `Re: ${s}`;
+}
+
 export default function LeadsPanel({
   leads = [],
   deals = [],
@@ -35,6 +49,7 @@ export default function LeadsPanel({
   onConvertLead,
   onOpenDeal,
   onImport,
+  canComposeEmail = false,
 }) {
   const me = String(user?.email || '').trim().toLowerCase();
   const [showConverted, setShowConverted] = useState(false);
@@ -42,6 +57,17 @@ export default function LeadsPanel({
   const [form, setForm] = useState(() => emptyLeadForm(me));
   const [saving, setSaving] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
+  const [detailTab, setDetailTab] = useState('activity');
+  const [merging, setMerging] = useState(false);
+  const [enrichBusy, setEnrichBusy] = useState(false);
+  const [enrichPreview, setEnrichPreview] = useState(null);
+  const [composeState, setComposeState] = useState(null);
+
+  const duplicateGroups = useMemo(
+    () => findDuplicateLeadGroups(leads),
+    [leads],
+  );
 
   const visibleLeads = useMemo(() => {
     return (leads || [])
@@ -144,12 +170,160 @@ export default function LeadsPanel({
         updatedAt: Date.now(),
       });
       if (editingId === lead.id) closeForm();
+      if (expandedId === lead.id) setExpandedId(null);
     } catch (err) {
       window.alert(`Could not archive lead.\n\n${err?.message || String(err)}`);
     }
   };
 
+  const mergeDuplicateLeads = async () => {
+    if (!duplicateGroups.length || merging) return;
+    const totalExtras = duplicateGroups.reduce(
+      (n, g) => n + Math.max(0, g.leads.length - 1),
+      0,
+    );
+    const ok = window.confirm(
+      `Merge ${duplicateGroups.length} company group${
+        duplicateGroups.length === 1 ? '' : 's'
+      }? Keep the oldest lead in each group, move deals, and archive ${totalExtras} duplicate${
+        totalExtras === 1 ? '' : 's'
+      }.`,
+    );
+    if (!ok) return;
+    setMerging(true);
+    try {
+      const now = Date.now();
+      for (const group of duplicateGroups) {
+        const [keeper, ...extras] = group.leads;
+        for (const extra of extras) {
+          const extraDeals = (deals || []).filter((d) => d.leadId === extra.id);
+          await Promise.all(
+            extraDeals.map((d) =>
+              updateDoc(doc('deals', d.id), {
+                leadId: keeper.id,
+                updatedAt: now,
+                lastActivityAt: now,
+              }),
+            ),
+          );
+          await updateDoc(doc('leads', extra.id), {
+            status: 'archived',
+            mergedIntoLeadId: keeper.id,
+            notes: `${extra.notes || ''}\n\n[Merged into ${
+              keeper.name || keeper.companyName || keeper.id
+            } on ${new Date(now).toISOString().slice(0, 10)}]`.trim(),
+            updatedAt: now,
+            lastActivityAt: now,
+          });
+        }
+        await updateDoc(doc('leads', keeper.id), {
+          updatedAt: now,
+          lastActivityAt: now,
+        });
+      }
+      window.alert('Duplicate leads merged.');
+    } catch (err) {
+      window.alert(`Could not merge leads.\n\n${err?.message || String(err)}`);
+    } finally {
+      setMerging(false);
+    }
+  };
+
+  const logLeadActivity = async (entry) => {
+    const docData = buildLeadActivityDoc({
+      ...entry,
+      actorEmail: entry?.actorEmail || user?.email || 'system',
+      at: entry?.at || Date.now(),
+    });
+    await fbAddDoc(fbCollection(db, 'leadActivities'), docData);
+    if (entry?.leadId) {
+      try {
+        await updateDoc(doc('leads', entry.leadId), {
+          updatedAt: Date.now(),
+          lastActivityAt: Date.now(),
+        });
+      } catch {
+        /* non-fatal */
+      }
+    }
+  };
+
+  const runEnrich = async (lead) => {
+    const website = String(lead?.website || '').trim();
+    if (!website || enrichBusy) return;
+    setEnrichBusy(true);
+    try {
+      const resp = await authedFetch('/.netlify/functions/enrich-client-from-website', {
+        website,
+        companyName: lead.companyName || lead.name || '',
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error || 'Enrichment failed');
+      setEnrichPreview({
+        lead,
+        suggestion: data.suggestion || data,
+        meta: data.meta || null,
+      });
+    } catch (err) {
+      window.alert(err?.message || 'Enrichment failed');
+    } finally {
+      setEnrichBusy(false);
+    }
+  };
+
+  const applyEnrich = async (nextLead) => {
+    if (!enrichPreview?.lead?.id) return;
+    const leadId = enrichPreview.lead.id;
+    const primaryContact = nextLead.primaryContact || {};
+    await updateDoc(doc('leads', leadId), {
+      name: nextLead.name || enrichPreview.lead.name,
+      companyName:
+        nextLead.companyName || nextLead.name || enrichPreview.lead.companyName,
+      website: nextLead.website || '',
+      phone: nextLead.phone || '',
+      companyDescription: nextLead.companyDescription || '',
+      industry: nextLead.industry || '',
+      address: nextLead.address || '',
+      city: nextLead.city || '',
+      region: nextLead.region || '',
+      postalCode: nextLead.postalCode || '',
+      country: nextLead.country || '',
+      googleBusinessProfileUrl: nextLead.googleBusinessProfileUrl || '',
+      linkedinUrl: nextLead.linkedinUrl || '',
+      facebookUrl: nextLead.facebookUrl || '',
+      instagramUrl: nextLead.instagramUrl || '',
+      twitterUrl: nextLead.twitterUrl || '',
+      primaryContact: {
+        name: primaryContact.name || '',
+        email: primaryContact.email || '',
+        phone: primaryContact.phone || '',
+        title: primaryContact.title || '',
+      },
+      contacts:
+        primaryContact.name || primaryContact.email
+          ? [
+              {
+                name: primaryContact.name || '',
+                email: primaryContact.email || '',
+                phone: primaryContact.phone || '',
+                title: primaryContact.title || '',
+              },
+            ]
+          : enrichPreview.lead.contacts || [],
+      updatedAt: Date.now(),
+      lastActivityAt: Date.now(),
+    });
+    setEnrichPreview(null);
+  };
+
   const formOpen = createOpen || !!editingId;
+  const leadAsEntity = (lead) =>
+    lead
+      ? {
+          ...lead,
+          name: lead.companyName || lead.name || 'Lead',
+        }
+      : null;
 
   return (
     <div className="space-y-4">
@@ -169,6 +343,18 @@ export default function LeadsPanel({
             />
             Show converted
           </label>
+          {duplicateGroups.length > 0 ? (
+            <button
+              type="button"
+              disabled={merging}
+              onClick={mergeDuplicateLeads}
+              className="px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+            >
+              {merging
+                ? 'Merging…'
+                : `Merge duplicate leads (${duplicateGroups.length})`}
+            </button>
+          ) : null}
           {onImport ? (
             <button
               type="button"
@@ -324,79 +510,205 @@ export default function LeadsPanel({
             const activity = formatRelativeActivity(lead.lastActivityAt || lead.updatedAt);
             const leadDeals = (deals || []).filter((d) => d.leadId === lead.id);
             const email = lead.primaryContact?.email;
+            const isExpanded = expandedId === lead.id;
             return (
               <div
                 key={lead.id}
-                className="bg-white border border-slate-100 rounded-[24px] p-5 shadow-sm flex flex-col md:flex-row md:items-center gap-4"
+                className="bg-white border border-slate-100 rounded-[24px] p-5 shadow-sm space-y-4"
               >
-                <button
-                  type="button"
-                  onClick={() => openEdit(lead)}
-                  className="flex-1 text-left space-y-1"
-                >
-                  <div className="font-black text-slate-800">
-                    {lead.name || lead.companyName || 'Untitled lead'}
-                  </div>
-                  <div className="text-xs font-bold text-slate-400">
-                    {lead.companyName && lead.name ? lead.companyName : null}
-                    {lead.primaryContact?.name
-                      ? `${lead.companyName && lead.name ? ' · ' : ''}${lead.primaryContact.name}`
-                      : null}
-                    {' · '}
-                    Owner: {staffDisplayFromEmail(lead.ownerEmail, adminUsers)}
-                    {activity ? ` · Updated ${activity}` : ''}
-                    {lead.status === 'converted' ? ' · Converted' : ''}
-                  </div>
-                  {leadDeals.length > 0 && (
-                    <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 pt-1">
-                      {leadDeals.length} deal{leadDeals.length === 1 ? '' : 's'}
+                <div className="flex flex-col md:flex-row md:items-center gap-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExpandedId(isExpanded ? null : lead.id);
+                      setDetailTab('activity');
+                    }}
+                    className="flex-1 text-left space-y-1"
+                  >
+                    <div className="font-black text-slate-800">
+                      {lead.name || lead.companyName || 'Untitled lead'}
                     </div>
-                  )}
-                </button>
-                <div className="flex flex-wrap items-center gap-2">
-                  {email ? (
-                    <a
-                      href={`mailto:${encodeURIComponent(email)}`}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-50 text-slate-600 text-xs font-bold hover:bg-slate-100"
-                      title="Open in your email client"
-                    >
-                      <Mail className="w-3.5 h-3.5" /> Email
-                    </a>
-                  ) : null}
-                  {lead.status !== 'converted' && (
+                    <div className="text-xs font-bold text-slate-400">
+                      {lead.companyName && lead.name ? lead.companyName : null}
+                      {lead.primaryContact?.name
+                        ? `${lead.companyName && lead.name ? ' · ' : ''}${lead.primaryContact.name}`
+                        : null}
+                      {' · '}
+                      Owner: {staffDisplayFromEmail(lead.ownerEmail, adminUsers)}
+                      {activity ? ` · Updated ${activity}` : ''}
+                      {lead.status === 'converted' ? ' · Converted' : ''}
+                    </div>
+                    {leadDeals.length > 0 && (
+                      <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 pt-1">
+                        {leadDeals.length} deal{leadDeals.length === 1 ? '' : 's'}
+                      </div>
+                    )}
+                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {email ? (
+                      <a
+                        href={`mailto:${encodeURIComponent(email)}`}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-50 text-slate-600 text-xs font-bold hover:bg-slate-100"
+                        title="Open in your email client"
+                      >
+                        <Mail className="w-3.5 h-3.5" /> Email
+                      </a>
+                    ) : null}
+                    {lead.status !== 'converted' && (
+                      <button
+                        type="button"
+                        onClick={() => onConvertLead?.(lead)}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-100 text-emerald-700 text-xs font-bold hover:bg-emerald-100"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" /> Convert to client
+                      </button>
+                    )}
+                    {leadDeals[0] && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenDeal?.(leadDeals[0].id)}
+                        className="px-3 py-2 rounded-xl bg-orange-50 text-[#fd7414] text-xs font-bold"
+                      >
+                        View deal
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={() => onConvertLead?.(lead)}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-100 text-emerald-700 text-xs font-bold hover:bg-emerald-100"
+                      onClick={() => openEdit(lead)}
+                      className="px-3 py-2 rounded-xl bg-slate-50 text-slate-600 text-xs font-bold hover:bg-slate-100"
                     >
-                      <UserPlus className="w-3.5 h-3.5" /> Convert to client
+                      Edit
                     </button>
-                  )}
-                  {leadDeals[0] && (
-                    <button
-                      type="button"
-                      onClick={() => onOpenDeal?.(leadDeals[0].id)}
-                      className="px-3 py-2 rounded-xl bg-orange-50 text-[#fd7414] text-xs font-bold"
-                    >
-                      View deal
-                    </button>
-                  )}
-                  {lead.status !== 'converted' && (
-                    <button
-                      type="button"
-                      onClick={() => archiveLead(lead)}
-                      className="p-2 text-slate-300 hover:text-red-500"
-                      title="Archive"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
+                    {lead.status !== 'converted' && (
+                      <button
+                        type="button"
+                        onClick={() => archiveLead(lead)}
+                        className="p-2 text-slate-300 hover:text-red-500"
+                        title="Archive"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
+
+                {isExpanded ? (
+                  <div className="border-t border-slate-100 pt-4 space-y-3">
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { id: 'activity', label: 'Activity' },
+                        { id: 'emails', label: 'Emails' },
+                        { id: 'enrich', label: 'Enrich' },
+                      ].map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => setDetailTab(t.id)}
+                          className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest ${
+                            detailTab === t.id
+                              ? 'bg-black text-white'
+                              : 'bg-slate-50 text-slate-500 hover:bg-slate-100'
+                          }`}
+                        >
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
+                    {detailTab === 'activity' ? (
+                      <ClientActivityTimeline
+                        entity={leadAsEntity(lead)}
+                        entityKind="lead"
+                        logActivity={logLeadActivity}
+                        canCompose
+                      />
+                    ) : null}
+                    {detailTab === 'emails' ? (
+                      <ClientEmailHistory
+                        entity={leadAsEntity(lead)}
+                        entityKind="lead"
+                        canCompose={canComposeEmail}
+                        onCompose={(ent) =>
+                          setComposeState({ lead: ent, mode: 'compose' })
+                        }
+                        onReply={(m) =>
+                          setComposeState({
+                            lead: leadAsEntity(lead),
+                            mode: 'reply',
+                            message: m,
+                          })
+                        }
+                      />
+                    ) : null}
+                    {detailTab === 'enrich' ? (
+                      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
+                        <p className="text-sm text-slate-500 font-medium">
+                          Pull public company info from the lead website into empty fields for review.
+                        </p>
+                        <button
+                          type="button"
+                          disabled={
+                            enrichBusy || !String(lead.website || '').trim()
+                          }
+                          onClick={() => runEnrich(lead)}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-black text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-40"
+                        >
+                          <Sparkles
+                            className={`w-3.5 h-3.5 ${enrichBusy ? 'animate-pulse' : ''}`}
+                          />
+                          {enrichBusy ? 'Enriching…' : 'Enrich from website'}
+                        </button>
+                        {!String(lead.website || '').trim() ? (
+                          <p className="text-xs font-bold text-amber-700">
+                            Add a website on the lead first (Edit).
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             );
           })
         )}
       </div>
+
+      {composeState?.lead ? (
+        <ClientEmailComposeModal
+          entity={composeState.lead}
+          entityKind="lead"
+          onClose={() => setComposeState(null)}
+          initialSubject={
+            composeState.mode === 'reply'
+              ? replySubject(composeState.message?.subject)
+              : ''
+          }
+          initialTo={
+            composeState.mode === 'reply'
+              ? composeState.message?.direction === 'inbound'
+                ? [composeState.message?.from].filter(Boolean)
+                : composeState.message?.to || []
+              : null
+          }
+          initialBody=""
+          inReplyToId={
+            composeState.mode === 'reply' ? composeState.message?.id || null : null
+          }
+        />
+      ) : null}
+
+      {enrichPreview?.lead ? (
+        <ClientEnrichPreviewModal
+          client={enrichPreview.lead}
+          suggestion={enrichPreview.suggestion}
+          meta={enrichPreview.meta}
+          onClose={() => setEnrichPreview(null)}
+          onApply={(next) => {
+            applyEnrich(next).catch((err) =>
+              window.alert(err?.message || 'Could not apply enrichment'),
+            );
+          }}
+        />
+      ) : null}
     </div>
   );
 }

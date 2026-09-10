@@ -9,6 +9,7 @@
 
 import { fetchCollection, fetchDoc, getDigestDb, mergeDoc } from './firebaseDigestClient.mjs';
 import { writeClientActivity } from './clientActivity.mjs';
+import { writeLeadActivity } from './leadActivity.mjs';
 import {
   emailsFromHeader,
   extractPlainBody,
@@ -47,17 +48,44 @@ const PUBLIC_MAIL_DOMAINS = new Set([
   'zoho.com',
 ]);
 
-function addEmailToMap(map, email, clientId, clientName) {
+function addEmailToMap(map, email, hit) {
   const em = String(email || '').trim().toLowerCase();
-  if (!em || !em.includes('@') || !clientId) return;
-  if (!map.has(em)) map.set(em, { clientId, clientName });
+  if (!em || !em.includes('@') || !hit) return;
+  const existing = map.get(em);
+  // Prefer client over lead when both match the same address.
+  if (existing?.kind === 'client' && hit.kind === 'lead') return;
+  if (!existing || (hit.kind === 'client' && existing.kind === 'lead')) {
+    map.set(em, hit);
+  }
 }
 
-function addDomainToMap(map, domain, clientId, clientName) {
+function addDomainToMap(map, domain, hit) {
   const d = String(domain || '').trim().toLowerCase().replace(/^\.+|\.+$/g, '');
-  if (!d || !d.includes('.') || !clientId) return;
+  if (!d || !d.includes('.') || !hit) return;
   if (PUBLIC_MAIL_DOMAINS.has(d)) return;
-  if (!map.has(d)) map.set(d, { clientId, clientName });
+  const existing = map.get(d);
+  if (existing?.kind === 'client' && hit.kind === 'lead') return;
+  if (!existing || (hit.kind === 'client' && existing.kind === 'lead')) {
+    map.set(d, hit);
+  }
+}
+
+function clientHit(clientId, clientName) {
+  return {
+    kind: 'client',
+    clientId,
+    leadId: null,
+    name: clientName || '',
+  };
+}
+
+function leadHit(leadId, leadName) {
+  return {
+    kind: 'lead',
+    clientId: null,
+    leadId,
+    name: leadName || '',
+  };
 }
 
 /** Hostname from website URL or bare domain (strips www.). */
@@ -84,7 +112,7 @@ export function domainFromEmail(email) {
 }
 
 /**
- * Match address domain to a client domain: exact or subdomain
+ * Match address domain to a client/lead domain: exact or subdomain
  * (e.g. mail.acme.com → acme.com).
  */
 function matchDomainMap(domainMap, emailDomain) {
@@ -92,61 +120,74 @@ function matchDomainMap(domainMap, emailDomain) {
   if (!d) return null;
   const exact = domainMap.get(d);
   if (exact) return exact;
-  for (const [clientDomain, hit] of domainMap) {
-    if (d.endsWith(`.${clientDomain}`)) return hit;
+  for (const [entityDomain, hit] of domainMap) {
+    if (d.endsWith(`.${entityDomain}`)) return hit;
   }
   return null;
 }
 
+function indexEntityContacts(byEmail, byDomain, entity, hit) {
+  const primary = entity.primaryContact;
+  if (primary?.email) {
+    addEmailToMap(byEmail, primary.email, hit);
+    addDomainToMap(byDomain, domainFromEmail(primary.email), hit);
+  }
+  if (entity.email) {
+    addEmailToMap(byEmail, entity.email, hit);
+    addDomainToMap(byDomain, domainFromEmail(entity.email), hit);
+  }
+  if (entity.contactEmail) {
+    addEmailToMap(byEmail, entity.contactEmail, hit);
+    addDomainToMap(byDomain, domainFromEmail(entity.contactEmail), hit);
+  }
+  const contacts = Array.isArray(entity.contacts) ? entity.contacts : [];
+  for (const ct of contacts) {
+    if (ct?.email) {
+      addEmailToMap(byEmail, ct.email, hit);
+      addDomainToMap(byDomain, domainFromEmail(ct.email), hit);
+    }
+  }
+  const portal = Array.isArray(entity.clientEmails)
+    ? entity.clientEmails
+    : String(entity.clientEmails || '')
+        .split(/[,\n;]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+  for (const em of portal) {
+    addEmailToMap(byEmail, em, hit);
+    addDomainToMap(byDomain, domainFromEmail(em), hit);
+  }
+  const siteDomain = domainFromWebsite(entity.website);
+  if (siteDomain) addDomainToMap(byDomain, siteDomain, hit);
+}
+
 /**
- * Build indexes: exact emails + company domains from website / CRM emails.
+ * Build indexes: exact emails + company domains from clients + open leads.
+ * Clients win when both match the same email/domain.
  * @returns {{ byEmail: Map, byDomain: Map }}
  */
 export async function buildClientEmailIndex(db) {
-  const clients = await fetchCollection(db, 'clients');
   const byEmail = new Map();
   const byDomain = new Map();
+
+  const clients = await fetchCollection(db, 'clients');
   for (const c of clients) {
-    const name = c.name || '';
-    const id = c.id;
-    const primary = c.primaryContact;
-    if (primary?.email) {
-      addEmailToMap(byEmail, primary.email, id, name);
-      addDomainToMap(byDomain, domainFromEmail(primary.email), id, name);
-    }
-    // Legacy / alternate single-email fields some imports used
-    if (c.email) {
-      addEmailToMap(byEmail, c.email, id, name);
-      addDomainToMap(byDomain, domainFromEmail(c.email), id, name);
-    }
-    if (c.contactEmail) {
-      addEmailToMap(byEmail, c.contactEmail, id, name);
-      addDomainToMap(byDomain, domainFromEmail(c.contactEmail), id, name);
-    }
-    const contacts = Array.isArray(c.contacts) ? c.contacts : [];
-    for (const ct of contacts) {
-      if (ct?.email) {
-        addEmailToMap(byEmail, ct.email, id, name);
-        addDomainToMap(byDomain, domainFromEmail(ct.email), id, name);
-      }
-    }
-    const portal = Array.isArray(c.clientEmails)
-      ? c.clientEmails
-      : String(c.clientEmails || '')
-          .split(/[,\n;]/)
-          .map((s) => s.trim())
-          .filter(Boolean);
-    for (const em of portal) {
-      addEmailToMap(byEmail, em, id, name);
-      addDomainToMap(byDomain, domainFromEmail(em), id, name);
-    }
-    const siteDomain = domainFromWebsite(c.website);
-    if (siteDomain) addDomainToMap(byDomain, siteDomain, id, name);
+    if (!c?.id) continue;
+    indexEntityContacts(byEmail, byDomain, c, clientHit(c.id, c.name || ''));
   }
+
+  const leads = await fetchCollection(db, 'leads');
+  for (const lead of leads) {
+    if (!lead?.id) continue;
+    if (lead.status === 'archived' || lead.status === 'converted') continue;
+    const name = lead.companyName || lead.name || '';
+    indexEntityContacts(byEmail, byDomain, lead, leadHit(lead.id, name));
+  }
+
   return { byEmail, byDomain };
 }
 
-function matchClient(index, addresses, selfEmail) {
+function matchCrmEntity(index, addresses, selfEmail) {
   const self = String(selfEmail || '').toLowerCase();
   const byEmail = index?.byEmail || index;
   const byDomain = index?.byDomain;
@@ -187,7 +228,7 @@ async function upsertGmailMessage({
   const fromEmails = emailsFromHeader(fromHeader);
   const toEmails = [...emailsFromHeader(toHeader), ...emailsFromHeader(ccHeader)];
   const all = [...fromEmails, ...toEmails];
-  const match = matchClient(emailIndex, all, selfEmail);
+  const match = matchCrmEntity(emailIndex, all, selfEmail);
   if (!match) return { skipped: true };
 
   const self = String(selfEmail || '').toLowerCase();
@@ -204,10 +245,15 @@ async function upsertGmailMessage({
   const body = extractPlainBody(message);
   const sentAt = Number(message.internalDate || Date.now());
   const to = direction === 'outbound' ? toEmails : fromEmails.length ? fromEmails : toEmails;
+  const isLead = match.kind === 'lead' && match.leadId;
+  const entityId = isLead ? match.leadId : match.clientId;
+  const entityName = match.name || match.clientName || '';
 
   const doc = {
-    clientId: match.clientId,
-    clientName: match.clientName || '',
+    clientId: isLead ? null : match.clientId,
+    leadId: isLead ? match.leadId : null,
+    clientName: isLead ? '' : entityName,
+    leadName: isLead ? entityName : '',
     direction,
     to,
     from: fromEmails[0] || fromHeader || '',
@@ -228,28 +274,54 @@ async function upsertGmailMessage({
 
   if (direction === 'inbound') {
     try {
-      await writeClientActivity({
-        clientId: match.clientId,
-        clientName: match.clientName || '',
-        type: 'email_received',
-        title: subject,
-        body: body.slice(0, 280),
-        actorEmail: fromEmails[0] || '',
-        source: 'system',
-        meta: {
-          gmailMessageId,
-          gmailThreadId: message.threadId || null,
-          emailMessageId: docId,
-          direction: 'inbound',
-        },
-        at: sentAt,
-      });
+      if (isLead) {
+        await writeLeadActivity({
+          leadId: match.leadId,
+          leadName: entityName,
+          type: 'email_received',
+          title: subject,
+          body: body.slice(0, 280),
+          actorEmail: fromEmails[0] || '',
+          source: 'system',
+          meta: {
+            gmailMessageId,
+            gmailThreadId: message.threadId || null,
+            emailMessageId: docId,
+            direction: 'inbound',
+          },
+          at: sentAt,
+        });
+      } else {
+        await writeClientActivity({
+          clientId: match.clientId,
+          clientName: entityName,
+          type: 'email_received',
+          title: subject,
+          body: body.slice(0, 280),
+          actorEmail: fromEmails[0] || '',
+          source: 'system',
+          meta: {
+            gmailMessageId,
+            gmailThreadId: message.threadId || null,
+            emailMessageId: docId,
+            direction: 'inbound',
+          },
+          at: sentAt,
+        });
+      }
     } catch (err) {
       console.warn('[gmailSync] activity skipped:', err?.message || err);
     }
   }
 
-  return { upserted: true, direction, clientId: match.clientId, docId };
+  return {
+    upserted: true,
+    direction,
+    clientId: isLead ? null : match.clientId,
+    leadId: isLead ? match.leadId : null,
+    entityId,
+    docId,
+  };
 }
 
 async function processMessageIds(accessToken, ids, ctx) {
@@ -267,7 +339,7 @@ async function processMessageIds(accessToken, ids, ctx) {
         ...emailsFromHeader(headerValue(headers, 'To')),
         ...emailsFromHeader(headerValue(headers, 'Cc')),
       ];
-      const match = matchClient(ctx.emailIndex, [...fromEmails, ...toEmails], ctx.selfEmail);
+      const match = matchCrmEntity(ctx.emailIndex, [...fromEmails, ...toEmails], ctx.selfEmail);
       if (!match) {
         skipped += 1;
         continue;

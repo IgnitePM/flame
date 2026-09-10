@@ -1,15 +1,18 @@
 /**
- * Persist a full client email for CRM history.
+ * Persist a full CRM email for history (client or lead).
  * Collection: clientEmailMessages/{id}
  * Prefer id `gmail_{gmailMessageId}` when syncing from Gmail for dedupe.
+ * Exactly one of clientId or leadId is required.
  */
 
 import { mergeDoc, getDigestDb } from './firebaseDigestClient.mjs';
 
 export async function writeClientEmailMessage({
   id = null,
-  clientId,
+  clientId = null,
+  leadId = null,
   clientName = '',
+  leadName = '',
   to = [],
   from = '',
   subject = '',
@@ -24,14 +27,18 @@ export async function writeClientEmailMessage({
   at = Date.now(),
 } = {}) {
   const cid = String(clientId || '').trim();
-  if (!cid) throw new Error('clientId required');
+  const lid = String(leadId || '').trim();
+  if (cid && lid) throw new Error('Provide clientId or leadId, not both.');
+  if (!cid && !lid) throw new Error('clientId or leadId required');
   const gmailId = gmailMessageId ? String(gmailMessageId).trim() : null;
   const docId =
     id ||
     (gmailId ? `gmail_${gmailId}` : `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`);
   const doc = {
-    clientId: cid,
-    clientName: String(clientName || '').trim(),
+    clientId: cid || null,
+    leadId: lid || null,
+    clientName: cid ? String(clientName || '').trim() : '',
+    leadName: lid ? String(leadName || clientName || '').trim() : '',
     direction: direction === 'inbound' ? 'inbound' : 'outbound',
     to: Array.isArray(to) ? to : [String(to || '')].filter(Boolean),
     from: String(from || '').trim(),

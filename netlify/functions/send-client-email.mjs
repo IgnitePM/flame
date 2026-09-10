@@ -1,4 +1,5 @@
 import { writeClientActivity } from './lib/clientActivity.mjs';
+import { writeLeadActivity } from './lib/leadActivity.mjs';
 import { writeClientEmailMessage } from './lib/clientEmailMessage.mjs';
 import { describeAuthError, requireStaffCaller } from './lib/requireAuth.mjs';
 import { fetchDoc, getDigestDb, mergeDoc } from './lib/firebaseDigestClient.mjs';
@@ -12,8 +13,9 @@ import {
 } from './lib/gmailOAuth.mjs';
 
 /**
- * Admin/billing: send an email to client contacts via the caller's connected Gmail.
- * POST { clientId, to: string|string[], subject, body, inReplyToId? }
+ * Admin/billing: send an email via the caller's connected Gmail.
+ * POST { clientId?, leadId?, to, subject, body, inReplyToId? }
+ * Exactly one of clientId or leadId.
  */
 export default async (req) => {
   if (req.method !== 'POST') {
@@ -42,6 +44,7 @@ export default async (req) => {
   }
 
   const clientId = String(body?.clientId || '').trim();
+  const leadId = String(body?.leadId || '').trim();
   const subject = String(body?.subject || '').trim();
   const text = String(body?.body || body?.text || '').trim();
   const inReplyToId = body?.inReplyToId ? String(body.inReplyToId).trim() : null;
@@ -54,8 +57,14 @@ export default async (req) => {
     ),
   ];
 
-  if (!clientId) {
-    return new Response(JSON.stringify({ error: 'Missing client.' }), {
+  if (clientId && leadId) {
+    return new Response(JSON.stringify({ error: 'Provide clientId or leadId, not both.' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  if (!clientId && !leadId) {
+    return new Response(JSON.stringify({ error: 'Missing client or lead.' }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' },
     });
@@ -86,12 +95,25 @@ export default async (req) => {
     }
 
     const db = await getDigestDb();
-    const client = await fetchDoc(db, `clients/${clientId}`);
-    if (!client) {
-      return new Response(JSON.stringify({ error: 'Client not found.' }), {
-        status: 404,
-        headers: { 'Content-Type': 'application/json' },
-      });
+    let entityName = '';
+    if (clientId) {
+      const client = await fetchDoc(db, `clients/${clientId}`);
+      if (!client) {
+        return new Response(JSON.stringify({ error: 'Client not found.' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      entityName = client.name || '';
+    } else {
+      const lead = await fetchDoc(db, `leads/${leadId}`);
+      if (!lead) {
+        return new Response(JSON.stringify({ error: 'Lead not found.' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      entityName = lead.companyName || lead.name || '';
     }
 
     let threadId = null;
@@ -144,8 +166,10 @@ export default async (req) => {
     try {
       emailRecord = await writeClientEmailMessage({
         id: sent.id ? `gmail_${sent.id}` : null,
-        clientId,
-        clientName: client.name || '',
+        clientId: clientId || null,
+        leadId: leadId || null,
+        clientName: clientId ? entityName : '',
+        leadName: leadId ? entityName : '',
         to: toList,
         from: fromAddr,
         subject,
@@ -165,9 +189,10 @@ export default async (req) => {
 
     const logId = `email_${now}_${Math.random().toString(36).slice(2, 8)}`;
     await mergeDoc(db, `auditLogs/${logId}`, {
-      type: 'client_email_sent',
-      clientId,
-      clientName: client.name || '',
+      type: leadId ? 'lead_email_sent' : 'client_email_sent',
+      clientId: clientId || null,
+      leadId: leadId || null,
+      clientName: entityName,
       to: toList,
       subject,
       actorEmail: caller.email,
@@ -177,30 +202,54 @@ export default async (req) => {
     });
 
     try {
-      await writeClientActivity({
-        clientId,
-        clientName: client.name || '',
-        type: 'email_sent',
-        title: subject,
-        body: text.slice(0, 800),
-        actorEmail: caller.email,
-        source: 'system',
-        meta: {
-          to: toList,
-          subject,
-          emailMessageId: emailRecord?.id || null,
-          gmailMessageId: sent.id || null,
-          inReplyToId,
-        },
-        at: now,
-      });
+      if (leadId) {
+        await writeLeadActivity({
+          leadId,
+          leadName: entityName,
+          type: 'email_sent',
+          title: subject,
+          body: text.slice(0, 800),
+          actorEmail: caller.email,
+          source: 'system',
+          meta: {
+            to: toList,
+            subject,
+            emailMessageId: emailRecord?.id || null,
+            gmailMessageId: sent.id || null,
+            inReplyToId,
+          },
+          at: now,
+        });
+        await mergeDoc(db, `leads/${leadId}`, {
+          lastLeadEmailAt: now,
+          lastActivityAt: now,
+          updatedAt: now,
+        });
+      } else {
+        await writeClientActivity({
+          clientId,
+          clientName: entityName,
+          type: 'email_sent',
+          title: subject,
+          body: text.slice(0, 800),
+          actorEmail: caller.email,
+          source: 'system',
+          meta: {
+            to: toList,
+            subject,
+            emailMessageId: emailRecord?.id || null,
+            gmailMessageId: sent.id || null,
+            inReplyToId,
+          },
+          at: now,
+        });
+        await mergeDoc(db, `clients/${clientId}`, {
+          lastClientEmailAt: now,
+        });
+      }
     } catch (err) {
       console.warn('[send-client-email] activity log skipped:', err?.message || err);
     }
-
-    await mergeDoc(db, `clients/${clientId}`, {
-      lastClientEmailAt: now,
-    });
 
     return new Response(
       JSON.stringify({

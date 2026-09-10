@@ -4,7 +4,7 @@ import { authedFetch } from '../utils/authedFetch.js';
 import { normalizePrimaryContact, normalizeClientContacts } from '../utils/clientDocuments.js';
 import { normalizePortalEmailList } from '../utils/portalAccess.js';
 
-function collectRecipientOptions(client) {
+function collectRecipientOptions(entity) {
   const opts = [];
   const seen = new Set();
   const add = (email, label) => {
@@ -13,12 +13,12 @@ function collectRecipientOptions(client) {
     seen.add(em);
     opts.push({ email: em, label: label || em });
   };
-  const primary = normalizePrimaryContact(client?.primaryContact);
+  const primary = normalizePrimaryContact(entity?.primaryContact);
   if (primary.email) add(primary.email, `${primary.name || 'Primary'} · ${primary.email}`);
-  for (const c of normalizeClientContacts(client?.contacts)) {
+  for (const c of normalizeClientContacts(entity?.contacts)) {
     if (c.email) add(c.email, `${c.name || 'Contact'} · ${c.email}`);
   }
-  for (const em of normalizePortalEmailList(client?.clientEmails)) {
+  for (const em of normalizePortalEmailList(entity?.clientEmails)) {
     add(em, `Portal · ${em}`);
   }
   return opts;
@@ -32,17 +32,21 @@ function replySubject(subject) {
 
 /**
  * Admin/billing compose modal — sends via the caller's connected Gmail (OAuth).
- * Supports reply drafts via initialSubject / initialTo / initialBody / inReplyToId.
+ * Supports client or lead via entityKind. Legacy `client` prop still works.
  */
 export default function ClientEmailComposeModal({
   client,
+  entity,
+  entityKind = 'client',
   onClose,
   initialSubject = '',
   initialTo = null,
   initialBody = '',
   inReplyToId = null,
 }) {
-  const options = useMemo(() => collectRecipientOptions(client), [client]);
+  const resolved = entity || client;
+  const kind = entity ? entityKind : 'client';
+  const options = useMemo(() => collectRecipientOptions(resolved), [resolved]);
   const [selected, setSelected] = useState([]);
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
@@ -77,7 +81,7 @@ export default function ClientEmailComposeModal({
   }, []);
 
   useEffect(() => {
-    if (!client) return;
+    if (!resolved) return;
     const prefTo = initialToKey
       ? initialToKey.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean)
       : [];
@@ -92,14 +96,14 @@ export default function ClientEmailComposeModal({
     setSubject(
       initialSubject
         ? String(initialSubject)
-        : client?.name
-          ? `${client.name} — Ignite PM`
+        : resolved?.name
+          ? `${resolved.name} — Ignite PM`
           : '',
     );
     setBody(String(initialBody || ''));
-  }, [client?.id, initialSubject, initialBody, initialToKey, options]);
+  }, [resolved?.id, kind, initialSubject, initialBody, initialToKey, options]);
 
-  if (!client) return null;
+  if (!resolved) return null;
 
   const toggle = (email) => {
     setSelected((prev) =>
@@ -116,13 +120,23 @@ export default function ClientEmailComposeModal({
     setBusy(true);
     setError('');
     try {
-      const resp = await authedFetch('/.netlify/functions/send-client-email', {
-        clientId: client.id,
-        to: selected,
-        subject,
-        body,
-        ...(inReplyToId ? { inReplyToId } : {}),
-      });
+      const payload =
+        kind === 'lead'
+          ? {
+              leadId: resolved.id,
+              to: selected,
+              subject,
+              body,
+              ...(inReplyToId ? { inReplyToId } : {}),
+            }
+          : {
+              clientId: resolved.id,
+              to: selected,
+              subject,
+              body,
+              ...(inReplyToId ? { inReplyToId } : {}),
+            };
+      const resp = await authedFetch('/.netlify/functions/send-client-email', payload);
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(data.error || 'Send failed');
       window.alert(`Email sent to ${selected.join(', ')}.`);
@@ -134,16 +148,18 @@ export default function ClientEmailComposeModal({
     }
   };
 
+  const label = kind === 'lead' ? 'lead' : 'client';
+
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[130] animate-in fade-in">
       <div className="bg-white rounded-[32px] w-full max-w-xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
         <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
           <div>
             <h3 className="font-black text-xl text-slate-900">
-              {inReplyToId ? 'Reply to client' : 'Email client'}
+              {inReplyToId ? `Reply to ${label}` : `Email ${label}`}
             </h3>
             <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-1">
-              {client.name}
+              {resolved.name || resolved.companyName}
               {gmail.connected && gmail.email ? ` · from ${gmail.email}` : ' · via your Gmail'}
             </p>
           </div>
@@ -158,12 +174,12 @@ export default function ClientEmailComposeModal({
         <div className="p-6 space-y-4 overflow-y-auto">
           {!gmail.loading && !gmail.connected ? (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900">
-              Connect your Gmail in Admin → Config before sending client email.
+              Connect your Gmail in Admin → Config before sending email.
             </div>
           ) : null}
           {options.length === 0 ? (
             <p className="text-sm text-slate-500 font-medium">
-              No email addresses on this client yet. Add a primary contact or authorized portal emails first.
+              No email addresses on this {label} yet. Add a primary contact first.
             </p>
           ) : (
             <div className="space-y-2">

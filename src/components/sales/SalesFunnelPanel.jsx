@@ -7,9 +7,20 @@ import {
   staffDisplayFromEmail,
 } from '../../utils/salesPipeline.js';
 import { validatePortalEmailsExclusive } from '../../utils/portalAccess.js';
+import { buildLeadActivityDoc } from '../../utils/leadActivity.js';
 import SalesFunnelBoard from './SalesFunnelBoard.jsx';
 import LeadsPanel from './LeadsPanel.jsx';
 import DealDetailDrawer, { NewDealModal } from './DealDetailDrawer.jsx';
+import {
+  db,
+  collection as fbCollection,
+  query,
+  where,
+  getDocs,
+  addDoc as fbAddDoc,
+  updateDoc as fbUpdateDoc,
+  doc as fbDoc,
+} from '../../firebase.js';
 
 function ConvertLeadModal({
   lead,
@@ -28,6 +39,7 @@ function ConvertLeadModal({
     status: 'paused',
     clientEmails: lead?.primaryContact?.email || '',
     reassignDeals: true,
+    migrateEmails: true,
   });
   const [saving, setSaving] = useState(false);
 
@@ -74,6 +86,18 @@ function ConvertLeadModal({
             : [],
         website: lead.website || '',
         phone: lead.phone || primaryContact.phone || '',
+        companyDescription: lead.companyDescription || '',
+        industry: lead.industry || '',
+        address: lead.address || '',
+        city: lead.city || '',
+        region: lead.region || '',
+        postalCode: lead.postalCode || '',
+        country: lead.country || '',
+        googleBusinessProfileUrl: lead.googleBusinessProfileUrl || '',
+        linkedinUrl: lead.linkedinUrl || '',
+        facebookUrl: lead.facebookUrl || '',
+        instagramUrl: lead.instagramUrl || '',
+        twitterUrl: lead.twitterUrl || '',
       });
       const clientId = clientRef.id;
       const now = Date.now();
@@ -97,6 +121,53 @@ function ConvertLeadModal({
             }),
           ),
         );
+      }
+      let migratedEmails = 0;
+      if (values.migrateEmails) {
+        try {
+          const snap = await getDocs(
+            query(
+              fbCollection(db, 'clientEmailMessages'),
+              where('leadId', '==', lead.id),
+            ),
+          );
+          await Promise.all(
+            snap.docs.map((d) =>
+              fbUpdateDoc(fbDoc(db, 'clientEmailMessages', d.id), {
+                clientId,
+                clientName: name,
+                leadId: null,
+                leadName: '',
+                migratedFromLeadId: lead.id,
+                migratedAt: now,
+              }),
+            ),
+          );
+          migratedEmails = snap.size;
+        } catch (err) {
+          console.warn('[convert lead] email migrate:', err?.message || err);
+        }
+      }
+      try {
+        await fbAddDoc(
+          fbCollection(db, 'leadActivities'),
+          buildLeadActivityDoc({
+            leadId: lead.id,
+            leadName: lead.companyName || lead.name || '',
+            type: 'note',
+            title: 'Converted to client',
+            body: migratedEmails
+              ? `Converted to client "${name}". Moved ${migratedEmails} email message${
+                  migratedEmails === 1 ? '' : 's'
+                } to the client record.`
+              : `Converted to client "${name}".`,
+            source: 'system',
+            meta: { convertedClientId: clientId, migratedEmails },
+            at: now,
+          }),
+        );
+      } catch (err) {
+        console.warn('[convert lead] activity note:', err?.message || err);
       }
       onClose?.({ clientId });
     } catch (err) {
@@ -183,6 +254,16 @@ function ConvertLeadModal({
           />
           Move open deals from this lead to the new client
         </label>
+        <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
+          <input
+            type="checkbox"
+            checked={values.migrateEmails}
+            onChange={(e) =>
+              setValues((v) => ({ ...v, migrateEmails: e.target.checked }))
+            }
+          />
+          Move synced emails from this lead to the new client
+        </label>
         <div className="flex justify-end gap-2 pt-2">
           <button
             type="button"
@@ -221,6 +302,7 @@ export default function SalesFunnelPanel({
   setDoc,
   setDeleteConfirm,
   generateSalesCoach,
+  canComposeEmail = false,
 }) {
   const [subTab, setSubTab] = useState('board');
   const [mineOnly, setMineOnly] = useState(false);
@@ -367,6 +449,7 @@ export default function SalesFunnelPanel({
             doc={doc}
             onConvertLead={setConvertLead}
             onImport={() => setImportOpen(true)}
+            canComposeEmail={canComposeEmail}
             onOpenDeal={(id) => {
               setSubTab('board');
               setSelectedDealId(id);
@@ -397,6 +480,7 @@ export default function SalesFunnelPanel({
         onClose={() => setNewDealOpen(false)}
         stages={stages}
         leads={leads}
+        deals={deals}
         clients={clients}
         adminUsers={adminUsers}
         user={user}
@@ -412,10 +496,12 @@ export default function SalesFunnelPanel({
         onClose={() => setImportOpen(false)}
         stages={stages}
         deals={deals}
+        leads={leads}
         clients={clients}
         adminUsers={adminUsers}
         user={user}
         setDoc={setDoc}
+        updateDoc={updateDoc}
         doc={doc}
       />
 

@@ -412,6 +412,7 @@ export function NewDealModal({
   onClose,
   stages = [],
   leads = [],
+  deals = [],
   clients = [],
   adminUsers = [],
   user,
@@ -468,6 +469,29 @@ export function NewDealModal({
         window.alert('Link this deal to a lead or a client.');
         setSaving(false);
         return;
+      }
+      if (assoc.leadId) {
+        const closedIds = new Set(
+          (stages || [])
+            .filter((s) => s.isWon || s.isLost)
+            .map((s) => s.id),
+        );
+        const openOnLead = (deals || []).filter(
+          (d) =>
+            d.leadId === assoc.leadId &&
+            !closedIds.has(d.stageId),
+        );
+        if (openOnLead.length > 0) {
+          const ok = window.confirm(
+            `This lead already has ${openOnLead.length} open deal${
+              openOnLead.length === 1 ? '' : 's'
+            }. Add another?`,
+          );
+          if (!ok) {
+            setSaving(false);
+            return;
+          }
+        }
       }
       const amount = Number(form.amount);
       const now = Date.now();
