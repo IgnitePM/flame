@@ -209,6 +209,8 @@ function RedirectStaffWorkspaceClientToAdmin() {
 const CLIENT_PAGE_TABS = [
   'summary',
   'emails',
+  'messages',
+  'reviews',
   'files',
   'cycle_activity',
   'tasks',
@@ -3540,6 +3542,7 @@ export default function App() {
         setUser={() => {}}
         signOut={() => setPortalPreviewClientId(null)}
         auth={auth}
+        user={user}
       />
     </div>
   ) : view === 'client_portal' && clientProfile ? (
@@ -3569,6 +3572,7 @@ export default function App() {
         setUser={setUser}
         signOut={signOut}
         auth={auth}
+        user={user}
       />
     ) : (
       <div className="min-h-screen bg-[#0f0f11] text-zinc-100 font-sans">

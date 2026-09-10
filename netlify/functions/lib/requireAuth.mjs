@@ -103,6 +103,56 @@ export async function requireStaffCaller(headers, { roles = null } = {}) {
   return { ...caller, role: role || '', isStaffDomain };
 }
 
+/**
+ * Staff OR a portal user authorized on the given clientId (via clients.clientEmails).
+ * Returns { ..., authorType: 'staff'|'client', role, isStaff }.
+ */
+export async function requireClientOrStaffCaller(headers, clientId) {
+  const caller = await verifyIdToken(headers);
+  const cid = String(clientId || '').trim();
+  if (!cid) throw new AuthError(400, 'clientId is required.');
+
+  const isStaffDomain = caller.email.endsWith(STAFF_DOMAIN);
+  const looked = await lookupRole(caller.email);
+  const role = caller.email === OWNER_EMAIL ? 'admin' : looked;
+  const isStaff = caller.email === OWNER_EMAIL || Boolean(role) || isStaffDomain;
+
+  if (isStaff) {
+    return {
+      ...caller,
+      role: role || '',
+      isStaffDomain,
+      isStaff: true,
+      authorType: 'staff',
+    };
+  }
+
+  try {
+    const { getDigestDb, fetchDoc } = await import('./firebaseDigestClient.mjs');
+    const db = await getDigestDb();
+    const client = await fetchDoc(db, `clients/${cid}`);
+    if (!client) throw new AuthError(404, 'Client not found.');
+    const emails = Array.isArray(client.clientEmails)
+      ? client.clientEmails.map((e) => String(e || '').trim().toLowerCase())
+      : [];
+    if (!emails.includes(caller.email)) {
+      throw new AuthError(403, 'You do not have access to this client.');
+    }
+    return {
+      ...caller,
+      role: '',
+      isStaffDomain: false,
+      isStaff: false,
+      authorType: 'client',
+      clientName: client.name || '',
+    };
+  } catch (err) {
+    if (err instanceof AuthError) throw err;
+    console.error('[requireAuth] client access check failed:', err?.message || err);
+    throw new AuthError(503, 'Could not verify client access. Try again.');
+  }
+}
+
 export function describeAuthError(err) {
   if (err instanceof AuthError) return { status: err.status, message: err.message };
   console.error('[requireAuth] unexpected:', err);

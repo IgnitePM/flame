@@ -83,6 +83,8 @@ import { computeRetainerDaysLeft } from '../utils/retainerCategoryStats.js';
 import { resolveExpenseEquivalentHours } from '../utils/billingEngine.js';
 import ClientProfileSummary from './ClientProfileSummary.jsx';
 import ClientFilesPanel from './ClientFilesPanel.jsx';
+import ClientMessagesPanel from './ClientMessagesPanel.jsx';
+import ClientReviewsPanel from './ClientReviewsPanel.jsx';
 import ClientCycleActivityPanel from './ClientCycleActivityPanel.jsx';
 import RetainerCategoryStats from './RetainerCategoryStats.jsx';
 import TaskLogSessionDetail from './TaskLogSessionDetail.jsx';
@@ -121,6 +123,8 @@ function parseClientSubTabFromSearch(search) {
   if (t === 'timesheets') return 'timesheets';
   if (t === 'cycle_activity' || t === 'activity') return 'cycle_activity';
   if (t === 'emails' || t === 'email') return 'emails';
+  if (t === 'messages' || t === 'message') return 'messages';
+  if (t === 'reviews' || t === 'review') return 'reviews';
   if (t === 'files' || t === 'drive') return 'files';
   return 'summary';
 }
@@ -2067,34 +2071,6 @@ const AdminDashboard = ({
         </div>
         )}
         </div>
-
-        <div className="flex flex-wrap gap-2 w-full md:w-auto">
-          <button
-            onClick={() => {
-              setManualTaskValues({
-                clientName: '',
-                billingTarget: '',
-                date: '',
-                hours: '',
-                minutes: '',
-                notes: '',
-                employeeName:
-                  user?.displayName || user?.email || '',
-                parsedExpense: 0,
-              });
-              setManualTaskModal(true);
-            }}
-            disabled={isRestrictedStaff}
-            title={isRestrictedStaff ? 'Admin only' : undefined}
-            className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-lg active:scale-95 ${
-              isRestrictedStaff
-                ? 'bg-slate-200 text-slate-400 cursor-not-allowed opacity-60'
-                : 'bg-slate-800 hover:bg-black text-white'
-            }`}
-          >
-            <History className="w-4 h-4" /> Log Task
-          </button>
-        </div>
       </div>
 
       {/* Payroll Tab (Wagepoint hours) */}
@@ -3679,6 +3655,10 @@ const AdminDashboard = ({
                 !isClientPage || clientDetailSubTab === 'summary';
               const showClientEmails =
                 isClientPage && clientDetailSubTab === 'emails';
+              const showClientMessages =
+                isClientPage && clientDetailSubTab === 'messages';
+              const showClientReviews =
+                isClientPage && clientDetailSubTab === 'reviews';
               const showClientFiles =
                 isClientPage && clientDetailSubTab === 'files';
               const showClientTasks =
@@ -3971,6 +3951,8 @@ const AdminDashboard = ({
                         {[
                           { id: 'summary', label: 'Summary' },
                           { id: 'emails', label: 'Emails' },
+                          { id: 'messages', label: 'Messages' },
+                          { id: 'reviews', label: 'Reviews' },
                           { id: 'files', label: 'Files' },
                           { id: 'cycle_activity', label: 'Cycle activity' },
                           { id: 'tasks', label: 'Tasks' },
@@ -4592,6 +4574,19 @@ const AdminDashboard = ({
                           </p>
                         )}
                       </div>
+                    )}
+
+                    {showClientMessages && (
+                      <ClientMessagesPanel
+                        client={c}
+                        mode="staff"
+                        userEmail={user?.email || ''}
+                        userName={user?.displayName || user?.email || ''}
+                      />
+                    )}
+
+                    {showClientReviews && (
+                      <ClientReviewsPanel client={c} mode="staff" />
                     )}
 
                     {showClientFiles && (

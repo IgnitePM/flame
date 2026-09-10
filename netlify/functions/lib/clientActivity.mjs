@@ -19,7 +19,9 @@ function activityTypeLabel(type) {
     file_upload: 'File',
     task_completed: 'Task completed',
     tag: 'Tag',
-    meeting: 'Meeting',
+    message_sent: 'Message',
+    review_sent: 'Review sent',
+    review_decision: 'Review decision',
   };
   return labels[type] || String(type || 'Activity');
 }

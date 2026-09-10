@@ -280,5 +280,43 @@ service cloud.firestore {
       allow update: if false;
       allow delete: if hasSalesFunnel() && isAdmin();
     }
+
+    // Per-client shared Messages inbox (staff + portal).
+    match /clientMessages/{messageId} {
+      allow read: if isAnyStaff() ||
+        (isSignedIn() &&
+         resource.data.clientId is string &&
+         clientAllowsEmail(resource.data.clientId));
+      // Writes go through Netlify (create + email). Digest bot + staff may write;
+      // portal creates only as authorType client for their own client.
+      allow create: if isAnyStaff() || isBilling() ||
+        (isSignedIn() &&
+         request.resource.data.clientId is string &&
+         request.resource.data.clientId != '' &&
+         clientAllowsEmail(request.resource.data.clientId) &&
+         request.resource.data.authorType == 'client' &&
+         request.resource.data.authorEmail == emailLower());
+      allow update: if isAnyStaff() || isBilling();
+      allow delete: if isAdmin();
+    }
+
+    // Deliverable Reviews (staff create; portal decide when pending).
+    match /clientReviews/{reviewId} {
+      allow read: if isAnyStaff() ||
+        (isSignedIn() &&
+         resource.data.clientId is string &&
+         clientAllowsEmail(resource.data.clientId));
+      allow create: if isAnyStaff() || isBilling();
+      allow update: if isAnyStaff() || isBilling() ||
+        (isSignedIn() &&
+         resource.data.clientId is string &&
+         clientAllowsEmail(resource.data.clientId) &&
+         resource.data.status == 'pending' &&
+         request.resource.data.clientId == resource.data.clientId &&
+         request.resource.data.status in ['approved', 'revisions_requested'] &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['status', 'decisionAt', 'decisionByEmail', 'decisionNote', 'linkedMessageId', 'updatedAt']));
+      allow delete: if isAdmin();
+    }
   }
 }

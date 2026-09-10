@@ -14,6 +14,9 @@ export const CLIENT_ACTIVITY_TYPES = {
   file_upload: { label: 'File', group: 'files' },
   task_completed: { label: 'Task completed', group: 'tasks' },
   tag: { label: 'Tag', group: 'notes' },
+  message_sent: { label: 'Message', group: 'portal' },
+  review_sent: { label: 'Review sent', group: 'portal' },
+  review_decision: { label: 'Review decision', group: 'portal' },
 };
 
 export const MANUAL_ACTIVITY_TYPES = ['note', 'call', 'meeting', 'tag'];
