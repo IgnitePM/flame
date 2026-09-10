@@ -34,6 +34,15 @@ export default async (req) => {
         gmailEmail: connected ? conn.gmailEmail || '' : '',
         lastSyncAt: connected ? Number(conn.lastSyncAt || 0) || null : null,
         connectedAt: connected ? Number(conn.connectedAt || 0) || null : null,
+        fullSync: connected && conn.fullSync
+          ? {
+              status: conn.fullSync.status || null,
+              scanned: Number(conn.fullSync.scanned || 0),
+              upserted: Number(conn.fullSync.upserted || 0),
+              chunkIndex: Number(conn.fullSync.chunkIndex || 0),
+              totalChunks: Number(conn.fullSync.totalChunks || 0),
+            }
+          : null,
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     );

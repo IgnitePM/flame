@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Link2, Mail, RefreshCw, Unlink } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { History, Link2, Mail, RefreshCw, Unlink } from 'lucide-react';
 import { authedFetch } from '../utils/authedFetch.js';
 
 function formatWhen(ms) {
@@ -26,9 +26,11 @@ export default function GmailConnectCard({ canManage = false, onTabFocus }) {
     connected: false,
     gmailEmail: '',
     lastSyncAt: null,
+    fullSync: null,
   });
   const [busy, setBusy] = useState('');
   const [banner, setBanner] = useState('');
+  const fullSyncAbort = useRef(false);
 
   const refresh = useCallback(async () => {
     if (!canManage) {
@@ -44,6 +46,7 @@ export default function GmailConnectCard({ canManage = false, onTabFocus }) {
         connected: Boolean(data.connected),
         gmailEmail: data.gmailEmail || '',
         lastSyncAt: data.lastSyncAt || null,
+        fullSync: data.fullSync || null,
       });
     } catch (err) {
       setStatus({
@@ -51,6 +54,7 @@ export default function GmailConnectCard({ canManage = false, onTabFocus }) {
         connected: false,
         gmailEmail: '',
         lastSyncAt: null,
+        fullSync: null,
         error: err?.message || String(err),
       });
     }
@@ -119,7 +123,9 @@ export default function GmailConnectCard({ canManage = false, onTabFocus }) {
     setBusy('sync');
     setBanner('');
     try {
-      const resp = await authedFetch('/.netlify/functions/sync-gmail-clients-http', {});
+      const resp = await authedFetch('/.netlify/functions/sync-gmail-clients-http', {
+        mode: 'recent',
+      });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) {
         throw new Error(
@@ -147,7 +153,49 @@ export default function GmailConnectCard({ canManage = false, onTabFocus }) {
     }
   };
 
+  const fullHistorySync = async () => {
+    if (busy) return;
+    const resume = status.fullSync?.status === 'running';
+    if (
+      !resume &&
+      !window.confirm(
+        'Run a full history sync? This walks all Gmail matching your CRM emails/domains in batches (can take several minutes). Keep this tab open.',
+      )
+    ) {
+      return;
+    }
+    setBusy('full');
+    fullSyncAbort.current = false;
+    setBanner(resume ? 'Resuming full history sync…' : 'Starting full history sync…');
+    let restart = !resume;
+    let guard = 0;
+    try {
+      while (!fullSyncAbort.current && guard < 500) {
+        guard += 1;
+        const resp = await authedFetch('/.netlify/functions/sync-gmail-clients-http', {
+          mode: 'full',
+          restart,
+        });
+        restart = false;
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.error || `Full sync failed (HTTP ${resp.status})`);
+        setBanner(data.hint || 'Full sync running…');
+        await refresh();
+        if (data.done || !data.continue) break;
+        // Brief pause between chunks to avoid hammering Functions
+        await new Promise((r) => setTimeout(r, 400));
+      }
+    } catch (err) {
+      setBanner(err?.message || String(err));
+    } finally {
+      setBusy('');
+      await refresh();
+    }
+  };
+
   if (!canManage) return null;
+
+  const fullRunning = status.fullSync?.status === 'running';
 
   return (
     <div className="bg-white p-8 rounded-[32px] border border-slate-100 shadow-sm text-left">
@@ -176,9 +224,21 @@ export default function GmailConnectCard({ canManage = false, onTabFocus }) {
               </div>
             ) : (
               <div className="text-[11px] font-bold text-slate-400 mt-1">
-                Not synced yet — use Sync now or wait for the 15‑minute job.
+                Not synced yet — use Sync now or Full history sync.
               </div>
             )}
+            {fullRunning ? (
+              <div className="text-[11px] font-bold text-amber-700 mt-1">
+                Full sync running — chunk {(status.fullSync.chunkIndex || 0) + 1}/
+                {status.fullSync.totalChunks || '?'} · scanned {status.fullSync.scanned || 0} ·
+                matched {status.fullSync.upserted || 0}
+              </div>
+            ) : status.fullSync?.status === 'done' ? (
+              <div className="text-[11px] font-bold text-slate-500 mt-1">
+                Last full sync: {status.fullSync.upserted || 0} matched /{' '}
+                {status.fullSync.scanned || 0} scanned
+              </div>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-3">
             <button
@@ -193,6 +253,19 @@ export default function GmailConnectCard({ canManage = false, onTabFocus }) {
             <button
               type="button"
               disabled={!!busy}
+              onClick={fullHistorySync}
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-black bg-white border border-slate-200 text-slate-800 disabled:opacity-40"
+            >
+              <History className={`w-4 h-4 ${busy === 'full' ? 'animate-pulse' : ''}`} />
+              {busy === 'full'
+                ? 'Full sync…'
+                : fullRunning
+                  ? 'Resume full sync'
+                  : 'Full history sync'}
+            </button>
+            <button
+              type="button"
+              disabled={!!busy}
               onClick={disconnect}
               className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-black bg-white border border-slate-200 text-slate-700 disabled:opacity-40"
             >
@@ -200,6 +273,10 @@ export default function GmailConnectCard({ canManage = false, onTabFocus }) {
               Disconnect
             </button>
           </div>
+          <p className="text-[11px] font-bold text-slate-400">
+            Full history sync searches all of Gmail for CRM emails and website domains in
+            batches (keep this tab open). Sync now only checks recent mail.
+          </p>
         </div>
       ) : (
         <div className="space-y-4">

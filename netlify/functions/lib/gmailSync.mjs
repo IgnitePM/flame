@@ -276,6 +276,199 @@ async function processMessageIds(accessToken, ids, ctx) {
 }
 
 /**
+ * Build Gmail search queries targeting CRM emails + website domains (all time).
+ * Chunked to stay under Gmail query length limits.
+ */
+export function buildGmailQueryChunks(emailIndex, maxLen = 450) {
+  const terms = [];
+  const byEmail = emailIndex?.byEmail;
+  const byDomain = emailIndex?.byDomain;
+  if (byEmail instanceof Map) {
+    for (const email of byEmail.keys()) {
+      terms.push(`from:${email}`, `to:${email}`);
+    }
+  }
+  if (byDomain instanceof Map) {
+    for (const domain of byDomain.keys()) {
+      terms.push(`from:${domain}`, `to:${domain}`);
+    }
+  }
+  // Dedupe while preserving order
+  const seen = new Set();
+  const unique = [];
+  for (const t of terms) {
+    if (seen.has(t)) continue;
+    seen.add(t);
+    unique.push(t);
+  }
+  if (!unique.length) return [];
+
+  const chunks = [];
+  let buf = [];
+  let len = 0;
+  for (const t of unique) {
+    const add = (buf.length ? 4 : 0) + t.length; // " OR "
+    if (buf.length && len + add > maxLen) {
+      chunks.push(`{${buf.join(' ')}}`);
+      buf = [t];
+      len = t.length;
+    } else {
+      buf.push(t);
+      len += add;
+    }
+  }
+  if (buf.length) chunks.push(`{${buf.join(' ')}}`);
+  return chunks;
+}
+
+const FULL_SYNC_PAGE_SIZE = 40;
+
+/**
+ * One chunked step of an all-time full history sync (resumable).
+ * Uses CRM-targeted Gmail queries so we don't scan unrelated mail.
+ */
+export async function syncGmailFullHistoryStep(uid, { restart = false } = {}) {
+  const connection = await loadConnection(uid);
+  if (!connection?.refreshToken) {
+    return { ok: false, error: 'Gmail is not connected.' };
+  }
+
+  const db = await getDigestDb();
+  const emailIndex = await buildClientEmailIndex(db);
+  const indexStats = {
+    clientEmails: emailIndex.byEmail.size,
+    clientDomains: emailIndex.byDomain.size,
+  };
+
+  if (indexStats.clientEmails === 0 && indexStats.clientDomains === 0) {
+    return {
+      ok: false,
+      error:
+        'Add client contact emails and/or websites first — full sync matches those addresses and domains.',
+      indexStats,
+    };
+  }
+
+  const chunks = buildGmailQueryChunks(emailIndex);
+  if (!chunks.length) {
+    return { ok: false, error: 'Could not build Gmail search queries from CRM data.', indexStats };
+  }
+
+  let fullSync = connection.fullSync && typeof connection.fullSync === 'object' ? { ...connection.fullSync } : null;
+  const now = Date.now();
+
+  if (restart || !fullSync || fullSync.status !== 'running') {
+    fullSync = {
+      status: 'running',
+      chunkIndex: 0,
+      pageToken: '',
+      scanned: 0,
+      upserted: 0,
+      skipped: 0,
+      totalChunks: chunks.length,
+      startedAt: now,
+      updatedAt: now,
+    };
+  } else {
+    fullSync.totalChunks = chunks.length;
+    // Clamp if CRM shrunk
+    if (Number(fullSync.chunkIndex) >= chunks.length) {
+      fullSync.chunkIndex = chunks.length - 1;
+      fullSync.pageToken = '';
+    }
+  }
+
+  const accessToken = await getValidAccessToken(connection);
+  const selfEmail = String(connection.gmailEmail || '').toLowerCase();
+  const staffEmail = String(connection.staffEmail || '').toLowerCase();
+  const ctx = { emailIndex, selfEmail, staffEmail };
+
+  let chunkIndex = Math.max(0, Number(fullSync.chunkIndex) || 0);
+  let pageToken = String(fullSync.pageToken || '');
+  let stepUpserted = 0;
+  let stepSkipped = 0;
+  let stepScanned = 0;
+
+  const q = chunks[chunkIndex];
+  const list = await gmailListMessages(accessToken, {
+    q,
+    pageToken,
+    maxResults: FULL_SYNC_PAGE_SIZE,
+  });
+  const ids = (list.messages || []).map((m) => m.id).filter(Boolean);
+  const result = await processMessageIds(accessToken, ids, ctx);
+  stepUpserted = result.upserted;
+  stepSkipped = result.skipped;
+  stepScanned = result.scanned;
+
+  fullSync.scanned = Number(fullSync.scanned || 0) + stepScanned;
+  fullSync.upserted = Number(fullSync.upserted || 0) + stepUpserted;
+  fullSync.skipped = Number(fullSync.skipped || 0) + stepSkipped;
+  fullSync.updatedAt = Date.now();
+
+  const nextPage = list.nextPageToken || '';
+  let done = false;
+  if (nextPage) {
+    fullSync.pageToken = nextPage;
+    fullSync.chunkIndex = chunkIndex;
+    fullSync.status = 'running';
+  } else if (chunkIndex + 1 < chunks.length) {
+    fullSync.chunkIndex = chunkIndex + 1;
+    fullSync.pageToken = '';
+    fullSync.status = 'running';
+  } else {
+    fullSync.status = 'done';
+    fullSync.pageToken = '';
+    fullSync.completedAt = Date.now();
+    done = true;
+    try {
+      const profile = await fetchGmailProfile(accessToken);
+      if (profile?.historyId) {
+        await saveConnection(uid, { historyId: String(profile.historyId) });
+      }
+    } catch (err) {
+      console.warn('[gmailSync] full sync historyId:', err?.message || err);
+    }
+  }
+
+  await saveConnection(uid, {
+    fullSync,
+    lastSyncAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+
+  const progress = {
+    chunk: chunkIndex + 1,
+    totalChunks: chunks.length,
+    scanned: fullSync.scanned,
+    upserted: fullSync.upserted,
+    status: fullSync.status,
+  };
+
+  return {
+    ok: true,
+    mode: 'full_history',
+    done,
+    continue: !done,
+    upserted: stepUpserted,
+    skipped: stepSkipped,
+    scanned: stepScanned,
+    totals: {
+      scanned: fullSync.scanned,
+      upserted: fullSync.upserted,
+      skipped: fullSync.skipped,
+    },
+    progress,
+    indexStats,
+    hint: done
+      ? `Full history sync complete — ${fullSync.upserted} matched message(s) across ${fullSync.scanned} scanned.`
+      : `Full sync in progress — chunk ${progress.chunk}/${progress.totalChunks}, ${fullSync.scanned} scanned, ${fullSync.upserted} matched so far…`,
+    lastSyncAt: Date.now(),
+    gmailEmail: selfEmail,
+  };
+}
+
+/**
  * Sync one staff Gmail connection into clientEmailMessages.
  * @param {string} uid
  * @param {{ forceBackfill?: boolean }} [opts]
@@ -402,8 +595,15 @@ export async function syncAllGmailConnections() {
   for (const conn of connections) {
     if (!conn.refreshToken && !conn.id) continue;
     try {
-      const r = await syncGmailConnection(conn.id || conn.uid);
-      results.push({ uid: conn.id || conn.uid, ...r });
+      const uid = conn.id || conn.uid;
+      // Continue an in-progress full history sync one step per schedule tick.
+      if (conn.fullSync?.status === 'running') {
+        const r = await syncGmailFullHistoryStep(uid, { restart: false });
+        results.push({ uid, ...r });
+      } else {
+        const r = await syncGmailConnection(uid);
+        results.push({ uid, ...r });
+      }
     } catch (err) {
       console.error('[gmailSync] connection', conn.id, err);
       results.push({ uid: conn.id || conn.uid, ok: false, error: err?.message || String(err) });

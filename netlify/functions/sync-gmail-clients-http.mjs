@@ -1,10 +1,12 @@
 import { describeAuthError, requireStaffCaller } from './lib/requireAuth.mjs';
-import { syncGmailConnection } from './lib/gmailSync.mjs';
+import { syncGmailConnection, syncGmailFullHistoryStep } from './lib/gmailSync.mjs';
 
 /**
- * Manual "Sync now" for the signed-in admin/billing caller.
- * Kept separate from the scheduled function — Netlify often returns HTTP 403
- * when browsers POST to a function that only has `config.schedule`.
+ * Manual Gmail sync for the signed-in admin/billing caller.
+ * POST body:
+ *   { mode?: 'recent' | 'full', restart?: boolean }
+ * - recent (default): ~30 day backfill / match pass
+ * - full: one chunk of all-time CRM-targeted history (call repeatedly until done)
  */
 export default async (req) => {
   if (req.method !== 'POST') {
@@ -25,8 +27,21 @@ export default async (req) => {
     });
   }
 
+  let body = {};
   try {
-    const result = await syncGmailConnection(caller.uid, { forceBackfill: true });
+    body = await req.json();
+  } catch {
+    body = {};
+  }
+
+  const mode = String(body?.mode || 'recent').toLowerCase() === 'full' ? 'full' : 'recent';
+  const restart = Boolean(body?.restart);
+
+  try {
+    const result =
+      mode === 'full'
+        ? await syncGmailFullHistoryStep(caller.uid, { restart })
+        : await syncGmailConnection(caller.uid, { forceBackfill: true });
     if (!result.ok) {
       return new Response(JSON.stringify({ error: result.error || 'Sync failed.' }), {
         status: 400,
