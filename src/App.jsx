@@ -330,7 +330,6 @@ export default function App() {
   const [adminDocReady, setAdminDocReady] = useState(false);
   /** Portal users: wait for the clientEmails query (and optional sync) before Access Denied. */
   const [portalClientsReady, setPortalClientsReady] = useState(false);
-  const portalSyncAttemptedRef = useRef(false);
   const [adminUsersFromCollection, setAdminUsersFromCollection] = useState([]);
   const [inboxNotifications, setInboxNotifications] = useState([]);
   const [expenses, setExpenses] = useState([]);
@@ -718,9 +717,9 @@ export default function App() {
     };
   }, [user, adminDocReady, myAdminDoc?.id, myAdminDoc?.features?.salesFunnel]);
 
-  // Portal users (no admin doc): only the client docs that list their email.
+  // Portal users (no admin doc): repair access, then load matching client docs.
   useEffect(() => {
-    if (!user?.email || !adminDocReady) return;
+    if (!user?.email || !adminDocReady) return undefined;
     if (myAdminDoc) {
       setPortalClientsReady(true);
       return undefined;
@@ -729,41 +728,79 @@ export default function App() {
       setPortalClientsReady(true);
       return undefined;
     }
+
     const emailKey = String(user.email).trim().toLowerCase();
+    let cancelled = false;
+    let unsub = () => {};
     setPortalClientsReady(false);
-    portalSyncAttemptedRef.current = false;
-    const unsub = onSnapshot(
-      query(collection(db, 'clients'), where('clientEmails', 'array-contains', emailKey)),
-      (snapshot) => {
-        const next = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-        clientsRef.current = next;
-        setClients(next);
-        setPortalClientsReady(true);
-        // Invite exists but array-contains missed (casing/whitespace): repair once.
-        if (next.length === 0 && !portalSyncAttemptedRef.current) {
-          portalSyncAttemptedRef.current = true;
-          authedFetch('/.netlify/functions/portal-sync-access', {})
-            .then(async (resp) => {
-              const data = await resp.json().catch(() => ({}));
-              if (!resp.ok || !data?.ok) {
-                console.warn('[portal] sync-access:', data?.error || data?.reason || resp.status);
-              }
-            })
-            .catch((err) => {
-              console.warn('[portal] sync-access failed:', err?.message || err);
-            });
+
+    const applyClients = (list) => {
+      if (cancelled) return;
+      clientsRef.current = list;
+      setClients(list);
+      setPortalClientsReady(true);
+    };
+
+    const loadByClientId = async (clientId) => {
+      if (!clientId || cancelled) return false;
+      try {
+        const snap = await getDoc(doc(db, 'clients', clientId));
+        if (cancelled) return false;
+        if (snap.exists()) {
+          applyClients([{ id: snap.id, ...snap.data() }]);
+          return true;
         }
-      },
-      (err) => {
-        console.warn('[portal] clients query failed:', err?.code || err?.message || err);
-        setPortalClientsReady(true);
-        if (!portalSyncAttemptedRef.current) {
-          portalSyncAttemptedRef.current = true;
-          authedFetch('/.netlify/functions/portal-sync-access', {}).catch(() => {});
+      } catch (err) {
+        console.warn('[portal] getDoc client failed:', err?.code || err?.message || err);
+      }
+      return false;
+    };
+
+    (async () => {
+      let sync = null;
+      try {
+        const resp = await authedFetch('/.netlify/functions/portal-sync-access', {});
+        sync = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          console.warn('[portal] sync-access HTTP', resp.status, sync?.error);
+        } else if (!sync?.ok) {
+          console.warn('[portal] sync-access:', sync?.reason || sync);
         }
-      },
-    );
-    return () => unsub();
+      } catch (err) {
+        console.warn('[portal] sync-access failed:', err?.message || err);
+      }
+      if (cancelled) return;
+
+      unsub = onSnapshot(
+        query(collection(db, 'clients'), where('clientEmails', 'array-contains', emailKey)),
+        async (snapshot) => {
+          const next = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+          if (next.length > 0) {
+            applyClients(next);
+            return;
+          }
+          // Query empty after repair — try direct read of the synced client.
+          if (sync?.ok && sync.clientId) {
+            const ok = await loadByClientId(sync.clientId);
+            if (ok) return;
+          }
+          applyClients([]);
+        },
+        async (err) => {
+          console.warn('[portal] clients query failed:', err?.code || err?.message || err);
+          if (sync?.ok && sync.clientId) {
+            const ok = await loadByClientId(sync.clientId);
+            if (ok) return;
+          }
+          applyClients([]);
+        },
+      );
+    })();
+
+    return () => {
+      cancelled = true;
+      unsub();
+    };
   }, [user, adminDocReady, myAdminDoc?.id]);
 
   useEffect(() => {
@@ -3289,8 +3326,27 @@ export default function App() {
           <Shield className="w-16 h-16 text-red-500 mx-auto mb-6" />
           <h2 className="text-2xl font-black mb-2">Access Denied</h2>
           <p className="text-slate-500 text-sm mb-6 font-medium">
-            Your account ({String(user?.email || '').trim() || user?.uid || 'unknown'}) is not on any client’s authorized portal list. Ask Ignite to add this exact email under the client’s Authorized Emails, Save Profile, then try again.
+            Signed in as <span className="text-slate-800 font-bold">{String(user?.email || '').trim() || user?.uid || 'unknown'}</span>. This email is not linked to a client portal yet.
           </p>
+          <p className="text-slate-400 text-xs mb-6">
+            Ignite: open the client → Authorized Emails → confirm this exact address → Save Profile → Resend invite.
+          </p>
+          <button
+            type="button"
+            onClick={async () => {
+              setPortalClientsReady(false);
+              try {
+                await authedFetch('/.netlify/functions/portal-sync-access', {});
+              } catch {
+                /* retry still reloads via effect below */
+              }
+              // Force effect to re-run by toggling ready; remount lookup:
+              window.location.reload();
+            }}
+            className="w-full bg-black text-white p-4 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-slate-800 transition-all mb-3"
+          >
+            Retry access
+          </button>
           <button onClick={() => { setUser(null); signOut(auth); }} className="w-full bg-slate-100 text-slate-600 p-4 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-slate-200 transition-all">Sign Out</button>
         </div>
       </div>

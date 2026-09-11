@@ -218,11 +218,19 @@ async function normalizeClientEmailsOnDoc(db, clientId, { ensureEmail = null } =
   if (!cid) return null;
   const client = await fetchDoc(db, `clients/${cid}`);
   if (!client) return null;
-  const emails = Array.isArray(client.clientEmails) ? client.clientEmails : [];
+  const raw = client.clientEmails;
+  const emails = Array.isArray(raw)
+    ? raw
+    : String(raw || '')
+        .split(/[,\n;]/g)
+        .map((s) => s.trim())
+        .filter(Boolean);
   const lowered = [...new Set(emails.map(normEmail).filter(Boolean))];
   const ensure = normEmail(ensureEmail);
   if (ensure && !lowered.includes(ensure)) lowered.push(ensure);
-  if (JSON.stringify(lowered) !== JSON.stringify(emails)) {
+  const sameArray =
+    Array.isArray(raw) && JSON.stringify(lowered) === JSON.stringify(raw);
+  if (!sameArray) {
     await mergeDoc(db, `clients/${cid}`, { clientEmails: lowered });
     return { ...client, id: cid, clientEmails: lowered };
   }
@@ -230,27 +238,42 @@ async function normalizeClientEmailsOnDoc(db, clientId, { ensureEmail = null } =
 }
 
 /**
- * Self-heal for portal login: if an invite exists for this email, force
- * clientEmails onto lowercase (and ensure the invite email is listed) so the
- * client-side array-contains query can succeed.
+ * Self-heal for portal login: normalize clientEmails to lowercase and ensure
+ * this email is listed, so the client-side array-contains query can succeed.
  */
 export async function syncPortalAccessForEmail(email) {
   const em = normEmail(email);
   if (!em) throw new Error('Missing email.');
   const db = await getDigestDb();
+
   const invite = await fetchDoc(db, `portalInvites/${em}`);
-  if (!invite?.clientId) {
-    return { ok: false, reason: 'no_invite', email: em };
+  if (invite && String(invite.status || '').toLowerCase() === 'revoked') {
+    return { ok: false, reason: 'revoked', email: em, clientId: invite.clientId || null };
   }
-  if (String(invite.status || '').toLowerCase() === 'revoked') {
-    return { ok: false, reason: 'revoked', email: em, clientId: invite.clientId };
+
+  let clientId = invite?.clientId ? String(invite.clientId).trim() : '';
+  if (!clientId) {
+    const clients = await fetchCollection(db, 'clients');
+    const match = (clients || []).find((c) => {
+      const emails = Array.isArray(c?.clientEmails)
+        ? c.clientEmails
+        : String(c?.clientEmails || '').split(/[,\n;]/g);
+      return emails.map(normEmail).includes(em);
+    });
+    clientId = match?.id ? String(match.id) : '';
   }
-  const client = await normalizeClientEmailsOnDoc(db, invite.clientId, {
+
+  if (!clientId) {
+    return { ok: false, reason: 'no_client', email: em };
+  }
+
+  const client = await normalizeClientEmailsOnDoc(db, clientId, {
     ensureEmail: em,
   });
   if (!client) {
-    return { ok: false, reason: 'client_missing', email: em, clientId: invite.clientId };
+    return { ok: false, reason: 'client_missing', email: em, clientId };
   }
+
   return {
     ok: true,
     email: em,
