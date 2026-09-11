@@ -234,6 +234,16 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Opaque set-password tokens for portal invites (digest bot only).
+    match /portalInviteTokens/{tokenId} {
+      allow read, write: if isBilling();
+    }
+
+    // Temporary Auth passwords for pending portal invites (digest bot only).
+    match /portalInviteSecrets/{emailId} {
+      allow read, write: if isBilling();
+    }
+
     // Outbound + synced Gmail CRM emails (client or lead). Staff only; digest bot writes.
     match /clientEmailMessages/{messageId} {
       allow read: if isAnyStaff();

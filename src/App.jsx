@@ -111,6 +111,7 @@ import { normalizeCompanyProfileFields } from './utils/clientCompanyProfile.js';
 import ClientEnrichPreviewModal from './components/ClientEnrichPreviewModal.jsx';
 import GlobalEmailsHub from './components/GlobalEmailsHub.jsx';
 import GlobalMessagesHub from './components/GlobalMessagesHub.jsx';
+import PortalSetPasswordPage from './components/PortalSetPasswordPage.jsx';
 import IdleFailsafeGuard from './components/IdleFailsafeGuard.jsx';
 import {
   filterClientsForTeamMember,
@@ -3257,6 +3258,11 @@ export default function App() {
 
   // --- LOGIN SCREEN ---
   if (!user) {
+    const path =
+      typeof window !== 'undefined' ? window.location.pathname || '' : '';
+    if (path.startsWith('/set-password')) {
+      return <PortalSetPasswordPage />;
+    }
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[#0f0f11] p-6">
         <div className="bg-white p-10 rounded-[40px] shadow-2xl border border-slate-100 flex flex-col items-center max-w-sm w-full text-center">
@@ -4439,7 +4445,7 @@ export default function App() {
                 <div className="space-y-2 pt-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Authorized Emails (Comma separated)</label>
                   <p className="text-xs text-slate-400 mb-2">
-                    Each email can access only this client. Invite creates their login (individual password) and emails a set-password link; Google sign-in with the same address also works.
+                    Each email can access only this client. Invite creates their login and emails a set-password link (opens on our site — scanners cannot use it up). Google sign-in with the same address also works.
                   </p>
                   <textarea
                     value={(editingClient.clientEmails || []).join(', ')}
@@ -4494,8 +4500,8 @@ export default function App() {
                                       if (!resp.ok) throw new Error(data.error || 'Invite failed');
                                       window.alert(
                                         pending || accepted
-                                          ? `Resent set-password email to ${email}.`
-                                          : `Invite sent to ${email}. They’ll get a set-password email (and a short portal note).`,
+                                          ? `Resent set-password link to ${email}.`
+                                          : `Invite sent to ${email}. They’ll get an email with a Set password button.`,
                                       );
                                     } catch (err) {
                                       window.alert(err?.message || String(err));
