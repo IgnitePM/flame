@@ -24,6 +24,7 @@ function activityTypeLabel(type) {
     review_decision: 'Approval decision',
     todo_request: 'Task request',
     todo_request_decision: 'Task request decision',
+    addon_request: 'Add-on hours',
   };
   return labels[type] || String(type || 'Activity');
 }

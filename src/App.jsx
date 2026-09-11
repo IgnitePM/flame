@@ -2252,38 +2252,27 @@ export default function App() {
     if (!hoursNum || !addonModal) return;
 
     const clientId = addonModal.id;
-    const clientName = addonModal.name;
-    const hourlyRate = Number(addonModal.hourlyRate) || 0;
+    if (!clientId || clientId === 'demo') {
+      window.alert('Add-on hours are not available in demo mode.');
+      return;
+    }
 
-    const subtotal = hoursNum * hourlyRate;
-    const hstRate = 0.13;
-    const hst = subtotal * hstRate;
-    const total = subtotal + hst;
-
-    const cycleOffset = addonValues.cycleTarget === 'next' ? 1 : 0;
-    const billingCycleStart = getBillingPeriod(
-      addonModal.billingDay || 1,
-      cycleOffset,
-    ).start;
-
-    await addDoc(collection(db, 'addons'), {
-      clientId,
-      clientName,
-      hours: hoursNum,
-      notes: addonValues.notes,
-      category: addonValues.category || 'Additional Hours',
-      requestedBy: view === 'client_portal' ? 'client' : 'admin',
-      billingCycleStart,
-      priceBreakdown: { hourlyRate, subtotal, hstRate, hst, total },
-      notificationState: {
-        adminNeedsInvoice: view === 'client_portal',
-        clientVisible: true,
-      },
-      status: 'pending',
-      date: Date.now(),
-    });
-    setAddonModal(null);
-    setAddonValues({ hours: '', notes: '', category: '', cycleTarget: 'current' });
+    try {
+      const resp = await authedFetch('/.netlify/functions/client-addon-request', {
+        clientId,
+        hours: hoursNum,
+        notes: addonValues.notes || '',
+        category: addonValues.category || 'Additional Hours',
+        cycleTarget: addonValues.cycleTarget === 'next' ? 'next' : 'current',
+        requestedBy: view === 'client_portal' ? 'client' : 'admin',
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error || 'Could not submit add-on request');
+      setAddonModal(null);
+      setAddonValues({ hours: '', notes: '', category: '', cycleTarget: 'current' });
+    } catch (err) {
+      window.alert(err?.message || String(err));
+    }
   };
 
   const parseProjectDeadlineMs = (value) => {

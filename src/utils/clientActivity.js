@@ -19,6 +19,7 @@ export const CLIENT_ACTIVITY_TYPES = {
   review_decision: { label: 'Approval decision', group: 'portal' },
   todo_request: { label: 'Task request', group: 'portal' },
   todo_request_decision: { label: 'Task request decision', group: 'portal' },
+  addon_request: { label: 'Add-on hours', group: 'portal' },
 };
 
 export const MANUAL_ACTIVITY_TYPES = ['note', 'call', 'meeting', 'tag'];

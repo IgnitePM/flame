@@ -35,6 +35,11 @@ const SlackNotificationsCard = ({ notifySettings = {}, updateNotifySettings }) =
       defaultOn: true,
     },
     {
+      key: 'notifyAddonPurchases',
+      label: 'Client requested add-on hours (invoice needed)',
+      defaultOn: true,
+    },
+    {
       key: 'notifyPortalInvitesGlobal',
       label: 'Also post portal invites to the workspace webhook (in addition to client webhook)',
       defaultOn: false,
