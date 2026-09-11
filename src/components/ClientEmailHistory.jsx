@@ -138,7 +138,7 @@ export default function ClientEmailHistory({
       ) : !loadError && filtered.length === 0 ? (
         <p className="text-xs italic text-slate-400">No emails match your search.</p>
       ) : (
-        <ul className="space-y-2 max-h-[360px] overflow-y-auto">
+        <ul className="space-y-2 max-h-[min(70vh,720px)] overflow-y-auto pr-1">
           {filtered.map((m) => {
             const open = expandedId === m.id;
             const inbound = m.direction === 'inbound';
@@ -181,7 +181,7 @@ export default function ClientEmailHistory({
                 </button>
                 {open && (
                   <div className="px-3 pb-3 space-y-2 border-t border-slate-100 pt-2">
-                    <pre className="text-xs font-medium text-slate-600 whitespace-pre-wrap font-sans max-h-48 overflow-y-auto">
+                    <pre className="text-xs font-medium text-slate-600 whitespace-pre-wrap break-words [overflow-wrap:anywhere] font-sans max-h-[min(50vh,480px)] overflow-y-auto">
                       {m.body || ''}
                     </pre>
                     {canCompose && onReply && (
