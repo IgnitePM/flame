@@ -591,7 +591,7 @@ const ClientPortal = ({
                   Tasks this billing cycle
                 </h3>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
-                  Request work or track shared tasks · estimates help plan the cycle
+                  Request work or track shared tasks · Ignite sets hour estimates for planning
                 </p>
               </div>
             </div>

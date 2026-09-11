@@ -4,6 +4,7 @@ import { authedFetch } from '../utils/authedFetch.js';
 
 /**
  * Portal form to request a retainer-category task (staff must approve).
+ * Estimated hours are assigned by staff after review — not by the client.
  */
 export default function PortalTaskRequestForm({
   client,
@@ -16,9 +17,10 @@ export default function PortalTaskRequestForm({
       ? []
       : ['General / Unclassified']),
   ];
-  const [categoryLabel, setCategoryLabel] = useState(categoryOptions[0] || 'General / Unclassified');
+  const [categoryLabel, setCategoryLabel] = useState(
+    categoryOptions[0] || 'General / Unclassified',
+  );
   const [text, setText] = useState('');
-  const [estimatedHours, setEstimatedHours] = useState('');
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState('');
 
@@ -32,12 +34,10 @@ export default function PortalTaskRequestForm({
         categoryLabel,
         categoryKey: todoCategoryKey ? todoCategoryKey(categoryLabel) : undefined,
         text: text.trim(),
-        estimatedHours: estimatedHours === '' ? null : Number(estimatedHours),
       });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(data.error || 'Could not submit request');
       setText('');
-      setEstimatedHours('');
       setBanner('Request sent — Ignite will review it shortly.');
     } catch (err) {
       setBanner(err?.message || String(err));
@@ -51,28 +51,17 @@ export default function PortalTaskRequestForm({
       <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">
         Request a task
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        <select
-          value={categoryLabel}
-          onChange={(e) => setCategoryLabel(e.target.value)}
-          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
-        >
-          {categoryOptions.map((cat) => (
-            <option key={cat} value={cat}>
-              {cat}
-            </option>
-          ))}
-        </select>
-        <input
-          type="number"
-          min="0"
-          step="0.25"
-          value={estimatedHours}
-          onChange={(e) => setEstimatedHours(e.target.value)}
-          placeholder="Suggested hours (optional)"
-          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-[#fd7414]"
-        />
-      </div>
+      <select
+        value={categoryLabel}
+        onChange={(e) => setCategoryLabel(e.target.value)}
+        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+      >
+        {categoryOptions.map((cat) => (
+          <option key={cat} value={cat}>
+            {cat}
+          </option>
+        ))}
+      </select>
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}

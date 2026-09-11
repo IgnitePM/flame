@@ -90,6 +90,9 @@ import RetainerCategoryStats from './RetainerCategoryStats.jsx';
 import TaskLogSessionDetail from './TaskLogSessionDetail.jsx';
 import TaskLogTimesheetRow from './TaskLogTimesheetRow.jsx';
 import TodoItemAttachments from './TodoItemAttachments.jsx';
+import TodoEstimateHoursSlider, {
+  normalizeTodoEstimatedHours,
+} from './TodoEstimateHoursSlider.jsx';
 import TaskNotesSection from './TaskNotesSection.jsx';
 import MentionTextarea from './MentionTextarea.jsx';
 import PayrollView from './PayrollView.jsx';
@@ -1695,7 +1698,10 @@ const AdminDashboard = ({
       }
       const recurrence = buildRecurrenceFromMode(todoEditOptionsRecurrence, dueDate);
       const estimateRaw = String(todoEditOptionsEstimate || '').trim();
-      const estimatedHours = estimateRaw === '' ? null : Math.max(0, Number(estimateRaw) || 0);
+      const estimatedHours =
+        estimateRaw === '' || Number(estimateRaw) === 0
+          ? null
+          : normalizeTodoEstimatedHours(estimateRaw);
       let nextItem = {
         ...item,
         text: title,
@@ -5139,20 +5145,25 @@ const AdminDashboard = ({
                                                 if (isCycleLocked(c, cycleStart)) return;
                                                 setTodoSaving(true);
                                                 try {
+                                                  const approved = {
+                                                    ...item,
+                                                    requestStatus: 'approved',
+                                                    decisionAt: Date.now(),
+                                                    decisionByEmail: user?.email || '',
+                                                  };
                                                   const next = items.map((i) =>
-                                                    i.id === item.id
-                                                      ? {
-                                                          ...i,
-                                                          requestStatus: 'approved',
-                                                          decisionAt: Date.now(),
-                                                          decisionByEmail: user?.email || '',
-                                                        }
-                                                      : i,
+                                                    i.id === item.id ? approved : i,
                                                   );
                                                   await updateClientTodo(c, cycleStart, catKey, {
                                                     ...catTodo,
                                                     items: next,
                                                   });
+                                                  openTodoEditOptionsModal(
+                                                    c,
+                                                    cycleStart,
+                                                    catKey,
+                                                    approved,
+                                                  );
                                                 } finally {
                                                   setTodoSaving(false);
                                                 }
@@ -5252,6 +5263,47 @@ const AdminDashboard = ({
                                           </button>
                                         )}
                                         </div>
+                                        {!isCycleLocked(c, cycleStart) ? (
+                                          <div className="pl-8 pr-1 pt-1 pb-0.5">
+                                            <TodoEstimateHoursSlider
+                                              compact
+                                              value={Number(item.estimatedHours) || 0}
+                                              categoryHours={
+                                                Number(c?.retainers?.[generalLabel] || 0) ||
+                                                null
+                                              }
+                                              disabled={todoSaving}
+                                              onCommit={async (hrs) => {
+                                                const estimatedHours =
+                                                  normalizeTodoEstimatedHours(hrs);
+                                                if (
+                                                  estimatedHours ===
+                                                    (item.estimatedHours ?? null) ||
+                                                  (estimatedHours === null &&
+                                                    !item.estimatedHours)
+                                                ) {
+                                                  return;
+                                                }
+                                                setTodoSaving(true);
+                                                try {
+                                                  const next = items.map((i) =>
+                                                    i.id === item.id
+                                                      ? { ...i, estimatedHours }
+                                                      : i,
+                                                  );
+                                                  await updateClientTodo(
+                                                    c,
+                                                    cycleStart,
+                                                    catKey,
+                                                    { ...catTodo, items: next },
+                                                  );
+                                                } finally {
+                                                  setTodoSaving(false);
+                                                }
+                                              }}
+                                            />
+                                          </div>
+                                        ) : null}
                                         {attachClientDriveFile && (
                                           <TodoItemAttachments
                                             item={item}
@@ -6355,6 +6407,47 @@ const AdminDashboard = ({
                                                                 <Trash2 className="w-4 h-4" />
                                                               </button>
                                                               </div>
+                                                              {!isCycleLocked(c, cycleStart) ? (
+                                                                <div className="pl-8 pr-1 pt-1 pb-0.5">
+                                                                  <TodoEstimateHoursSlider
+                                                                    compact
+                                                                    value={Number(item.estimatedHours) || 0}
+                                                                    categoryHours={
+                                                                      Number(c?.retainers?.[cat] || 0) ||
+                                                                      null
+                                                                    }
+                                                                    disabled={todoSaving}
+                                                                    onCommit={async (hrs) => {
+                                                                      const estimatedHours =
+                                                                        normalizeTodoEstimatedHours(hrs);
+                                                                      if (
+                                                                        estimatedHours ===
+                                                                          (item.estimatedHours ?? null) ||
+                                                                        (estimatedHours === null &&
+                                                                          !item.estimatedHours)
+                                                                      ) {
+                                                                        return;
+                                                                      }
+                                                                      setTodoSaving(true);
+                                                                      try {
+                                                                        const next = items.map((i) =>
+                                                                          i.id === item.id
+                                                                            ? { ...i, estimatedHours }
+                                                                            : i,
+                                                                        );
+                                                                        await updateClientTodo(
+                                                                          c,
+                                                                          cycleStart,
+                                                                          catKey,
+                                                                          { ...catTodo, items: next },
+                                                                        );
+                                                                      } finally {
+                                                                        setTodoSaving(false);
+                                                                      }
+                                                                    }}
+                                                                  />
+                                                                </div>
+                                                              ) : null}
                                                               {attachClientDriveFile && (
                                                                 <TodoItemAttachments
                                                                   item={item}
@@ -8096,21 +8189,31 @@ const AdminDashboard = ({
             </div>
             {!todoEditOptionsTarget.subtaskId ? (
               <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-                  Estimated hours
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.25"
-                  value={todoEditOptionsEstimate}
-                  onChange={(e) => setTodoEditOptionsEstimate(e.target.value)}
-                  placeholder="e.g. 2.5"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
-                />
-                <p className="mt-1 text-[10px] font-bold text-slate-500">
-                  Shown to the client for planning transparency.
-                </p>
+                {(() => {
+                  const cl = clients.find((x) => x.id === todoEditOptionsTarget.clientId);
+                  const catName =
+                    getEnabledRetainerCategoryNames(cl || {}).find(
+                      (n) => todoCategoryKey(n) === todoEditOptionsTarget.categoryKey,
+                    ) ||
+                    (todoEditOptionsTarget.categoryKey ===
+                    todoCategoryKey('General / Unclassified')
+                      ? 'General / Unclassified'
+                      : null);
+                  const catHours =
+                    catName && catName !== 'General / Unclassified'
+                      ? Number(cl?.retainers?.[catName] || 0)
+                      : Number(cl?.retainers?.[catName] || 0) || null;
+                  return (
+                    <TodoEstimateHoursSlider
+                      value={todoEditOptionsEstimate === '' ? 0 : Number(todoEditOptionsEstimate) || 0}
+                      onChange={(hrs) =>
+                        setTodoEditOptionsEstimate(hrs <= 0 ? '' : String(hrs))
+                      }
+                      categoryHours={catHours > 0 ? catHours : null}
+                      disabled={todoSaving}
+                    />
+                  );
+                })()}
               </div>
             ) : null}
             <div className="flex justify-end gap-2 pt-1">

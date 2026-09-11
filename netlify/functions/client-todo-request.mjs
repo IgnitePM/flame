@@ -22,7 +22,8 @@ function todoCategoryKey(name) {
 
 /**
  * Portal: request a retainer/category task (pending staff approval).
- * POST { clientId, categoryKey?, categoryLabel?, text, estimatedHours? }
+ * POST { clientId, categoryKey?, categoryLabel?, text }
+ * Estimated hours are set by staff later — clients do not suggest them.
  */
 export default async (req) => {
   if (req.method !== 'POST') {
@@ -76,7 +77,6 @@ export default async (req) => {
       String(body.categoryKey || '').trim() ||
       (label ? todoCategoryKey(label) : todoCategoryKey('General / Unclassified'));
 
-    const estimatedHours = Math.max(0, Number(body.estimatedHours) || 0) || null;
     const itemId = `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const newItem = {
       id: itemId,
@@ -89,7 +89,7 @@ export default async (req) => {
       dueDate: null,
       assigneeEmails: [],
       recurrence: null,
-      estimatedHours,
+      estimatedHours: null,
       requestStatus: 'pending',
       requestedByEmail: caller.email,
       requestedAt: Date.now(),
@@ -137,7 +137,7 @@ export default async (req) => {
         body: text.slice(0, 500),
         actorEmail: caller.email,
         source: 'system',
-        meta: { itemId, categoryKey, estimatedHours },
+        meta: { itemId, categoryKey },
       });
     } catch (err) {
       console.warn('[client-todo-request] activity:', err?.message || err);
