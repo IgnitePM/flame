@@ -12,6 +12,7 @@ import ClientMessagesPanel from './ClientMessagesPanel.jsx';
 import ClientReviewsPanel from './ClientReviewsPanel.jsx';
 import ClientPortalFilesPanel from './ClientPortalFilesPanel.jsx';
 import PortalTaskRequestForm from './PortalTaskRequestForm.jsx';
+import PortalCompanyProfilePanel from './PortalCompanyProfilePanel.jsx';
 import {
   ChevronLeft,
   ChevronRight,
@@ -24,29 +25,31 @@ import {
   ClipboardCheck,
   LayoutDashboard,
   FolderOpen,
+  Building2,
+  Calendar,
+  ExternalLink,
 } from 'lucide-react';
 
-const IDLE_NOTE_MARKER =
-  '[Clock stopped automatically: session was idle — Ignite PM]';
+const STRATEGY_BOOKING_URL = 'https://calendar.app.google/nsL6wM7189fAM1Vd7';
+
+const IDLE_NOTE_MARKERS = [
+  '[Clock stopped automatically: session was idle — Ignite PM]',
+  '[Clock stopped automatically: session was idle — Ignite PM server]',
+];
 
 /** Strip idle auto-stop boilerplate from portal-facing task notes. */
 function portalSafeTaskNotes(task) {
-  if (task?.autoStoppedReason === 'idle_timeout') {
-    const raw = String(task?.notes || '');
-    const cleaned = raw
-      .split(IDLE_NOTE_MARKER)
-      .join('')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-    return cleaned || '';
+  let raw = String(task?.notes || '');
+  for (const marker of IDLE_NOTE_MARKERS) {
+    raw = raw.split(marker).join('');
   }
-  const raw = String(task?.notes || '');
-  if (!raw.includes(IDLE_NOTE_MARKER)) return raw;
-  return raw
-    .split(IDLE_NOTE_MARKER)
-    .join('')
+  // Catch older / paraphrased idle wording.
+  raw = raw
+    .replace(/\[?\s*Clock(?:ed)?\s+stopped[^\]]*idle[^\]]*\]?/gi, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+  if (task?.autoStoppedReason === 'idle_timeout' && !raw) return '';
+  return raw;
 }
 
 const ClientPortal = ({
@@ -186,6 +189,7 @@ const ClientPortal = ({
         <div className="max-w-5xl mx-auto flex gap-2 overflow-x-auto py-2">
           {[
             { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+            { id: 'company', label: 'Company', icon: Building2 },
             { id: 'messages', label: 'Messages', icon: MessageSquare },
             { id: 'approvals', label: 'Approvals', icon: ClipboardCheck },
             { id: 'files', label: 'Files', icon: FolderOpen },
@@ -230,8 +234,37 @@ const ClientPortal = ({
           <ClientPortalFilesPanel client={clientProfile} />
         ) : null}
 
+        {portalSection === 'company' ? (
+          <PortalCompanyProfilePanel client={clientProfile} />
+        ) : null}
+
         {portalSection === 'dashboard' ? (
         <>
+        <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-6 sm:p-8 rounded-[32px] shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-5">
+          <div className="min-w-0">
+            <div className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-[#fd7414] mb-2">
+              <Calendar className="w-3.5 h-3.5" />
+              Strategy &amp; review
+            </div>
+            <h3 className="font-black text-xl sm:text-2xl tracking-tight">
+              Book a Strategy and Review meeting
+            </h3>
+            <p className="text-slate-300 text-sm font-medium mt-2 max-w-xl">
+              Pick a time on Ignite’s calendar. Opens Google’s booking page in a new tab
+              (Google does not allow embedding this scheduler inside other sites).
+            </p>
+          </div>
+          <a
+            href={STRATEGY_BOOKING_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 inline-flex items-center justify-center gap-2 bg-[#fd7414] hover:bg-[#e8680f] text-white px-6 py-4 rounded-2xl text-xs font-black uppercase tracking-widest transition-colors"
+          >
+            Book meeting
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+        </div>
+
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h2 className="text-3xl font-black text-slate-900">Dashboard</h2>
@@ -312,50 +345,8 @@ const ClientPortal = ({
             </p>
           ) : (
             <>
-              <div className="bg-slate-50 p-6 sm:p-8 rounded-3xl border border-slate-100">
-                <div className="flex justify-between items-end mb-2">
-                  <span className="font-black text-slate-700 text-lg">
-                    All hour lines (rollup)
-                  </span>
-                  <span className="text-sm font-black text-slate-500">
-                    {stats.currentUsed.toFixed(2)}h /{' '}
-                    {stats.adjustedAllotted.toFixed(2)}h
-                  </span>
-                </div>
-                <div className="text-[10px] text-slate-400 font-bold mb-4">
-                  Base: {stats.base.toFixed(2)}h
-                  {stats.carryover !== 0 &&
-                    ` | Carryover: ${
-                      stats.carryover > 0 ? '+' : ''
-                    }${stats.carryover.toFixed(2)}h`}
-                  {stats.currentAddons > 0 &&
-                    ` | Add-ons: +${stats.currentAddons.toFixed(2)}h`}
-                </div>
-                <div className="w-full bg-slate-200 rounded-full h-4 mb-2 overflow-hidden shadow-inner">
-                  <div
-                    className={`${
-                      stats.isOver
-                        ? 'bg-red-500'
-                        : stats.percent > 85
-                        ? 'bg-orange-500'
-                        : 'bg-[#fd7414]'
-                    } h-4 rounded-full transition-all duration-1000`}
-                    style={{ width: `${stats.percent}%` }}
-                  ></div>
-                </div>
-                {stats.isOver && (
-                  <p className="text-xs font-black text-red-500 uppercase tracking-widest text-right mt-3">
-                    Over Retainer Limit by{' '}
-                    {(
-                      stats.currentUsed - stats.adjustedAllotted
-                    ).toFixed(2)}
-                    h
-                  </p>
-                )}
-              </div>
-
               {clientHasEnabledRetainers(clientProfile) && (
-                  <div className="pt-4 border-t border-slate-100">
+                  <div>
                     <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">
                       Retainer Categories
                     </h4>

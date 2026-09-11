@@ -82,11 +82,22 @@ service cloud.firestore {
       allow create: if isAnyStaff() && (!isKiosk() || hasSalesFunnel());
       // Admin/billing (and unknown staff roles) may update anything; kiosk
       // staff only the fields the kiosk UI writes (todos, docs, team access).
-      allow update: if isAnyStaff() && (
+      // Portal users may update company profile / contacts only.
+      allow update: if (isAnyStaff() && (
         !isKiosk() ||
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(
           ['todoCycles', 'teamMemberAccessEmails', 'documents', 'generalNotes', 'cycleNotes']
         )
+      )) || (
+        isSignedIn() &&
+        resource.data.clientEmails is list &&
+        resource.data.clientEmails.hasAny([request.auth.token.email, emailLower()]) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'website', 'phone', 'companyDescription', 'industry',
+          'address', 'city', 'region', 'postalCode', 'country',
+          'googleBusinessProfileUrl', 'linkedinUrl', 'facebookUrl',
+          'instagramUrl', 'twitterUrl', 'primaryContact', 'contacts'
+        ])
       );
       allow delete: if isAdmin();
     }
