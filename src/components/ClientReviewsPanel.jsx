@@ -401,7 +401,7 @@ export default function ClientReviewsPanel({ client, mode = 'staff' }) {
       )}
 
       {pickerOpen ? (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4">
+        <div className="fixed inset-0 z-[400] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md max-h-[70vh] overflow-hidden rounded-3xl bg-white shadow-2xl flex flex-col">
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
               <div className="text-sm font-black">Attach from Drive</div>

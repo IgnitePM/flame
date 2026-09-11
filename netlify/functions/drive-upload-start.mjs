@@ -41,11 +41,16 @@ export default async (req) => {
       });
     }
     const { accessToken } = await getValidCompanyAccessToken();
+    const origin =
+      String(body.origin || '').trim() ||
+      String(req.headers.get('origin') || req.headers.get('Origin') || '').trim() ||
+      String(process.env.URL || process.env.DEPLOY_PRIME_URL || '').replace(/\/$/, '');
     const uploadUrl = await driveStartResumableUpload(accessToken, {
       name,
       mimeType: String(body.mimeType || 'application/octet-stream'),
       parents: [folderId],
       sizeBytes: body.sizeBytes != null ? Number(body.sizeBytes) : null,
+      origin,
     });
     return new Response(JSON.stringify({ ok: true, uploadUrl }), {
       status: 200,

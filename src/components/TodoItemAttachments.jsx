@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { FileText, Folder, Paperclip, Trash2, Upload, X } from 'lucide-react';
 import {
   formatFileSize,
@@ -95,10 +96,12 @@ export default function TodoItemAttachments({
   };
 
   const handleUpload = async (file) => {
-    if (!file || !onAttachDriveFile || !clientFolderId) return;
+    const targetFolder = String(folderId || clientFolderId || '').trim();
+    if (!file || !onAttachDriveFile || !targetFolder) return;
     setUploading(true);
+    setError('');
     try {
-      const meta = await uploadFileToDriveFolder(clientFolderId, file);
+      const meta = await uploadFileToDriveFolder(targetFolder, file);
       await onAttachDriveFile(client, meta, {
         linkedTodoId: item.id,
         linkedTodoText: item.text || '',
@@ -107,7 +110,9 @@ export default function TodoItemAttachments({
       });
       setPickerOpen(false);
     } catch (err) {
-      window.alert(err?.message || 'Upload failed.');
+      const msg = err?.message || 'Upload failed.';
+      setError(msg);
+      window.alert(msg);
     } finally {
       setUploading(false);
     }
@@ -131,6 +136,106 @@ export default function TodoItemAttachments({
         sensitivity: 'base',
       });
     });
+
+  const pickerModal =
+    pickerOpen && typeof document !== 'undefined'
+      ? createPortal(
+          <div className="fixed inset-0 z-[400] flex items-end sm:items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-lg max-h-[80vh] overflow-hidden rounded-3xl bg-white shadow-2xl flex flex-col">
+              <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
+                <div className="text-sm font-black text-slate-800">Attach from Drive</div>
+                <button
+                  type="button"
+                  onClick={() => setPickerOpen(false)}
+                  className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-700"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="px-4 py-2 flex flex-wrap gap-2 border-b border-slate-50">
+                {folderId !== clientFolderId ? (
+                  <button
+                    type="button"
+                    onClick={() => browseFolder(clientFolderId)}
+                    className="text-[10px] font-black uppercase tracking-widest text-[#fd7414]"
+                  >
+                    ← Client folder
+                  </button>
+                ) : null}
+                <input
+                  type="search"
+                  value={pickerSearch}
+                  onChange={(e) => setPickerSearch(e.target.value)}
+                  placeholder="Filter by name…"
+                  className="flex-1 min-w-[140px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                />
+                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-[9px] font-black uppercase tracking-widest text-slate-700">
+                  <Upload className="h-3.5 w-3.5" />
+                  {uploading ? 'Uploading…' : 'Upload new'}
+                  <input
+                    type="file"
+                    className="sr-only"
+                    disabled={uploading}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = '';
+                      handleUpload(file);
+                    }}
+                  />
+                </label>
+              </div>
+              <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                {loading ? (
+                  <p className="text-xs text-slate-400 font-bold">Loading…</p>
+                ) : error ? (
+                  <p className="text-xs text-red-600 font-bold">{error}</p>
+                ) : sorted.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic">
+                    {pickerSearch.trim()
+                      ? 'No files match this filter.'
+                      : 'No files in this folder.'}
+                  </p>
+                ) : (
+                  sorted.map((file) => {
+                    const folder = isDriveFolder(file);
+                    return (
+                      <button
+                        key={file.id}
+                        type="button"
+                        disabled={uploading}
+                        onClick={() =>
+                          folder ? browseFolder(file.id) : attachExisting(file)
+                        }
+                        className="flex w-full items-center gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-left hover:border-[#fd7414]/40 disabled:opacity-40"
+                      >
+                        {folder ? (
+                          <Folder className="h-4 w-4 shrink-0 text-[#fd7414]" />
+                        ) : (
+                          <FileText className="h-4 w-4 shrink-0 text-slate-400" />
+                        )}
+                        <span className="min-w-0 flex-1 truncate text-xs font-bold text-slate-800">
+                          {file.name}
+                        </span>
+                        {!folder ? (
+                          <span className="text-[9px] font-bold text-slate-400">
+                            {formatFileSize(Number(file.size || 0))}
+                          </span>
+                        ) : (
+                          <span className="text-[9px] font-bold text-slate-400">Open</span>
+                        )}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+              <div className="border-t border-slate-100 px-4 py-2 text-[10px] font-medium text-slate-400">
+                Choosing a file attaches it to this task. Upload puts the file in the folder you’re browsing.
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )
+      : null;
 
   return (
     <div
@@ -187,108 +292,14 @@ export default function TodoItemAttachments({
           type="button"
           disabled={uploading}
           onClick={openPicker}
-          className={`inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-[9px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 disabled:opacity-40`}
+          className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-[9px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 disabled:opacity-40"
         >
           <Paperclip className="h-3.5 w-3.5 text-[#fd7414]" />
           {uploading ? 'Working…' : 'Attach from Drive'}
         </button>
       )}
 
-      {pickerOpen ? (
-        <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg max-h-[80vh] overflow-hidden rounded-3xl bg-white shadow-2xl flex flex-col">
-            <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
-              <div className="text-sm font-black text-slate-800">Attach from Drive</div>
-              <button
-                type="button"
-                onClick={() => setPickerOpen(false)}
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-700"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="px-4 py-2 flex flex-wrap gap-2 border-b border-slate-50">
-              {folderId !== clientFolderId ? (
-                <button
-                  type="button"
-                  onClick={() => browseFolder(clientFolderId)}
-                  className="text-[10px] font-black uppercase tracking-widest text-[#fd7414]"
-                >
-                  ← Client folder
-                </button>
-              ) : null}
-              <input
-                type="search"
-                value={pickerSearch}
-                onChange={(e) => setPickerSearch(e.target.value)}
-                placeholder="Filter by name…"
-                className="flex-1 min-w-[140px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
-              />
-              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-[9px] font-black uppercase tracking-widest text-slate-700">
-                <Upload className="h-3.5 w-3.5" />
-                Upload new
-                <input
-                  type="file"
-                  className="sr-only"
-                  disabled={uploading}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    e.target.value = '';
-                    handleUpload(file);
-                  }}
-                />
-              </label>
-            </div>
-            <div className="flex-1 overflow-y-auto p-3 space-y-2">
-              {loading ? (
-                <p className="text-xs text-slate-400 font-bold">Loading…</p>
-              ) : error ? (
-                <p className="text-xs text-red-600 font-bold">{error}</p>
-              ) : sorted.length === 0 ? (
-                <p className="text-xs text-slate-400 italic">
-                  {pickerSearch.trim()
-                    ? 'No files match this filter.'
-                    : 'No files in this folder.'}
-                </p>
-              ) : (
-                sorted.map((file) => {
-                  const folder = isDriveFolder(file);
-                  return (
-                    <button
-                      key={file.id}
-                      type="button"
-                      disabled={uploading}
-                      onClick={() =>
-                        folder ? browseFolder(file.id) : attachExisting(file)
-                      }
-                      className="flex w-full items-center gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-left hover:border-[#fd7414]/40 disabled:opacity-40"
-                    >
-                      {folder ? (
-                        <Folder className="h-4 w-4 shrink-0 text-[#fd7414]" />
-                      ) : (
-                        <FileText className="h-4 w-4 shrink-0 text-slate-400" />
-                      )}
-                      <span className="min-w-0 flex-1 truncate text-xs font-bold text-slate-800">
-                        {file.name}
-                      </span>
-                      {!folder ? (
-                        <span className="text-[9px] font-bold text-slate-400">
-                          {formatFileSize(Number(file.size || 0))}
-                        </span>
-                      ) : (
-                        <span className="text-[9px] font-bold text-slate-400">Open</span>
-                      )}
-                    </button>
-                  );
-                })
-              )}
-            </div>
-            <div className="border-t border-slate-100 px-4 py-2 text-[10px] font-medium text-slate-400">
-              Choosing a file attaches it to this task. Upload puts the file in the client Drive folder.
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {pickerModal}
     </div>
   );
 }

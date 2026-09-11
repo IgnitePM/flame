@@ -4,6 +4,7 @@
  */
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import https from 'node:https';
 import { fetchDoc, getDigestDb, mergeDoc, removeDoc } from './firebaseDigestClient.mjs';
 
 export const DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive'].join(' ');
@@ -455,10 +456,13 @@ export async function driveEnsureNamedFolder(accessToken, parentId, folderName) 
 /**
  * Start a resumable upload session. Client PUTs the file bytes to the returned URL
  * (avoids Netlify request body size limits).
+ *
+ * `origin` must be the browser page origin so Google's upload URL allows CORS PUTs.
+ * Uses https.request because Node fetch forbids setting the Origin header.
  */
 export async function driveStartResumableUpload(
   accessToken,
-  { name, mimeType, parents = [], sizeBytes = null },
+  { name, mimeType, parents = [], sizeBytes = null, origin = '' },
 ) {
   const params = new URLSearchParams({
     uploadType: 'resumable',
@@ -474,26 +478,59 @@ export async function driveStartResumableUpload(
   if (parentIds.length) meta.parents = parentIds;
   if (mimeType) meta.mimeType = mimeType;
 
+  const body = JSON.stringify(meta);
   const headers = {
     Authorization: `Bearer ${accessToken}`,
     'Content-Type': 'application/json; charset=UTF-8',
+    'Content-Length': Buffer.byteLength(body),
     'X-Upload-Content-Type': mimeType || 'application/octet-stream',
   };
   if (sizeBytes != null && Number(sizeBytes) >= 0) {
     headers['X-Upload-Content-Length'] = String(Number(sizeBytes));
   }
+  const originHeader = String(origin || '').trim();
+  if (originHeader) headers.Origin = originHeader;
 
-  const resp = await fetch(`https://www.googleapis.com/upload/drive/v3/files?${params}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(meta),
+  const uploadUrl = await new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        method: 'POST',
+        hostname: 'www.googleapis.com',
+        path: `/upload/drive/v3/files?${params}`,
+        headers,
+      },
+      (resp) => {
+        const chunks = [];
+        resp.on('data', (c) => chunks.push(c));
+        resp.on('end', () => {
+          const raw = Buffer.concat(chunks).toString('utf8');
+          if (resp.statusCode < 200 || resp.statusCode >= 300) {
+            let message = 'Could not start Drive upload.';
+            try {
+              message = JSON.parse(raw)?.error?.message || message;
+            } catch {
+              /* ignore */
+            }
+            reject(new Error(message));
+            return;
+          }
+          const location =
+            resp.headers.location ||
+            resp.headers.Location ||
+            (Array.isArray(resp.headers.location) ? resp.headers.location[0] : '');
+          if (!location) {
+            reject(new Error('No resumable upload URL returned.'));
+            return;
+          }
+          resolve(String(location));
+        });
+      },
+    );
+    req.on('error', reject);
+    req.write(body);
+    req.end();
   });
-  if (!resp.ok) {
-    const data = await resp.json().catch(() => ({}));
-    throw new Error(data?.error?.message || 'Could not start Drive upload.');
-  }
-  const uploadUrl = resp.headers.get('location') || resp.headers.get('Location');
-  if (!uploadUrl) throw new Error('No resumable upload URL returned.');
+
   return uploadUrl;
 }
 

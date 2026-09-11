@@ -29,6 +29,7 @@ export async function uploadFileToDriveFolder(folderId, file) {
     name: file.name,
     mimeType: file.type || 'application/octet-stream',
     sizeBytes: file.size,
+    origin: typeof window !== 'undefined' ? window.location.origin : undefined,
   });
   const startData = await start.json().catch(() => ({}));
   if (!start.ok || !startData.uploadUrl) {
@@ -42,6 +43,12 @@ export async function uploadFileToDriveFolder(folderId, file) {
       'Content-Length': String(file.size),
     },
     body: file,
+  }).catch((err) => {
+    throw new Error(
+      err?.message === 'Failed to fetch'
+        ? 'Upload blocked by the browser (CORS). Try again after refresh — if it keeps failing, use a smaller file or attach an existing Drive file.'
+        : err?.message || 'Upload failed.',
+    );
   });
   const meta = await put.json().catch(() => ({}));
   if (!put.ok) {
