@@ -328,6 +328,9 @@ export default function App() {
   /** Own admins/{emailLower} doc — collection queries fail for kiosk/billing (Firestore rules). */
   const [myAdminDoc, setMyAdminDoc] = useState(null);
   const [adminDocReady, setAdminDocReady] = useState(false);
+  /** Portal users: wait for the clientEmails query (and optional sync) before Access Denied. */
+  const [portalClientsReady, setPortalClientsReady] = useState(false);
+  const portalSyncAttemptedRef = useRef(false);
   const [adminUsersFromCollection, setAdminUsersFromCollection] = useState([]);
   const [inboxNotifications, setInboxNotifications] = useState([]);
   const [expenses, setExpenses] = useState([]);
@@ -717,18 +720,47 @@ export default function App() {
 
   // Portal users (no admin doc): only the client docs that list their email.
   useEffect(() => {
-    if (!user?.email || !adminDocReady || myAdminDoc) return;
-    if (ENABLE_DEMOS && (user.uid === 'demo-user-123' || user.uid === 'demo-client-123')) return;
+    if (!user?.email || !adminDocReady) return;
+    if (myAdminDoc) {
+      setPortalClientsReady(true);
+      return undefined;
+    }
+    if (ENABLE_DEMOS && (user.uid === 'demo-user-123' || user.uid === 'demo-client-123')) {
+      setPortalClientsReady(true);
+      return undefined;
+    }
     const emailKey = String(user.email).trim().toLowerCase();
+    setPortalClientsReady(false);
+    portalSyncAttemptedRef.current = false;
     const unsub = onSnapshot(
       query(collection(db, 'clients'), where('clientEmails', 'array-contains', emailKey)),
       (snapshot) => {
         const next = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         clientsRef.current = next;
         setClients(next);
+        setPortalClientsReady(true);
+        // Invite exists but array-contains missed (casing/whitespace): repair once.
+        if (next.length === 0 && !portalSyncAttemptedRef.current) {
+          portalSyncAttemptedRef.current = true;
+          authedFetch('/.netlify/functions/portal-sync-access', {})
+            .then(async (resp) => {
+              const data = await resp.json().catch(() => ({}));
+              if (!resp.ok || !data?.ok) {
+                console.warn('[portal] sync-access:', data?.error || data?.reason || resp.status);
+              }
+            })
+            .catch((err) => {
+              console.warn('[portal] sync-access failed:', err?.message || err);
+            });
+        }
       },
-      () => {
-        // Unauthorized accounts simply see the Access Denied screen.
+      (err) => {
+        console.warn('[portal] clients query failed:', err?.code || err?.message || err);
+        setPortalClientsReady(true);
+        if (!portalSyncAttemptedRef.current) {
+          portalSyncAttemptedRef.current = true;
+          authedFetch('/.netlify/functions/portal-sync-access', {}).catch(() => {});
+        }
       },
     );
     return () => unsub();
@@ -3236,7 +3268,7 @@ export default function App() {
     );
   }
 
-  // Global Auth Gate
+  // Global Auth Gate — wait for portal client lookup so we don't flash Access Denied.
   if (
     user &&
     !isUserAdmin &&
@@ -3244,12 +3276,21 @@ export default function App() {
     !userEmailLower.endsWith('@ignitepm.com') &&
     !(ENABLE_DEMOS && (user.uid === 'demo-user-123' || user.uid === 'demo-client-123'))
   ) {
+    if (!portalClientsReady) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-[#0f0f11]">
+          <RotateCw className="w-8 h-8 text-[#fd7414] animate-spin" />
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[#0f0f11] p-6">
         <div className="bg-white p-12 rounded-[40px] shadow-2xl border border-slate-100 text-center max-w-sm w-full">
           <Shield className="w-16 h-16 text-red-500 mx-auto mb-6" />
           <h2 className="text-2xl font-black mb-2">Access Denied</h2>
-          <p className="text-slate-500 text-sm mb-6 font-medium">Your account ({String(user?.email || '').trim() || user?.uid || 'unknown'}) is not authorized. Please contact an administrator.</p>
+          <p className="text-slate-500 text-sm mb-6 font-medium">
+            Your account ({String(user?.email || '').trim() || user?.uid || 'unknown'}) is not on any client’s authorized portal list. Ask Ignite to add this exact email under the client’s Authorized Emails, Save Profile, then try again.
+          </p>
           <button onClick={() => { setUser(null); signOut(auth); }} className="w-full bg-slate-100 text-slate-600 p-4 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-slate-200 transition-all">Sign Out</button>
         </div>
       </div>

@@ -209,24 +209,82 @@ async function sendBrandedInviteEmail({
   }
 }
 
-async function assertEmailOnClientOnly(db, email, clientId) {
-  const clients = await fetchCollection(db, 'clients');
-  const matches = clients.filter((c) => {
-    const emails = Array.isArray(c.clientEmails) ? c.clientEmails : [];
-    return emails.map(normEmail).includes(email);
+/**
+ * Portal login queries array-contains with a lowercase email, and Firestore
+ * matching is case-sensitive. Always persist clientEmails lowercased.
+ */
+async function normalizeClientEmailsOnDoc(db, clientId, { ensureEmail = null } = {}) {
+  const cid = String(clientId || '').trim();
+  if (!cid) return null;
+  const client = await fetchDoc(db, `clients/${cid}`);
+  if (!client) return null;
+  const emails = Array.isArray(client.clientEmails) ? client.clientEmails : [];
+  const lowered = [...new Set(emails.map(normEmail).filter(Boolean))];
+  const ensure = normEmail(ensureEmail);
+  if (ensure && !lowered.includes(ensure)) lowered.push(ensure);
+  if (JSON.stringify(lowered) !== JSON.stringify(emails)) {
+    await mergeDoc(db, `clients/${cid}`, { clientEmails: lowered });
+    return { ...client, id: cid, clientEmails: lowered };
+  }
+  return { ...client, id: cid, clientEmails: emails };
+}
+
+/**
+ * Self-heal for portal login: if an invite exists for this email, force
+ * clientEmails onto lowercase (and ensure the invite email is listed) so the
+ * client-side array-contains query can succeed.
+ */
+export async function syncPortalAccessForEmail(email) {
+  const em = normEmail(email);
+  if (!em) throw new Error('Missing email.');
+  const db = await getDigestDb();
+  const invite = await fetchDoc(db, `portalInvites/${em}`);
+  if (!invite?.clientId) {
+    return { ok: false, reason: 'no_invite', email: em };
+  }
+  if (String(invite.status || '').toLowerCase() === 'revoked') {
+    return { ok: false, reason: 'revoked', email: em, clientId: invite.clientId };
+  }
+  const client = await normalizeClientEmailsOnDoc(db, invite.clientId, {
+    ensureEmail: em,
   });
-  if (!matches.some((c) => c.id === clientId)) {
+  if (!client) {
+    return { ok: false, reason: 'client_missing', email: em, clientId: invite.clientId };
+  }
+  return {
+    ok: true,
+    email: em,
+    clientId: client.id,
+    clientName: client.name || '',
+    clientEmails: client.clientEmails || [],
+  };
+}
+
+async function assertEmailOnClientOnly(db, email, clientId) {
+  const client = await normalizeClientEmailsOnDoc(db, clientId);
+  if (!client) {
+    throw new Error('Client not found.');
+  }
+  const onThis = (Array.isArray(client.clientEmails) ? client.clientEmails : [])
+    .map(normEmail)
+    .includes(email);
+  if (!onThis) {
     throw new Error(
       'That email is not on this client’s authorized portal list. Add it under Authorized Emails and save first.',
     );
   }
-  const other = matches.find((c) => c.id !== clientId);
+  const clients = await fetchCollection(db, 'clients');
+  const other = clients.find((c) => {
+    if (!c || c.id === clientId) return false;
+    const emails = Array.isArray(c.clientEmails) ? c.clientEmails : [];
+    return emails.map(normEmail).includes(email);
+  });
   if (other) {
     throw new Error(
       `That email is already authorized on “${other.name || other.id}”. Each email can only access one client.`,
     );
   }
-  return matches.find((c) => c.id === clientId);
+  return client;
 }
 
 async function assertNotStaff(db, email) {
@@ -445,6 +503,7 @@ export async function completeSetPassword({ token, password } = {}) {
     /* ignore */
   }
 
+  const invite = (await fetchDoc(db, `portalInvites/${em}`)) || {};
   await mergeDoc(db, `portalInvites/${em}`, {
     status: 'accepted',
     acceptedAt: Date.now(),
@@ -452,6 +511,18 @@ export async function completeSetPassword({ token, password } = {}) {
     setPasswordTokenExpiresAt: null,
     updatedAt: Date.now(),
   });
+
+  // Re-normalize so the first login after set-password can array-contains match.
+  if (invite.clientId) {
+    try {
+      await normalizeClientEmailsOnDoc(db, invite.clientId, { ensureEmail: em });
+    } catch (err) {
+      console.warn(
+        '[portalInvite] clientEmails normalize skipped:',
+        err?.message || err,
+      );
+    }
+  }
 
   return { ok: true, email: em, loginUrl: appLoginUrl() };
 }
