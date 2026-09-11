@@ -124,7 +124,8 @@ function parseClientSubTabFromSearch(search) {
   if (t === 'cycle_activity' || t === 'activity') return 'cycle_activity';
   if (t === 'emails' || t === 'email') return 'emails';
   if (t === 'messages' || t === 'message') return 'messages';
-  if (t === 'reviews' || t === 'review') return 'reviews';
+  if (t === 'approvals' || t === 'approval' || t === 'reviews' || t === 'review')
+    return 'approvals';
   if (t === 'files' || t === 'drive') return 'files';
   return 'summary';
 }
@@ -1278,6 +1279,7 @@ const AdminDashboard = ({
   const [todoEditOptionsTitle, setTodoEditOptionsTitle] = useState('');
   const [todoEditOptionsDue, setTodoEditOptionsDue] = useState('');
   const [todoEditOptionsRecurrence, setTodoEditOptionsRecurrence] = useState('none');
+  const [todoEditOptionsEstimate, setTodoEditOptionsEstimate] = useState('');
   /** Global Tasks tab: inline add sub-task (one parent at a time). */
   const [globalSubtaskComposer, setGlobalSubtaskComposer] = useState(null);
   const [globalSubtaskText, setGlobalSubtaskText] = useState('');
@@ -1608,6 +1610,13 @@ const AdminDashboard = ({
     });
     setTodoEditOptionsTitle(String(subtask ? subtask.text : item.text || ''));
     setTodoEditOptionsDue(asDateInput(subtask ? subtask.dueDate : item.dueDate));
+    setTodoEditOptionsEstimate(
+      subtask
+        ? ''
+        : item?.estimatedHours != null && item.estimatedHours !== ''
+          ? String(item.estimatedHours)
+          : '',
+    );
     const recurrenceSource = subtask || item;
     const t = recurrenceSource?.recurrence?.type;
     let editMode = 'none';
@@ -1684,6 +1693,8 @@ const AdminDashboard = ({
         return;
       }
       const recurrence = buildRecurrenceFromMode(todoEditOptionsRecurrence, dueDate);
+      const estimateRaw = String(todoEditOptionsEstimate || '').trim();
+      const estimatedHours = estimateRaw === '' ? null : Math.max(0, Number(estimateRaw) || 0);
       let nextItem = {
         ...item,
         text: title,
@@ -1691,6 +1702,7 @@ const AdminDashboard = ({
         recurring: !!recurrence,
         recurringId: recurrence ? item.recurringId || item.id : null,
         recurrence,
+        estimatedHours,
       };
       nextItem = clampAllSubtaskDueDatesToParent(nextItem);
       nextList = list.map((i) => (i.id === itemId ? nextItem : i));
@@ -3657,8 +3669,8 @@ const AdminDashboard = ({
                 isClientPage && clientDetailSubTab === 'emails';
               const showClientMessages =
                 isClientPage && clientDetailSubTab === 'messages';
-              const showClientReviews =
-                isClientPage && clientDetailSubTab === 'reviews';
+              const showClientApprovals =
+                isClientPage && clientDetailSubTab === 'approvals';
               const showClientFiles =
                 isClientPage && clientDetailSubTab === 'files';
               const showClientTasks =
@@ -3952,7 +3964,7 @@ const AdminDashboard = ({
                           { id: 'summary', label: 'Summary' },
                           { id: 'emails', label: 'Emails' },
                           { id: 'messages', label: 'Messages' },
-                          { id: 'reviews', label: 'Reviews' },
+                          { id: 'approvals', label: 'Approvals' },
                           { id: 'files', label: 'Files' },
                           { id: 'cycle_activity', label: 'Cycle activity' },
                           { id: 'tasks', label: 'Tasks' },
@@ -4582,10 +4594,12 @@ const AdminDashboard = ({
                         mode="staff"
                         userEmail={user?.email || ''}
                         userName={user?.displayName || user?.email || ''}
+                        staffEmails={staffEmails}
+                        adminUsers={adminUsers}
                       />
                     )}
 
-                    {showClientReviews && (
+                    {showClientApprovals && (
                       <ClientReviewsPanel client={c} mode="staff" />
                     )}
 
@@ -5086,6 +5100,16 @@ const AdminDashboard = ({
                                           <span className={`${urgency.textClass} truncate`}>
                                             {item.text || '(no text)'}
                                           </span>
+                                          {item.requestStatus === 'pending' ? (
+                                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest bg-sky-50 text-sky-700 shrink-0">
+                                              Client request
+                                            </span>
+                                          ) : null}
+                                          {Number(item.estimatedHours) > 0 ? (
+                                            <span className={`text-[10px] font-black uppercase tracking-widest shrink-0 ${urgency.metaClass}`}>
+                                              Est {Number(item.estimatedHours).toFixed(2)}h
+                                            </span>
+                                          ) : null}
                                           {item.recurring && (
                                             <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${urgency.metaClass}`}>
                                               Recurring
@@ -5097,6 +5121,68 @@ const AdminDashboard = ({
                                             </span>
                                           )}
                                         </span>
+                                        {item.requestStatus === 'pending' ? (
+                                          <div className="flex gap-1 shrink-0">
+                                            <button
+                                              type="button"
+                                              disabled={todoSaving || isCycleLocked(c, cycleStart)}
+                                              onClick={async () => {
+                                                if (isCycleLocked(c, cycleStart)) return;
+                                                setTodoSaving(true);
+                                                try {
+                                                  const next = items.map((i) =>
+                                                    i.id === item.id
+                                                      ? {
+                                                          ...i,
+                                                          requestStatus: 'approved',
+                                                          decisionAt: Date.now(),
+                                                          decisionByEmail: user?.email || '',
+                                                        }
+                                                      : i,
+                                                  );
+                                                  await updateClientTodo(c, cycleStart, catKey, {
+                                                    ...catTodo,
+                                                    items: next,
+                                                  });
+                                                } finally {
+                                                  setTodoSaving(false);
+                                                }
+                                              }}
+                                              className="px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-emerald-600 text-white"
+                                            >
+                                              Approve
+                                            </button>
+                                            <button
+                                              type="button"
+                                              disabled={todoSaving || isCycleLocked(c, cycleStart)}
+                                              onClick={async () => {
+                                                if (isCycleLocked(c, cycleStart)) return;
+                                                setTodoSaving(true);
+                                                try {
+                                                  const next = items.map((i) =>
+                                                    i.id === item.id
+                                                      ? {
+                                                          ...i,
+                                                          requestStatus: 'rejected',
+                                                          decisionAt: Date.now(),
+                                                          decisionByEmail: user?.email || '',
+                                                        }
+                                                      : i,
+                                                  );
+                                                  await updateClientTodo(c, cycleStart, catKey, {
+                                                    ...catTodo,
+                                                    items: next,
+                                                  });
+                                                } finally {
+                                                  setTodoSaving(false);
+                                                }
+                                              }}
+                                              className="px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-amber-600 text-white"
+                                            >
+                                              Decline
+                                            </button>
+                                          </div>
+                                        ) : null}
                                         {renderAssigneeMultiSelect({
                                           openKey: `todo_item__${c.id}__${cycleStart}__${catKey}__${item.id}`,
                                           value: assignees,
@@ -7979,6 +8065,25 @@ const AdminDashboard = ({
                 </p>
               )}
             </div>
+            {!todoEditOptionsTarget.subtaskId ? (
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                  Estimated hours
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.25"
+                  value={todoEditOptionsEstimate}
+                  onChange={(e) => setTodoEditOptionsEstimate(e.target.value)}
+                  placeholder="e.g. 2.5"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                />
+                <p className="mt-1 text-[10px] font-bold text-slate-500">
+                  Shown to the client for planning transparency.
+                </p>
+              </div>
+            ) : null}
             <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"

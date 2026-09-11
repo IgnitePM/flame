@@ -15,8 +15,10 @@ export const CLIENT_ACTIVITY_TYPES = {
   task_completed: { label: 'Task completed', group: 'tasks' },
   tag: { label: 'Tag', group: 'notes' },
   message_sent: { label: 'Message', group: 'portal' },
-  review_sent: { label: 'Review sent', group: 'portal' },
-  review_decision: { label: 'Review decision', group: 'portal' },
+  review_sent: { label: 'Approval sent', group: 'portal' },
+  review_decision: { label: 'Approval decision', group: 'portal' },
+  todo_request: { label: 'Task request', group: 'portal' },
+  todo_request_decision: { label: 'Task request decision', group: 'portal' },
 };
 
 export const MANUAL_ACTIVITY_TYPES = ['note', 'call', 'meeting', 'tag'];

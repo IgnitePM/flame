@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link2, Paperclip, Send } from 'lucide-react';
 import {
   db,
@@ -14,8 +14,10 @@ import {
   isDriveFolder,
   listDriveFolder,
   uploadFileToDriveFolder,
+  driveFileViewUrl,
 } from '../utils/clientDrive.js';
-import { driveFileViewUrl } from '../utils/clientDrive.js';
+import MentionTextarea from './MentionTextarea.jsx';
+import { staffHandle } from '../utils/staffDirectory.js';
 
 function formatWhen(ms) {
   const n = Number(ms || 0);
@@ -32,6 +34,26 @@ function formatWhen(ms) {
   }
 }
 
+function MessageBody({ text, mine }) {
+  const parts = String(text || '').split(/(@[a-z0-9._+-]+)/gi);
+  return (
+    <div className="text-sm font-medium whitespace-pre-wrap break-words">
+      {parts.map((part, i) =>
+        part.startsWith('@') ? (
+          <span
+            key={`${part}_${i}`}
+            className={mine ? 'font-black text-white underline' : 'font-black text-[#fd7414]'}
+          >
+            {part}
+          </span>
+        ) : (
+          <span key={`${i}`}>{part}</span>
+        ),
+      )}
+    </div>
+  );
+}
+
 /**
  * Shared client Messages inbox.
  * @param {'staff'|'portal'} mode
@@ -41,6 +63,8 @@ export default function ClientMessagesPanel({
   mode = 'staff',
   userEmail = '',
   userName = '',
+  staffEmails = [],
+  adminUsers = [],
 }) {
   const clientId = client?.id;
   const [messages, setMessages] = useState([]);
@@ -53,7 +77,38 @@ export default function ClientMessagesPanel({
   const [banner, setBanner] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [driveFiles, setDriveFiles] = useState([]);
+  const [portalStaffEmails, setPortalStaffEmails] = useState([]);
   const bottomRef = useRef(null);
+
+  const mentionEmails = useMemo(() => {
+    if (mode === 'staff' && staffEmails?.length) return staffEmails;
+    if (portalStaffEmails.length) return portalStaffEmails;
+    const team = Array.isArray(client?.teamMemberAccessEmails)
+      ? client.teamMemberAccessEmails
+      : [];
+    return [...new Set(team.map((e) => String(e || '').trim().toLowerCase()).filter(Boolean))];
+  }, [mode, staffEmails, portalStaffEmails, client?.teamMemberAccessEmails]);
+
+  useEffect(() => {
+    if (mode !== 'portal' || !clientId) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await authedFetch('/.netlify/functions/staff-mention-directory', {
+          clientId,
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || cancelled) return;
+        const emails = Array.isArray(data.emails) ? data.emails : [];
+        setPortalStaffEmails(emails);
+      } catch {
+        /* fall back to teamMemberAccessEmails */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, clientId]);
 
   useEffect(() => {
     if (!clientId) {
@@ -179,6 +234,8 @@ export default function ClientMessagesPanel({
             ? `Sent — emailed ${data.email.sent} portal contact(s).`
             : 'Sent — Ignite was notified.',
         );
+      } else if (data.mentions?.length) {
+        setBanner(`Sent — mentioned ${data.mentions.length} teammate(s).`);
       } else if (data.email?.skipped) {
         setBanner(
           mode === 'staff'
@@ -204,7 +261,7 @@ export default function ClientMessagesPanel({
           Messages
         </h5>
         <span className="text-[10px] font-bold text-slate-400">
-          Shared inbox with {mode === 'staff' ? 'the client portal' : 'Ignite'}
+          Shared inbox with {mode === 'staff' ? 'the client portal' : 'Ignite'} · @mention staff
         </span>
       </div>
 
@@ -242,9 +299,7 @@ export default function ClientMessagesPanel({
                     {m.authorName || m.authorEmail || m.authorType} ·{' '}
                     {formatWhen(m.createdAt)}
                   </div>
-                  <div className="text-sm font-medium whitespace-pre-wrap break-words">
-                    {m.body}
-                  </div>
+                  <MessageBody text={m.body} mine={mine} />
                   {Array.isArray(m.attachments) && m.attachments.length > 0 ? (
                     <ul className="mt-2 space-y-1">
                       {m.attachments.map((a) => (
@@ -295,16 +350,18 @@ export default function ClientMessagesPanel({
         </div>
       ) : null}
 
-      <textarea
+      <MentionTextarea
         value={body}
-        onChange={(e) => setBody(e.target.value)}
+        onChange={setBody}
+        staffEmails={mentionEmails}
+        adminUsers={adminUsers}
         rows={3}
         placeholder={
           mode === 'staff'
-            ? 'Message the client…'
-            : 'Message the Ignite team…'
+            ? 'Message the client… Use @name to tag a teammate'
+            : 'Message the Ignite team… Use @name to tag someone'
         }
-        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-[#fd7414]"
+        textareaClassName="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-[#fd7414]"
       />
 
       <div className="flex flex-wrap gap-2 items-center">
@@ -367,6 +424,11 @@ export default function ClientMessagesPanel({
       </div>
 
       {banner ? <p className="text-xs font-bold text-slate-600">{banner}</p> : null}
+      {mentionEmails.length > 0 ? (
+        <p className="text-[10px] text-slate-400 font-bold">
+          Tag with @{staffHandle(mentionEmails[0]) || 'name'}…
+        </p>
+      ) : null}
 
       {pickerOpen ? (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4">

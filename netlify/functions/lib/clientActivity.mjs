@@ -20,8 +20,10 @@ function activityTypeLabel(type) {
     task_completed: 'Task completed',
     tag: 'Tag',
     message_sent: 'Message',
-    review_sent: 'Review sent',
-    review_decision: 'Review decision',
+    review_sent: 'Approval sent',
+    review_decision: 'Approval decision',
+    todo_request: 'Task request',
+    todo_request_decision: 'Task request decision',
   };
   return labels[type] || String(type || 'Activity');
 }

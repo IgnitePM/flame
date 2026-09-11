@@ -44,11 +44,11 @@ function statusLabel(status) {
   if (s === 'approved') return 'Approved';
   if (s === 'revisions_requested') return 'Revisions requested';
   if (s === 'closed') return 'Closed';
-  return 'Pending review';
+  return 'Pending approval';
 }
 
 /**
- * Deliverable Reviews for a client.
+ * Deliverable Approvals for a client.
  * @param {'staff'|'portal'} mode
  */
 export default function ClientReviewsPanel({ client, mode = 'staff' }) {
@@ -86,8 +86,8 @@ export default function ClientReviewsPanel({ client, mode = 'staff' }) {
         console.warn('[ClientReviewsPanel]', err);
         setLoadError(
           err?.code === 'failed-precondition'
-            ? 'Reviews index is still building — try again shortly.'
-            : err?.message || 'Could not load reviews.',
+            ? 'Approvals index is still building — try again shortly.'
+            : err?.message || 'Could not load approvals.',
         );
         setReviews([]);
       },
@@ -161,15 +161,15 @@ export default function ClientReviewsPanel({ client, mode = 'staff' }) {
         attachments,
       });
       const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(data.error || 'Could not create review');
+      if (!resp.ok) throw new Error(data.error || 'Could not create approval');
       setTitle('');
       setDescription('');
       setAttachments([]);
       setComposeOpen(false);
       setBanner(
         data.email?.sent > 0
-          ? `Review sent — emailed ${data.email.sent} portal contact(s).`
-          : 'Review created. Add portal emails on the client to email them next time.',
+          ? `Approval sent — emailed ${data.email.sent} portal contact(s).`
+          : 'Approval created. Add portal emails on the client to email them next time.',
       );
     } catch (err) {
       setBanner(err?.message || String(err));
@@ -206,7 +206,7 @@ export default function ClientReviewsPanel({ client, mode = 'staff' }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-            Reviews
+            Approvals
           </h5>
           <p className="text-xs font-medium text-slate-500 mt-1">
             {mode === 'staff'
@@ -221,7 +221,7 @@ export default function ClientReviewsPanel({ client, mode = 'staff' }) {
             className="inline-flex items-center gap-2 rounded-xl bg-black px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white"
           >
             <Plus className="w-3.5 h-3.5" />
-            {composeOpen ? 'Cancel' : 'New review'}
+            {composeOpen ? 'Cancel' : 'New approval'}
           </button>
         ) : null}
       </div>
@@ -242,7 +242,7 @@ export default function ClientReviewsPanel({ client, mode = 'staff' }) {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={4}
-            placeholder="What should they review?"
+            placeholder="What should they approve?"
             className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-[#fd7414]"
           />
           {attachments.length > 0 ? (
@@ -293,7 +293,7 @@ export default function ClientReviewsPanel({ client, mode = 'staff' }) {
               onClick={createReview}
               className="ml-auto rounded-xl bg-[#fd7414] px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white disabled:opacity-40"
             >
-              {busy ? 'Sending…' : 'Send for review'}
+              {busy ? 'Sending…' : 'Send for approval'}
             </button>
           </div>
         </div>
@@ -301,7 +301,7 @@ export default function ClientReviewsPanel({ client, mode = 'staff' }) {
 
       {reviews.length === 0 && !loadError ? (
         <p className="text-xs italic text-slate-400 bg-slate-50 border border-slate-200 rounded-2xl p-6 text-center">
-          No reviews yet.
+          No approvals yet.
         </p>
       ) : (
         <ul className="space-y-3">

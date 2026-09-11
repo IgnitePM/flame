@@ -10,6 +10,8 @@ import { resolveExpenseEquivalentHours } from '../utils/billingEngine.js';
 import RetainerCategoryStats from './RetainerCategoryStats.jsx';
 import ClientMessagesPanel from './ClientMessagesPanel.jsx';
 import ClientReviewsPanel from './ClientReviewsPanel.jsx';
+import ClientPortalFilesPanel from './ClientPortalFilesPanel.jsx';
+import PortalTaskRequestForm from './PortalTaskRequestForm.jsx';
 import {
   ChevronLeft,
   ChevronRight,
@@ -21,7 +23,31 @@ import {
   MessageSquare,
   ClipboardCheck,
   LayoutDashboard,
+  FolderOpen,
 } from 'lucide-react';
+
+const IDLE_NOTE_MARKER =
+  '[Clock stopped automatically: session was idle — Ignite PM]';
+
+/** Strip idle auto-stop boilerplate from portal-facing task notes. */
+function portalSafeTaskNotes(task) {
+  if (task?.autoStoppedReason === 'idle_timeout') {
+    const raw = String(task?.notes || '');
+    const cleaned = raw
+      .split(IDLE_NOTE_MARKER)
+      .join('')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    return cleaned || '';
+  }
+  const raw = String(task?.notes || '');
+  if (!raw.includes(IDLE_NOTE_MARKER)) return raw;
+  return raw
+    .split(IDLE_NOTE_MARKER)
+    .join('')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
 
 const ClientPortal = ({
   clientProfile,
@@ -161,7 +187,8 @@ const ClientPortal = ({
           {[
             { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
             { id: 'messages', label: 'Messages', icon: MessageSquare },
-            { id: 'reviews', label: 'Reviews', icon: ClipboardCheck },
+            { id: 'approvals', label: 'Approvals', icon: ClipboardCheck },
+            { id: 'files', label: 'Files', icon: FolderOpen },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -195,8 +222,12 @@ const ClientPortal = ({
           />
         ) : null}
 
-        {portalSection === 'reviews' ? (
+        {portalSection === 'approvals' ? (
           <ClientReviewsPanel client={clientProfile} mode="portal" />
+        ) : null}
+
+        {portalSection === 'files' ? (
+          <ClientPortalFilesPanel client={clientProfile} />
         ) : null}
 
         {portalSection === 'dashboard' ? (
@@ -569,18 +600,53 @@ const ClientPortal = ({
                   Tasks this billing cycle
                 </h3>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
-                  Shared by your team — view only
+                  Request work or track shared tasks · estimates help plan the cycle
                 </p>
               </div>
             </div>
+            {(() => {
+              const openEstimateSum = Object.values(todoState).reduce((sum, cat) => {
+                for (const item of cat?.items || []) {
+                  if (item?.done) continue;
+                  if (item?.requestStatus === 'rejected') continue;
+                  if (item?.requestStatus === 'pending') continue;
+                  sum += Number(item?.estimatedHours || 0);
+                }
+                return sum;
+              }, 0);
+              const remaining = Math.max(
+                0,
+                Number(stats?.adjustedAllotted || 0) - Number(stats?.currentUsed || 0),
+              );
+              return openEstimateSum > 0 || remaining ? (
+                <div className="rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3 text-xs font-bold text-slate-600 flex flex-wrap gap-4">
+                  <span>
+                    Open task estimates:{' '}
+                    <span className="text-slate-900 font-black">
+                      {openEstimateSum.toFixed(1)}h
+                    </span>
+                  </span>
+                  {Number.isFinite(remaining) ? (
+                    <span>
+                      Retainer remaining:{' '}
+                      <span className="text-slate-900 font-black">
+                        {remaining.toFixed(1)}h
+                      </span>
+                    </span>
+                  ) : null}
+                </div>
+              ) : null;
+            })()}
             {!hasTodosForCycle ? (
               <p className="text-slate-400 italic text-sm">
-                No tasks listed for this cycle yet.
+                No tasks listed for this cycle yet — request one below.
               </p>
             ) : (
               <div className="space-y-6">
                 {Object.entries(todoState).map(([catKey, catTodo]) => {
-                  const items = orderTodosForDisplay(catTodo?.items || []);
+                  const items = orderTodosForDisplay(catTodo?.items || []).filter(
+                    (item) => item.requestStatus !== 'rejected',
+                  );
                   if (!items.length) return null;
                   const closed = !!catTodo?.closed;
                   return (
@@ -625,6 +691,16 @@ const ClientPortal = ({
                                 {new Date(item.dueDate).toLocaleDateString()}
                               </span>
                             )}
+                            {Number(item.estimatedHours) > 0 ? (
+                              <span className="text-[10px] font-bold text-slate-500">
+                                Est. {Number(item.estimatedHours).toFixed(2)}h
+                              </span>
+                            ) : null}
+                            {item.requestStatus === 'pending' ? (
+                              <span className="text-[9px] font-black uppercase tracking-widest text-sky-700 bg-sky-50 px-1.5 py-0.5 rounded">
+                                Pending approval
+                              </span>
+                            ) : null}
                           </li>
                         ))}
                       </ul>
@@ -633,6 +709,12 @@ const ClientPortal = ({
                 })}
               </div>
             )}
+
+            <PortalTaskRequestForm
+              client={clientProfile}
+              categories={getEnabledRetainerCategoryNames(clientProfile)}
+              todoCategoryKey={todoCategoryKey}
+            />
           </div>
         )}
 
@@ -661,11 +743,11 @@ const ClientPortal = ({
                         {new Date(t.clockInTime).toLocaleDateString()}
                       </span>
                     </div>
-                    {t.notes && (
+                    {portalSafeTaskNotes(t) ? (
                       <p className="text-sm text-slate-500 font-medium">
-                        &quot;{t.notes}&quot;
+                        &quot;{portalSafeTaskNotes(t)}&quot;
                       </p>
-                    )}
+                    ) : null}
                   </div>
                   <div className="font-black text-[#fd7414] shrink-0 font-mono">
                     {formatTime(getTaskDuration(t))}
@@ -735,11 +817,11 @@ const ClientPortal = ({
                           {new Date(t.clockInTime).toLocaleDateString()}
                         </span>
                       </div>
-                      {t.notes && (
+                      {portalSafeTaskNotes(t) ? (
                         <p className="text-sm text-slate-500 font-medium">
-                          &quot;{t.notes}&quot;
+                          &quot;{portalSafeTaskNotes(t)}&quot;
                         </p>
-                      )}
+                      ) : null}
                     </div>
                     <div className="font-black text-[#fd7414] shrink-0 font-mono">
                       {formatTime(getTaskDuration(t))}

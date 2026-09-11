@@ -1,5 +1,5 @@
 /**
- * Helpers for client portal Messages + Reviews (SMTP notify + Firestore writes).
+ * Helpers for client portal Messages + Approvals (SMTP notify + Firestore writes).
  */
 
 import { sendDigestEmail } from './mailer.mjs';
@@ -132,15 +132,15 @@ export async function notifyPortalReviewSent({ client, title, description }) {
   if (!to.length) return { sent: 0, skipped: 'no_portal_emails' };
   const href = appBaseUrl();
   const { text, html } = emailShell({
-    eyebrow: 'Ignite PM · Reviews',
-    title: `Please review: ${title}`,
-    bodyText: description || 'A new deliverable is ready for your review in the client portal.',
-    ctaLabel: 'Review in portal',
+    eyebrow: 'Ignite PM · Approvals',
+    title: `Please approve: ${title}`,
+    bodyText: description || 'A new deliverable is ready for your approval in the client portal.',
+    ctaLabel: 'Open portal',
     ctaHref: href,
   });
   await sendDigestEmail({
     to,
-    subject: `Please review: ${title}`,
+    subject: `Please approve: ${title}`,
     text,
     html,
   });
@@ -151,9 +151,9 @@ export async function notifyStaffReviewDecision({ client, title, status, note, b
   const to = staffNotifyEmails(client);
   if (!to.length) return { sent: 0, skipped: 'no_staff_emails' };
   const label = status === 'approved' ? 'Approved' : 'Revisions requested';
-  const href = `${appBaseUrl()}/clients/${client.id}?tab=reviews`;
+  const href = `${appBaseUrl()}/clients/${client.id}?tab=approvals`;
   const { text, html } = emailShell({
-    eyebrow: 'Ignite PM · Reviews',
+    eyebrow: 'Ignite PM · Approvals',
     title: `${label}: ${title}`,
     bodyText: `${byEmail || 'Client'} responded on ${client.name || 'client'}.\n\n${note || '(no note)'}`,
     ctaLabel: 'Open in CRM',
@@ -162,6 +162,37 @@ export async function notifyStaffReviewDecision({ client, title, status, note, b
   await sendDigestEmail({
     to,
     subject: `${label}: ${title} — ${client.name || 'Client'}`,
+    text,
+    html,
+  });
+  return { sent: to.length };
+}
+
+export async function notifyStaffMentions({
+  client,
+  messageBody,
+  authorName,
+  mentionedEmails = [],
+}) {
+  const to = [
+    ...new Set(
+      (mentionedEmails || [])
+        .map((e) => String(e || '').trim().toLowerCase())
+        .filter((e) => e.includes('@')),
+    ),
+  ];
+  if (!to.length) return { sent: 0, skipped: 'no_mentions' };
+  const href = `${appBaseUrl()}/clients/${client.id}?tab=messages`;
+  const { text, html } = emailShell({
+    eyebrow: 'Ignite PM · Mention',
+    title: `You were mentioned — ${client.name || 'Client'}`,
+    bodyText: `${authorName || 'Someone'} tagged you in Messages:\n\n${messageBody}`,
+    ctaLabel: 'Open conversation',
+    ctaHref: href,
+  });
+  await sendDigestEmail({
+    to,
+    subject: `Mentioned in Messages — ${client.name || 'Client'}`,
     text,
     html,
   });

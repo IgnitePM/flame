@@ -109,6 +109,8 @@ import { buildClientActivityDoc } from './utils/clientActivity.js';
 import { normalizeClientConnectionFields } from './utils/clientConnections.js';
 import { normalizeCompanyProfileFields } from './utils/clientCompanyProfile.js';
 import ClientEnrichPreviewModal from './components/ClientEnrichPreviewModal.jsx';
+import GlobalEmailsHub from './components/GlobalEmailsHub.jsx';
+import GlobalMessagesHub from './components/GlobalMessagesHub.jsx';
 import IdleFailsafeGuard from './components/IdleFailsafeGuard.jsx';
 import {
   filterClientsForTeamMember,
@@ -210,7 +212,7 @@ const CLIENT_PAGE_TABS = [
   'summary',
   'emails',
   'messages',
-  'reviews',
+  'approvals',
   'files',
   'cycle_activity',
   'tasks',
@@ -418,7 +420,12 @@ export default function App() {
   const [manualTaskModal, setManualTaskModal] = useState(false);
   const [manualTaskValues, setManualTaskValues] = useState({ clientName: '', billingTarget: '', date: '', hours: '', minutes: '', notes: '', employeeName: '', parsedExpense: 0 });
   const [addonModal, setAddonModal] = useState(null); 
-  const [addonValues, setAddonValues] = useState({ hours: '', notes: '', category: '' });
+  const [addonValues, setAddonValues] = useState({
+    hours: '',
+    notes: '',
+    category: '',
+    cycleTarget: 'current',
+  });
   const [projectModal, setProjectModal] = useState(null); 
   const [projectValues, setProjectValues] = useState({
     clientId: '',
@@ -2183,7 +2190,11 @@ export default function App() {
     const hst = subtotal * hstRate;
     const total = subtotal + hst;
 
-    const nextCycleStart = getBillingPeriod(addonModal.billingDay || 1, 1).start;
+    const cycleOffset = addonValues.cycleTarget === 'next' ? 1 : 0;
+    const billingCycleStart = getBillingPeriod(
+      addonModal.billingDay || 1,
+      cycleOffset,
+    ).start;
 
     await addDoc(collection(db, 'addons'), {
       clientId,
@@ -2192,7 +2203,7 @@ export default function App() {
       notes: addonValues.notes,
       category: addonValues.category || 'Additional Hours',
       requestedBy: view === 'client_portal' ? 'client' : 'admin',
-      billingCycleStart: nextCycleStart,
+      billingCycleStart,
       priceBreakdown: { hourlyRate, subtotal, hstRate, hst, total },
       notificationState: {
         adminNeedsInvoice: view === 'client_portal',
@@ -2202,7 +2213,7 @@ export default function App() {
       date: Date.now(),
     });
     setAddonModal(null);
-    setAddonValues({ hours: '', notes: '', category: '' });
+    setAddonValues({ hours: '', notes: '', category: '', cycleTarget: 'current' });
   };
 
   const parseProjectDeadlineMs = (value) => {
@@ -3612,6 +3623,26 @@ export default function App() {
                 Tasks
               </button>
               <button
+                onClick={() => navigate('/messages')}
+                className={`px-3 sm:px-5 py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                  location.pathname.startsWith('/messages')
+                    ? 'bg-[#fd7414] text-white shadow-md shadow-[#fd7414]/25'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                Messages
+              </button>
+              <button
+                onClick={() => navigate('/emails')}
+                className={`px-3 sm:px-5 py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                  location.pathname.startsWith('/emails')
+                    ? 'bg-[#fd7414] text-white shadow-md shadow-[#fd7414]/25'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                Emails
+              </button>
+              <button
                 onClick={() => navigate('/clients')}
                 className={`px-3 sm:px-5 py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap ${
                   location.pathname.startsWith('/clients')
@@ -3720,6 +3751,38 @@ export default function App() {
                     navigate={navigate}
                     lockedTab="tasks_global"
                   />
+                </StaffThemeShell>
+              }
+            />
+            <Route
+              path="/messages"
+              element={
+                <StaffThemeShell>
+                  <div className="mx-auto w-full max-w-[min(1200px,calc(100vw-1.5rem))] px-4 py-6 sm:px-6">
+                    <GlobalMessagesHub
+                      clients={clients}
+                      onOpenClient={(id, tab) =>
+                        navigate(`/clients/${id}${tab ? `?tab=${tab}` : ''}`)
+                      }
+                    />
+                  </div>
+                </StaffThemeShell>
+              }
+            />
+            <Route
+              path="/emails"
+              element={
+                <StaffThemeShell>
+                  <div className="mx-auto w-full max-w-[min(1200px,calc(100vw-1.5rem))] px-4 py-6 sm:px-6">
+                    <GlobalEmailsHub
+                      clients={clients}
+                      leads={salesLeads}
+                      onOpenClient={(id, tab) =>
+                        navigate(`/clients/${id}${tab ? `?tab=${tab}` : ''}`)
+                      }
+                      onOpenLead={() => navigate('/sales')}
+                    />
+                  </div>
                 </StaffThemeShell>
               }
             />
@@ -5428,8 +5491,44 @@ export default function App() {
             </div>
             <div className="p-8 space-y-5 text-left">
               <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
+                  Apply hours to
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAddonValues({ ...addonValues, cycleTarget: 'current' })
+                    }
+                    className={`rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-widest border ${
+                      addonValues.cycleTarget !== 'next'
+                        ? 'bg-[#fd7414] text-white border-[#fd7414]'
+                        : 'bg-slate-50 text-slate-500 border-slate-200'
+                    }`}
+                  >
+                    This cycle
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAddonValues({ ...addonValues, cycleTarget: 'next' })
+                    }
+                    className={`rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-widest border ${
+                      addonValues.cycleTarget === 'next'
+                        ? 'bg-[#fd7414] text-white border-[#fd7414]'
+                        : 'bg-slate-50 text-slate-500 border-slate-200'
+                    }`}
+                  >
+                    Next cycle
+                  </button>
+                </div>
+                <p className="text-[11px] font-bold text-slate-400 pt-1">
+                  Unused hours carry forward into future cycles.
+                </p>
+              </div>
+              <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Additional Hours Requested</label>
-                {view === 'client_portal' ? (
+                {view === 'client_portal' || portalPreviewClientId ? (
                   <div className="space-y-3">
                     <input
                       type="range"
@@ -5480,7 +5579,7 @@ export default function App() {
                             </div>
                             <div className="flex justify-between text-sm font-black pt-2 border-t border-slate-200">
                               <span className="text-slate-700">
-                                Total
+                                Total due
                               </span>
                               <span className="text-[#fd7414]">
                                 ${total.toFixed(2)}
@@ -5491,7 +5590,7 @@ export default function App() {
                       })()}
                     </div>
                     <p className="text-xs text-slate-400 font-bold">
-                      Additional retainer cost will be added to your next billing cycle.
+                      Price is calculated automatically from your retainer rate (rate not shown). Unused hours carry forward.
                     </p>
                   </div>
                 ) : (

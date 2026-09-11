@@ -55,7 +55,7 @@ export default async (req) => {
 
     const systemNote = await createMessageDoc({
       clientId,
-      body: `Review requested: ${title}${description ? `\n\n${description}` : ''}`,
+      body: `Approval requested: ${title}${description ? `\n\n${description}` : ''}`,
       authorType: 'staff',
       authorEmail: caller.email,
       authorName: caller.email,
@@ -88,7 +88,7 @@ export default async (req) => {
         clientId,
         clientName: client.name || '',
         type: 'review_sent',
-        title: `Review sent: ${title}`,
+        title: `Approval sent: ${title}`,
         body: description.slice(0, 500),
         actorEmail: caller.email,
         source: 'system',
