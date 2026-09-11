@@ -7,8 +7,8 @@ import {
 } from './lib/geminiModels.mjs';
 
 /**
- * Staff: extract grouped to-dos from a meeting transcript via Gemini.
- * POST { transcript, clientName?, retainerCategories?, generalCategoryLabel? }
+ * Staff: extract grouped to-dos from a meeting transcript or email via Gemini.
+ * POST { transcript|text, sourceType?: 'transcript'|'email', clientName?, retainerCategories?, generalCategoryLabel? }
  */
 
 function extractFirstJsonObject(text) {
@@ -160,7 +160,14 @@ export default async (req) => {
     payload = {};
   }
 
-  const transcript = String(payload.transcript || '').trim();
+  const sourceType =
+    String(payload.sourceType || payload.source || 'transcript').trim().toLowerCase() ===
+    'email'
+      ? 'email'
+      : 'transcript';
+  const transcript = String(
+    payload.transcript || payload.text || payload.emailText || '',
+  ).trim();
   const clientName = String(payload.clientName || '').trim().slice(0, 200);
   const retainerCategories = Array.isArray(payload.retainerCategories)
     ? payload.retainerCategories
@@ -175,10 +182,15 @@ export default async (req) => {
     .slice(0, 120);
 
   if (!transcript) {
-    return new Response(JSON.stringify({ error: 'Missing transcript' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return new Response(
+      JSON.stringify({
+        error: sourceType === 'email' ? 'Missing email content' : 'Missing transcript',
+      }),
+      {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
   }
 
   // Cap keeps cost bounded; default ~3h of pasted notes.
@@ -192,7 +204,45 @@ export default async (req) => {
     new Set([...retainerCategories, generalCategoryLabel]),
   );
 
-  const prompt = `
+  const prompt =
+    sourceType === 'email'
+      ? `
+You are an assistant that extracts structured action items from client email threads.
+
+Task:
+1) Read the email (headers + body).
+2) Extract action items: work Ignite should do, client requests, follow-ups, deadlines, and next steps.
+3) Ignore signatures, legal footers, unsubscribe links, tracking URLs, and pure FYI content with no action.
+4) Group similar action items together to reduce the number of to-do entries.
+   - Each group should be a single actionable to-do text that combines the shared intent.
+5) Assign each grouped to-do to exactly ONE category from the allowed categories.
+   - Pick the closest match by semantics.
+   - If unsure, assign to: "${generalCategoryLabel}".
+
+Output requirements:
+- Respond with JSON only, no markdown.
+- JSON shape:
+{
+  "todos": [
+    { "text": "string", "category": "one of allowed categories" }
+  ]
+}
+- "text" should be a concise imperative to-do sentence.
+- Return at most 15 to-do groups.
+- If there are no action items, return {"todos":[]}.
+
+Allowed categories:
+${allowedCategories.map((c) => `- ${c}`).join('\n')}
+
+Client context (may help wording):
+${clientName || '(unknown)'}
+
+Email content:
+"""
+${trimmedTranscript}
+"""
+`.trim()
+      : `
 You are an assistant that extracts structured action items from meeting transcripts.
 
 Task:

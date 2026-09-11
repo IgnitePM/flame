@@ -1240,6 +1240,7 @@ const AdminDashboard = ({
   const [cycleNotesDraft, setCycleNotesDraft] = useState({});
   const [cycleNotesSaving, setCycleNotesSaving] = useState({});
   const [aiTodoModalOpen, setAiTodoModalOpen] = useState(false);
+  const [aiTodoSource, setAiTodoSource] = useState('transcript'); // transcript | email
   const [aiTodoTranscript, setAiTodoTranscript] = useState('');
   const [aiTodoCandidates, setAiTodoCandidates] = useState([]);
   const [aiTodoSelected, setAiTodoSelected] = useState({});
@@ -4554,6 +4555,13 @@ const AdminDashboard = ({
                               setEmailComposeDraft(null);
                               setEmailComposeClient(client);
                             }}
+                            onExtractTasks={({ text }) => {
+                              setAiTodoSource('email');
+                              setAiTodoTranscript(String(text || '').trim());
+                              setAiTodoCandidates([]);
+                              setAiTodoSelected({});
+                              setAiTodoModalOpen(true);
+                            }}
                             onReply={(msg) => {
                               const inbound = msg.direction === 'inbound';
                               const replyTo = inbound
@@ -4908,6 +4916,7 @@ const AdminDashboard = ({
                             <button
                               type="button"
                               onClick={() => {
+                                setAiTodoSource('transcript');
                                 setAiTodoTranscript('');
                                 setAiTodoCandidates([]);
                                 setAiTodoSelected({});
@@ -5416,10 +5425,14 @@ const AdminDashboard = ({
                           <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                             <div>
                               <h3 className="font-black text-2xl text-slate-900">
-                                AI Extract to-dos
+                                {aiTodoSource === 'email'
+                                  ? 'AI Extract tasks from email'
+                                  : 'AI Extract to-dos'}
                               </h3>
                               <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-1">
-                                Upload/paste meeting transcript, then review
+                                {aiTodoSource === 'email'
+                                  ? 'Review the email text, extract, then add selected tasks'
+                                  : 'Upload/paste meeting transcript, then review'}
                               </p>
                             </div>
                             <button
@@ -5434,17 +5447,23 @@ const AdminDashboard = ({
                           <div className="p-8 space-y-5">
                             <div className="space-y-2">
                               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-                                Meeting transcript (plain text)
+                                {aiTodoSource === 'email'
+                                  ? 'Email content'
+                                  : 'Meeting transcript (plain text)'}
                               </label>
                               <textarea
                                 value={aiTodoTranscript}
                                 onChange={(e) => setAiTodoTranscript(e.target.value)}
                                 className="w-full bg-white border border-slate-200 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[220px] font-medium text-sm"
-                                placeholder="Paste the transcript or notes here. Gemini will extract action items and map them to retainer categories."
+                                placeholder={
+                                  aiTodoSource === 'email'
+                                    ? 'Email subject and body…'
+                                    : 'Paste the transcript or notes here. Gemini will extract action items and map them to retainer categories.'
+                                }
                               />
                               <p className="text-[11px] text-slate-400 font-bold">
-                                Note: very large transcripts may be trimmed by the
-                                server cap before AI extraction.
+                                Note: very large text may be trimmed by the server cap before AI
+                                extraction.
                               </p>
                             </div>
 
@@ -5455,7 +5474,11 @@ const AdminDashboard = ({
                                 onClick={async () => {
                                   const transcript = (aiTodoTranscript || '').trim();
                                   if (!transcript) {
-                                    window.alert('Paste meeting transcript first.');
+                                    window.alert(
+                                      aiTodoSource === 'email'
+                                        ? 'Email content is empty.'
+                                        : 'Paste meeting transcript first.',
+                                    );
                                     return;
                                   }
 
@@ -5467,6 +5490,7 @@ const AdminDashboard = ({
                                       '/.netlify/functions/gemini-extract-todos',
                                       {
                                         transcript,
+                                        sourceType: aiTodoSource,
                                         clientName: c.name,
                                         retainerCategories,
                                         generalCategoryLabel:
@@ -5498,10 +5522,15 @@ const AdminDashboard = ({
                                       selected[t.id] = true;
                                     });
                                     setAiTodoSelected(selected);
+                                    if (!normalized.length) {
+                                      window.alert('No action items found in this content.');
+                                    }
                                   } catch (err) {
                                     console.error(err);
                                     window.alert(
-                                      'Could not extract to-dos from transcript.\n\n' +
+                                      (aiTodoSource === 'email'
+                                        ? 'Could not extract tasks from email.\n\n'
+                                        : 'Could not extract to-dos from transcript.\n\n') +
                                         (err?.message || String(err)),
                                     );
                                   } finally {

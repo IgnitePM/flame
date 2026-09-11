@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Mail, Reply, Search } from 'lucide-react';
+import { Mail, Reply, Search, Sparkles } from 'lucide-react';
 import {
   db,
   collection,
@@ -36,6 +36,28 @@ function messageMatchesSearch(m, raw) {
   return hay.includes(q);
 }
 
+/** Build plain text the AI extract endpoint can read. */
+export function formatEmailForAiExtract(m, kind = 'client') {
+  if (!m) return '';
+  const inbound = m.direction === 'inbound';
+  const to = Array.isArray(m.to) ? m.to.join(', ') : String(m.to || '');
+  const when = formatWhen(m.sentAt) || '';
+  return [
+    `Subject: ${m.subject || '(no subject)'}`,
+    `Direction: ${inbound ? 'inbound (from client/contact)' : 'outbound (from Ignite)'}`,
+    inbound
+      ? `From: ${m.from || m.actorEmail || (kind === 'lead' ? 'lead' : 'client')}`
+      : `From: ${m.actorEmail || 'staff'}`,
+    to ? `To: ${to}` : '',
+    when ? `Date: ${when}` : '',
+    '',
+    String(m.body || '').trim(),
+  ]
+    .filter((line) => line !== '')
+    .join('\n')
+    .trim();
+}
+
 /**
  * CRM email history for a client or lead (outbound sends + synced inbound).
  * Prefer `entity` + `entityKind`; legacy `client` prop still works.
@@ -46,6 +68,7 @@ export default function ClientEmailHistory({
   entityKind = 'client',
   onCompose,
   onReply,
+  onExtractTasks,
   canCompose = false,
 }) {
   const resolved = entity || client;
@@ -184,16 +207,34 @@ export default function ClientEmailHistory({
                     <pre className="text-xs font-medium text-slate-600 whitespace-pre-wrap break-words [overflow-wrap:anywhere] font-sans max-h-[min(50vh,480px)] overflow-y-auto">
                       {m.body || ''}
                     </pre>
-                    {canCompose && onReply && (
-                      <button
-                        type="button"
-                        onClick={() => onReply(m)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50"
-                      >
-                        <Reply className="w-3.5 h-3.5" />
-                        Reply
-                      </button>
-                    )}
+                    <div className="flex flex-wrap gap-2">
+                      {onExtractTasks ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onExtractTasks({
+                              message: m,
+                              text: formatEmailForAiExtract(m, kind),
+                            })
+                          }
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest hover:bg-black"
+                          title="Extract action items from this email into cycle tasks"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          AI Extract tasks
+                        </button>
+                      ) : null}
+                      {canCompose && onReply && (
+                        <button
+                          type="button"
+                          onClick={() => onReply(m)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50"
+                        >
+                          <Reply className="w-3.5 h-3.5" />
+                          Reply
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
               </li>
