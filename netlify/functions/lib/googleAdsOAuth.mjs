@@ -33,13 +33,9 @@ function oauthConfig() {
 }
 
 export function developerToken() {
-  const token = String(process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '').trim();
-  if (!token) {
-    throw new Error(
-      'Missing GOOGLE_ADS_DEVELOPER_TOKEN. Get it from Google Ads API Center.',
-    );
-  }
-  return token;
+  // Optional since Sept 2026: access is tied to the Cloud project behind OAuth.
+  // Header is ignored by Google when present; omit when unset.
+  return String(process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '').trim();
 }
 
 export function loginCustomerId() {
@@ -247,9 +243,10 @@ export function normalizeAdsCustomerId(raw) {
 function adsHeaders(accessToken, { loginCustomerId: loginId } = {}) {
   const headers = {
     Authorization: `Bearer ${accessToken}`,
-    'developer-token': developerToken(),
     'Content-Type': 'application/json',
   };
+  const token = developerToken();
+  if (token) headers['developer-token'] = token;
   const login = normalizeAdsCustomerId(loginId || loginCustomerId());
   if (login) headers['login-customer-id'] = login;
   return headers;

@@ -142,8 +142,8 @@ export default function GoogleAdsConnectCard({ canManage = false, onTabFocus }) 
           <h3 className="font-black text-lg text-slate-900">Google Ads</h3>
           <p className="text-sm text-slate-500 font-medium mt-1">
             Connect an Ignite Google account with access to client Ads accounts (usually via MCC).
-            Requires a developer token in Netlify env. Portal Analytics → Ads shows spend and
-            campaign performance for the billing period.
+            API access is granted on your Google Cloud project. Portal Analytics → Ads shows spend
+            and campaign performance for the billing period.
           </p>
         </div>
       </div>
@@ -193,8 +193,9 @@ export default function GoogleAdsConnectCard({ canManage = false, onTabFocus }) 
             </div>
           ) : (
             <p className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
-              No Ads customers listed yet. Confirm the developer token, MCC login-customer-id, and
-              that this Google account can access client accounts — then refresh.
+              No Ads customers listed yet. Confirm Google Ads API access on this Cloud project,
+              set GOOGLE_ADS_LOGIN_CUSTOMER_ID to your MCC ID (digits only), and that this Google
+              account can access client accounts — then refresh.
             </p>
           )}
 

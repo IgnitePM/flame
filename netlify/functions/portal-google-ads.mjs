@@ -92,22 +92,6 @@ export default async (req) => {
       );
     }
 
-    if (!process.env.GOOGLE_ADS_DEVELOPER_TOKEN) {
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          available: false,
-          warning:
-            'Google Ads developer token is not configured. Add GOOGLE_ADS_DEVELOPER_TOKEN in Netlify.',
-          dateFrom,
-          dateTo,
-          totals: {},
-          campaigns: [],
-        }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      );
-    }
-
     let accessToken;
     try {
       ({ accessToken } = await getValidAdsAccessToken());
