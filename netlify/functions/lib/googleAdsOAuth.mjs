@@ -16,8 +16,25 @@ export const GOOGLE_ADS_SCOPES = [
 export const COMPANY_CONNECTION_ID = 'company';
 
 function apiVersion() {
-  // Default to a current Ads API version; override with GOOGLE_ADS_API_VERSION if needed.
-  return String(process.env.GOOGLE_ADS_API_VERSION || 'v21').replace(/^\/*/, '');
+  // Prefer a currently supported major version (v21 is sunset → HTTP 404).
+  return String(process.env.GOOGLE_ADS_API_VERSION || 'v25').replace(/^\/*/, '');
+}
+
+const ADS_API_VERSION_FALLBACKS = ['v25', 'v24', 'v23', 'v22'];
+
+function candidateApiVersions() {
+  const preferred = apiVersion();
+  return [...new Set([preferred, ...ADS_API_VERSION_FALLBACKS])];
+}
+
+function googleAdsErrorMessage(data, status, fallback) {
+  return (
+    data?.error?.message ||
+    data?.error?.details?.[0]?.errors?.[0]?.message ||
+    data?.message ||
+    fallback ||
+    `Google Ads HTTP ${status}`
+  );
 }
 
 function oauthConfig() {
@@ -260,48 +277,56 @@ function adsHeaders(accessToken, { loginCustomerId: loginId } = {}) {
 }
 
 export async function listAccessibleCustomers(accessToken) {
-  const resp = await fetch(
-    `https://googleads.googleapis.com/${apiVersion()}/customers:listAccessibleCustomers`,
-    {
-      method: 'GET',
-      headers: adsHeaders(accessToken),
-    },
-  );
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    throw new Error(
-      data?.error?.message ||
-        data?.message ||
-        `Could not list Ads customers (HTTP ${resp.status}).`,
+  let lastErr = null;
+  for (const version of candidateApiVersions()) {
+    const resp = await fetch(
+      `https://googleads.googleapis.com/${version}/customers:listAccessibleCustomers`,
+      {
+        method: 'GET',
+        headers: adsHeaders(accessToken),
+      },
     );
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      const resourceNames = Array.isArray(data.resourceNames) ? data.resourceNames : [];
+      return resourceNames
+        .map((rn) => normalizeAdsCustomerId(String(rn).replace(/^customers\//, '')))
+        .filter(Boolean)
+        .map((customerId) => ({ customerId, descriptiveName: customerId }));
+    }
+    lastErr = new Error(
+      googleAdsErrorMessage(data, resp.status, `Could not list Ads customers (HTTP ${resp.status}).`),
+    );
+    // Try next version only on missing endpoint / sunset version.
+    if (resp.status !== 404) break;
   }
-  const resourceNames = Array.isArray(data.resourceNames) ? data.resourceNames : [];
-  return resourceNames
-    .map((rn) => normalizeAdsCustomerId(String(rn).replace(/^customers\//, '')))
-    .filter(Boolean)
-    .map((customerId) => ({ customerId, descriptiveName: customerId }));
+  throw lastErr || new Error('Could not list Ads customers.');
 }
 
 export async function searchGoogleAds(accessToken, customerId, query, opts = {}) {
   const id = normalizeAdsCustomerId(customerId);
   if (!id) throw new Error('Missing Google Ads customer ID.');
-  const resp = await fetch(
-    `https://googleads.googleapis.com/${apiVersion()}/customers/${encodeURIComponent(id)}/googleAds:search`,
-    {
-      method: 'POST',
-      headers: adsHeaders(accessToken, opts),
-      body: JSON.stringify({ query: String(query || '') }),
-    },
-  );
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    throw new Error(
-      data?.error?.message ||
-        data?.message ||
-        `Google Ads search failed (HTTP ${resp.status}).`,
+
+  let lastErr = null;
+  for (const version of candidateApiVersions()) {
+    const resp = await fetch(
+      `https://googleads.googleapis.com/${version}/customers/${encodeURIComponent(id)}/googleAds:search`,
+      {
+        method: 'POST',
+        headers: adsHeaders(accessToken, opts),
+        body: JSON.stringify({ query: String(query || '') }),
+      },
     );
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      return Array.isArray(data.results) ? data.results : [];
+    }
+    lastErr = new Error(
+      googleAdsErrorMessage(data, resp.status, `Google Ads search failed (HTTP ${resp.status}).`),
+    );
+    if (resp.status !== 404) break;
   }
-  return Array.isArray(data.results) ? data.results : [];
+  throw lastErr || new Error('Google Ads search failed.');
 }
 
 /**
