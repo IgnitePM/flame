@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { orderTodosForDisplay } from '../utils/todoListOrder.js';
 import {
   clientHasEnabledRetainers,
-  clientHasActiveSeoRetainer,
+  clientHasActiveAnalyticsRetainer,
   getEnabledRetainerCategoryEntries,
   getEnabledRetainerCategoryNames,
 } from '../utils/retainerCategories.js';
@@ -26,7 +26,7 @@ import ClientPortalFilesPanel from './ClientPortalFilesPanel.jsx';
 import PortalTaskRequestForm from './PortalTaskRequestForm.jsx';
 import PortalCompanyProfilePanel from './PortalCompanyProfilePanel.jsx';
 import ClientPortalToolsPanel from './ClientPortalToolsPanel.jsx';
-import ClientPortalSeoPanel from './ClientPortalSeoPanel.jsx';
+import ClientPortalAnalyticsPanel from './ClientPortalAnalyticsPanel.jsx';
 import {
   ChevronLeft,
   ChevronRight,
@@ -43,7 +43,7 @@ import {
   Calendar,
   ExternalLink,
   Wrench,
-  LineChart,
+  BarChart3,
 } from 'lucide-react';
 
 const STRATEGY_BOOKING_URL = 'https://calendar.app.google/nsL6wM7189fAM1Vd7';
@@ -256,7 +256,7 @@ const ClientPortal = ({
   }, [portalSection, latestStaffMessageAt]);
 
   useEffect(() => {
-    if (portalSection === 'seo' && !clientHasActiveSeoRetainer(clientProfile)) {
+    if (portalSection === 'analytics' && !clientHasActiveAnalyticsRetainer(clientProfile)) {
       setPortalSection('dashboard');
     }
   }, [portalSection, clientProfile]);
@@ -375,11 +375,11 @@ const ClientPortal = ({
             { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
             { id: 'company', label: 'Company', icon: Building2 },
             {
-              id: 'seo',
-              label: 'SEO',
-              icon: LineChart,
-              disabled: !clientHasActiveSeoRetainer(clientProfile),
-              disabledTitle: 'Available with an active SEO retainer',
+              id: 'analytics',
+              label: 'Analytics',
+              icon: BarChart3,
+              disabled: !clientHasActiveAnalyticsRetainer(clientProfile),
+              disabledTitle: 'Available with an active SEO, Email, Social, or Ads retainer',
             },
             { id: 'tools', label: 'Tools', icon: Wrench },
             { id: 'messages', label: 'Messages', icon: MessageSquare },
@@ -450,8 +450,9 @@ const ClientPortal = ({
           />
         ) : null}
 
-        {portalSection === 'seo' && clientHasActiveSeoRetainer(clientProfile) ? (
-          <ClientPortalSeoPanel
+        {portalSection === 'analytics' &&
+        clientHasActiveAnalyticsRetainer(clientProfile) ? (
+          <ClientPortalAnalyticsPanel
             client={clientProfile}
             dateFromMs={mStart}
             dateToMs={mEnd}

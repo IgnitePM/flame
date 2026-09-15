@@ -78,6 +78,48 @@ export function clientHasActiveSeoRetainer(client) {
   );
 }
 
+/** Email Marketing (and similar) retainers. */
+export function clientHasActiveEmailRetainer(client) {
+  return getEnabledRetainerCategoryNames(client).some((name) =>
+    String(name || '')
+      .toLowerCase()
+      .includes('email'),
+  );
+}
+
+/**
+ * Organic/social content retainers (e.g. "Social Media").
+ * Excludes ad-budget lines so Ads gating stays separate.
+ */
+export function clientHasActiveSocialMediaRetainer(client) {
+  return getEnabledRetainerCategoryNames(client).some((name) => {
+    const lower = String(name || '').toLowerCase();
+    return lower.includes('social media');
+  });
+}
+
+/** Paid ads retainers (Social Ad Budget, PPC, Google Ads, etc.). */
+export function clientHasActiveAdsRetainer(client) {
+  return getEnabledRetainerCategoryNames(client).some((name) => {
+    const lower = String(name || '').toLowerCase().trim();
+    if (lower === 'social ad budget') return true;
+    if (/\bgoogle\s*ads\b/.test(lower)) return true;
+    if (/\bppc\b/.test(lower)) return true;
+    if (/\bads?\b/.test(lower) && !lower.includes('social media')) return true;
+    return false;
+  });
+}
+
+/** Any Analytics hub sub-section retainer is active. */
+export function clientHasActiveAnalyticsRetainer(client) {
+  return (
+    clientHasActiveSeoRetainer(client) ||
+    clientHasActiveEmailRetainer(client) ||
+    clientHasActiveSocialMediaRetainer(client) ||
+    clientHasActiveAdsRetainer(client)
+  );
+}
+
 export function isRetainerCategoryDollar(client, categoryName) {
   if (!categoryName) return false;
   return (

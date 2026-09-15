@@ -4713,7 +4713,7 @@ export default function App() {
                       placeholder="e.g. 11991701"
                     />
                     <p className="text-[10px] font-bold text-slate-400">
-                      Links this client’s portal SEO tab to their SE Ranking project (Project API site_id). Leave blank until SEO is set up.
+                      Links this client’s portal Analytics → Website tab to their SE Ranking project (Project API site_id). Leave blank until SEO is set up.
                     </p>
                   </div>
                   <div className="space-y-2">
@@ -4734,7 +4734,68 @@ export default function App() {
                       placeholder="e.g. 123456789"
                     />
                     <p className="text-[10px] font-bold text-slate-400">
-                      Numeric Google Analytics 4 property ID (Admin → Config lists properties after GA4 is connected). Used for all-source traffic on the portal SEO tab.
+                      Numeric Google Analytics 4 property ID (Admin → Config lists properties after GA4 is connected). Used for Website traffic on portal Analytics.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                      Mailchimp audience ID
+                    </label>
+                    <input
+                      type="text"
+                      value={editingClient.mailchimpAudienceId ?? ''}
+                      onChange={(e) =>
+                        setEditingClient({
+                          ...editingClient,
+                          mailchimpAudienceId: e.target.value.trim(),
+                        })
+                      }
+                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      placeholder="e.g. a1b2c3d4e5"
+                    />
+                    <p className="text-[10px] font-bold text-slate-400">
+                      Mailchimp list/audience ID for portal Analytics → Email.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                      Planable workspace ID
+                    </label>
+                    <input
+                      type="text"
+                      value={editingClient.planableWorkspaceId ?? ''}
+                      onChange={(e) =>
+                        setEditingClient({
+                          ...editingClient,
+                          planableWorkspaceId: e.target.value.trim(),
+                        })
+                      }
+                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      placeholder="Planable workspace ID"
+                    />
+                    <p className="text-[10px] font-bold text-slate-400">
+                      Planable workspace ID for portal Analytics → Social Media.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                      Google Ads customer ID
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={editingClient.googleAdsCustomerId ?? ''}
+                      onChange={(e) =>
+                        setEditingClient({
+                          ...editingClient,
+                          googleAdsCustomerId: e.target.value.replace(/[^\d]/g, ''),
+                        })
+                      }
+                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      placeholder="e.g. 1234567890"
+                    />
+                    <p className="text-[10px] font-bold text-slate-400">
+                      10-digit Google Ads customer ID (no dashes). Used for portal Analytics → Ads after Ads is connected in Config.
                     </p>
                   </div>
                   <div className="space-y-2">
@@ -5575,6 +5636,13 @@ export default function App() {
                         )
                       : null,
                     ga4PropertyId: String(editingClient.ga4PropertyId || '')
+                      .replace(/[^\d]/g, '')
+                      .trim() || null,
+                    mailchimpAudienceId:
+                      String(editingClient.mailchimpAudienceId || '').trim() || null,
+                    planableWorkspaceId:
+                      String(editingClient.planableWorkspaceId || '').trim() || null,
+                    googleAdsCustomerId: String(editingClient.googleAdsCustomerId || '')
                       .replace(/[^\d]/g, '')
                       .trim() || null,
                     ...normalizeCompanyProfileFields(editingClient),
