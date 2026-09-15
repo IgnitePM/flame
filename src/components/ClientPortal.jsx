@@ -13,6 +13,7 @@ import ClientReviewsPanel from './ClientReviewsPanel.jsx';
 import ClientPortalFilesPanel from './ClientPortalFilesPanel.jsx';
 import PortalTaskRequestForm from './PortalTaskRequestForm.jsx';
 import PortalCompanyProfilePanel from './PortalCompanyProfilePanel.jsx';
+import ClientPortalToolsPanel from './ClientPortalToolsPanel.jsx';
 import {
   ChevronLeft,
   ChevronRight,
@@ -28,6 +29,7 @@ import {
   Building2,
   Calendar,
   ExternalLink,
+  Wrench,
 } from 'lucide-react';
 
 const STRATEGY_BOOKING_URL = 'https://calendar.app.google/nsL6wM7189fAM1Vd7';
@@ -190,6 +192,7 @@ const ClientPortal = ({
           {[
             { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
             { id: 'company', label: 'Company', icon: Building2 },
+            { id: 'tools', label: 'Tools', icon: Wrench },
             { id: 'messages', label: 'Messages', icon: MessageSquare },
             { id: 'approvals', label: 'Approvals', icon: ClipboardCheck },
             { id: 'files', label: 'Files', icon: FolderOpen },
@@ -236,6 +239,13 @@ const ClientPortal = ({
 
         {portalSection === 'company' ? (
           <PortalCompanyProfilePanel client={clientProfile} />
+        ) : null}
+
+        {portalSection === 'tools' ? (
+          <ClientPortalToolsPanel
+            client={clientProfile}
+            user={user || auth?.currentUser || null}
+          />
         ) : null}
 
         {portalSection === 'dashboard' ? (
@@ -323,18 +333,18 @@ const ClientPortal = ({
             <h3 className="font-black text-xl text-slate-900">
               Retainer usage (hour lines)
             </h3>
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
               <button
                 onClick={() => setAddonModal(clientProfile)}
-                className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2"
+                className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2"
               >
-                <Plus className="w-3 h-3" /> Add Hours
+                <Plus className="w-3 h-3 shrink-0" /> Purchase Additional Hours
               </button>
               <button
                 onClick={() => setProjectModal(clientProfile)}
-                className="bg-black hover:bg-slate-800 text-white px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2"
+                className="bg-black hover:bg-slate-800 text-white px-4 py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2"
               >
-                <FolderGit2 className="w-3 h-3" /> Request Project
+                <FolderGit2 className="w-3 h-3 shrink-0" /> Request Custom Project Quote
               </button>
             </div>
           </div>

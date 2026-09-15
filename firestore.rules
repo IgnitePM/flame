@@ -245,6 +245,30 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Portal mini-app saves (Tools tab). Clients read/write only their own
+    // clientId; staff can read all for CRM support.
+    match /clientPortalToolSaves/{saveId} {
+      allow read: if isAnyStaff() ||
+        (isSignedIn() &&
+         resource.data.clientId is string &&
+         clientAllowsEmail(resource.data.clientId));
+      allow create: if isAnyStaff() ||
+        (isSignedIn() &&
+         request.resource.data.clientId is string &&
+         request.resource.data.toolId is string &&
+         clientAllowsEmail(request.resource.data.clientId));
+      allow update: if isAnyStaff() ||
+        (isSignedIn() &&
+         resource.data.clientId is string &&
+         clientAllowsEmail(resource.data.clientId) &&
+         request.resource.data.clientId == resource.data.clientId &&
+         request.resource.data.toolId == resource.data.toolId);
+      allow delete: if isAdmin() ||
+        (isSignedIn() &&
+         resource.data.clientId is string &&
+         clientAllowsEmail(resource.data.clientId));
+    }
+
     // Opaque set-password tokens for portal invites (digest bot only).
     match /portalInviteTokens/{tokenId} {
       allow read, write: if isBilling();
