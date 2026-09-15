@@ -169,7 +169,7 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
     return { from, to };
   }, [dateFromMs, dateToMs]);
 
-  const load = async () => {
+  const load = async ({ forceRefresh = false } = {}) => {
     if (!client?.id) return;
     setLoading(true);
     setError('');
@@ -178,6 +178,7 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
         clientId: client.id,
         dateFrom: range.from,
         dateTo: range.to,
+        ...(forceRefresh ? { forceRefresh: true } : {}),
       });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(data.error || `Request failed (${resp.status})`);
@@ -221,7 +222,7 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
         </p>
         <button
           type="button"
-          onClick={load}
+          onClick={() => load({ forceRefresh: true })}
           className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-black uppercase tracking-widest"
         >
           <RefreshCw className="w-3.5 h-3.5" /> Retry
@@ -254,11 +255,18 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
           <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px] mt-1">
             {p.title || p.domain || 'SE Ranking'} · {formatDay(report.dateFrom)} –{' '}
             {formatDay(report.dateTo)}
+            {report?.cached
+              ? ` · Cached${
+                  report.cacheAgeSec
+                    ? ` ${Math.max(1, Math.round(report.cacheAgeSec / 60))}m ago`
+                    : ''
+                }`
+              : ''}
           </p>
         </div>
         <button
           type="button"
-          onClick={load}
+          onClick={() => load({ forceRefresh: true })}
           className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-black uppercase tracking-widest"
         >
           <RefreshCw className="w-3.5 h-3.5" /> Refresh

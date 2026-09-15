@@ -8,6 +8,7 @@ import {
   getValidGa4AccessToken,
   normalizeGa4PropertyId,
 } from './lib/ga4OAuth.mjs';
+import { wantsForceRefresh, withAnalyticsCache } from './lib/analyticsReportCache.mjs';
 
 /**
  * Portal/staff SEO report proxy for SE Ranking Project API + optional GA4.
@@ -269,6 +270,16 @@ export default async (req) => {
       dateTo = tmp;
     }
 
+    const forceRefresh = wantsForceRefresh(body);
+
+    const report = await withAnalyticsCache({
+      db,
+      source: 'website',
+      clientId,
+      dateFrom,
+      dateTo,
+      forceRefresh,
+      build: async () => {
     // Pull enough history for week-over-week even near the start of a billing cycle.
     const historyFrom = addDaysYmd(dateFrom, -14);
     const positionsFrom = historyFrom;
@@ -493,42 +504,46 @@ export default async (req) => {
         'No GA4 property linked yet. Ask Ignite to add the GA4 property ID on your account.';
     }
 
-    return new Response(
-      JSON.stringify({
-        siteId,
-        dateFrom,
-        dateTo,
-        project: {
-          title: summary?.title || summary?.name || '',
-          domain: summary?.name || '',
-          todayAvg: Number(summary?.today_avg) || null,
-          yesterdayAvg: Number(summary?.yesterday_avg) || null,
-          totalUp: Number(summary?.total_up) || 0,
-          totalDown: Number(summary?.total_down) || 0,
-          top5: Number(summary?.top5) || 0,
-          top10: Number(summary?.top10) || 0,
-          top30: Number(summary?.top30) || 0,
-          visibility: Number(summary?.visibility) || null,
-          visibilityPercent: Number(summary?.visibility_percent) || null,
-        },
-        visibilityTrend: visibilityTrendInRange,
-        avgPositionTrend: avgPositionTrendInRange,
-        weekOverWeek: {
-          visibility: wowVisibility,
-          avgPosition: wowAvgPosition,
-          keywordsImproved: wowImproved,
-          keywordsDeclined: wowDeclined,
-          keywordsFlat: wowFlat,
-        },
-        traffic,
-        analytics,
-        keywords: keywordTable,
-        keywordCount: keywordTable.length,
-        fetchedAt: Date.now(),
-        fetchedBy: caller.email,
-      }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } },
-    );
+    return {
+      siteId,
+      dateFrom,
+      dateTo,
+      project: {
+        title: summary?.title || summary?.name || '',
+        domain: summary?.name || '',
+        todayAvg: Number(summary?.today_avg) || null,
+        yesterdayAvg: Number(summary?.yesterday_avg) || null,
+        totalUp: Number(summary?.total_up) || 0,
+        totalDown: Number(summary?.total_down) || 0,
+        top5: Number(summary?.top5) || 0,
+        top10: Number(summary?.top10) || 0,
+        top30: Number(summary?.top30) || 0,
+        visibility: Number(summary?.visibility) || null,
+        visibilityPercent: Number(summary?.visibility_percent) || null,
+      },
+      visibilityTrend: visibilityTrendInRange,
+      avgPositionTrend: avgPositionTrendInRange,
+      weekOverWeek: {
+        visibility: wowVisibility,
+        avgPosition: wowAvgPosition,
+        keywordsImproved: wowImproved,
+        keywordsDeclined: wowDeclined,
+        keywordsFlat: wowFlat,
+      },
+      traffic,
+      analytics,
+      keywords: keywordTable,
+      keywordCount: keywordTable.length,
+      fetchedAt: Date.now(),
+      fetchedBy: caller.email,
+    };
+      },
+    });
+
+    return new Response(JSON.stringify(report), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
   } catch (err) {
     console.error('[portal-se-ranking]', err);
     return new Response(

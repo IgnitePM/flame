@@ -109,6 +109,13 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Short-lived portal analytics snapshots (SE Ranking / GA4 / Mailchimp / etc.).
+    // Written only by Netlify digest-bot functions — never by the browser.
+    match /portalAnalyticsCache/{cacheId} {
+      allow read, write: if isAnyStaff();
+      allow delete: if isAdmin();
+    }
+
     // Per-client third-party API secrets (e.g. Mailchimp keys). Never on the
     // clients doc — portal users can read clients. Digest bot reads for Netlify
     // portal proxies; staff manage via CRM.

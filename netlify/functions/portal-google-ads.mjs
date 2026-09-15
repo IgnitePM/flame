@@ -9,6 +9,7 @@ import {
   getValidAdsAccessToken,
   normalizeAdsCustomerId,
 } from './lib/googleAdsOAuth.mjs';
+import { wantsForceRefresh, withAnalyticsCache } from './lib/analyticsReportCache.mjs';
 
 /**
  * Portal/staff Google Ads analytics proxy.
@@ -112,8 +113,21 @@ export default async (req) => {
       );
     }
 
-    const report = await fetchAdsReport(accessToken, customerId, dateFrom, dateTo);
-    return new Response(JSON.stringify({ ok: true, ...report }), {
+    const forceRefresh = wantsForceRefresh(body);
+    const report = await withAnalyticsCache({
+      db,
+      source: 'ads',
+      clientId,
+      dateFrom,
+      dateTo,
+      forceRefresh,
+      build: async () => {
+        const data = await fetchAdsReport(accessToken, customerId, dateFrom, dateTo);
+        return { ok: true, ...data };
+      },
+    });
+
+    return new Response(JSON.stringify(report), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });

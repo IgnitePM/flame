@@ -4,6 +4,7 @@ import {
 } from './lib/requireAuth.mjs';
 import { fetchDoc, getDigestDb } from './lib/firebaseDigestClient.mjs';
 import { clientHasActiveSocialMediaRetainer } from './lib/retainerAccess.mjs';
+import { wantsForceRefresh, withAnalyticsCache } from './lib/analyticsReportCache.mjs';
 
 /**
  * Portal/staff Planable social analytics proxy.
@@ -270,6 +271,15 @@ export default async (req) => {
       );
     }
 
+    const forceRefresh = wantsForceRefresh(body);
+    const report = await withAnalyticsCache({
+      db,
+      source: 'social',
+      clientId,
+      dateFrom,
+      dateTo,
+      forceRefresh,
+      build: async () => {
     const pagesPayload = await planableGet(token, '/pages', {
       workspaceId,
       limit: 50,
@@ -422,28 +432,32 @@ export default async (req) => {
       console.warn('[portal-planable] posts', postsWarning);
     }
 
-    return new Response(
-      JSON.stringify({
-        ok: true,
-        available: true,
-        dateFrom,
-        dateTo,
-        workspaceId,
-        pages,
-        platforms,
-        topPosts,
-        totals: {
-          impressions: totalImpressions,
-          reach: totalReach,
-          engagement: totalEngagement,
-          likes: totalLikes,
-          comments: totalComments,
-          shares: totalShares,
-        },
-        ...(postsWarning ? { warning: postsWarning } : {}),
-      }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } },
-    );
+    return {
+      ok: true,
+      available: true,
+      dateFrom,
+      dateTo,
+      workspaceId,
+      pages,
+      platforms,
+      topPosts,
+      totals: {
+        impressions: totalImpressions,
+        reach: totalReach,
+        engagement: totalEngagement,
+        likes: totalLikes,
+        comments: totalComments,
+        shares: totalShares,
+      },
+      ...(postsWarning ? { warning: postsWarning } : {}),
+    };
+      },
+    });
+
+    return new Response(JSON.stringify(report), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
   } catch (err) {
     console.error('[portal-planable]', err);
     return new Response(

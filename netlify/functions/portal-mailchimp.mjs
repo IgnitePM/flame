@@ -4,6 +4,7 @@ import {
 } from './lib/requireAuth.mjs';
 import { fetchDoc, getDigestDb } from './lib/firebaseDigestClient.mjs';
 import { clientHasActiveEmailRetainer } from './lib/retainerAccess.mjs';
+import { wantsForceRefresh, withAnalyticsCache } from './lib/analyticsReportCache.mjs';
 
 /**
  * Portal/staff Mailchimp analytics proxy.
@@ -182,6 +183,15 @@ export default async (req) => {
       }
     }
 
+    const forceRefresh = wantsForceRefresh(body);
+    const report = await withAnalyticsCache({
+      db,
+      source: 'email',
+      clientId,
+      dateFrom,
+      dateTo,
+      forceRefresh,
+      build: async () => {
     const listResult = await mcGetSoft(
       creds.apiKey,
       creds.dc,
@@ -210,20 +220,17 @@ export default async (req) => {
               .join('; ')}.`
           : ' Confirm the Audience ID under Audience → Settings → Audience name and defaults (not the ID in the browser URL).';
 
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          available: false,
-          warning: `Mailchimp could not find audience “${audienceId}”.${hint}`,
-          dateFrom,
-          dateTo,
-          audience: { id: audienceId },
-          availableAudiences: availableLists,
-          campaigns: [],
-          totals: {},
-        }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      );
+      return {
+        ok: true,
+        available: false,
+        warning: `Mailchimp could not find audience “${audienceId}”.${hint}`,
+        dateFrom,
+        dateTo,
+        audience: { id: audienceId },
+        availableAudiences: availableLists,
+        campaigns: [],
+        totals: {},
+      };
     }
 
     const list = listResult.data;
@@ -291,37 +298,41 @@ export default async (req) => {
       .filter((n) => n != null && Number.isFinite(n));
     const unsubscribes = campaigns.reduce((s, c) => s + (c.unsubscribes || 0), 0);
 
-    return new Response(
-      JSON.stringify({
-        ok: true,
-        available: true,
-        dateFrom,
-        dateTo,
-        audience: {
-          id: String(list.id || audienceId),
-          name: String(list.name || ''),
-          memberCount: Number(list.stats?.member_count || 0),
-        },
-        campaigns,
-        totals: {
-          campaigns: campaigns.length,
-          emailsSent,
-          avgOpenRate: openRates.length
-            ? openRates.reduce((a, b) => a + b, 0) / openRates.length
-            : null,
-          avgClickRate: clickRates.length
-            ? clickRates.reduce((a, b) => a + b, 0) / clickRates.length
-            : null,
-          unsubscribes,
-        },
-        ...(campaignsResult.ok
-          ? {}
-          : {
-              warning: `Audience found, but campaign fetch had an issue: ${campaignsResult.error}`,
-            }),
-      }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } },
-    );
+    return {
+      ok: true,
+      available: true,
+      dateFrom,
+      dateTo,
+      audience: {
+        id: String(list.id || audienceId),
+        name: String(list.name || ''),
+        memberCount: Number(list.stats?.member_count || 0),
+      },
+      campaigns,
+      totals: {
+        campaigns: campaigns.length,
+        emailsSent,
+        avgOpenRate: openRates.length
+          ? openRates.reduce((a, b) => a + b, 0) / openRates.length
+          : null,
+        avgClickRate: clickRates.length
+          ? clickRates.reduce((a, b) => a + b, 0) / clickRates.length
+          : null,
+        unsubscribes,
+      },
+      ...(campaignsResult.ok
+        ? {}
+        : {
+            warning: `Audience found, but campaign fetch had an issue: ${campaignsResult.error}`,
+          }),
+    };
+      },
+    });
+
+    return new Response(JSON.stringify(report), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
   } catch (err) {
     console.error('[portal-mailchimp]', err);
     return new Response(

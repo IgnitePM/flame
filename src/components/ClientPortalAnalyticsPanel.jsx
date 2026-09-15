@@ -131,6 +131,14 @@ function formatDay(ymd) {
   }
 }
 
+function cacheSubtitleSuffix(report) {
+  if (!report?.cached) return '';
+  const mins = report.cacheAgeSec
+    ? Math.max(1, Math.round(Number(report.cacheAgeSec) / 60))
+    : null;
+  return mins ? ` · Cached ${mins}m ago` : ' · Cached';
+}
+
 function formatNum(n, digits = 0) {
   if (n == null || !Number.isFinite(Number(n))) return '—';
   return Number(n).toLocaleString(undefined, {
@@ -198,7 +206,7 @@ function useAnalyticsReport(endpoint, clientId, dateFromMs, dateToMs, enabled) {
     return { from, to };
   }, [dateFromMs, dateToMs]);
 
-  const load = async () => {
+  const load = async ({ forceRefresh = false } = {}) => {
     if (!enabled || !clientId) return;
     setLoading(true);
     setError('');
@@ -207,6 +215,7 @@ function useAnalyticsReport(endpoint, clientId, dateFromMs, dateToMs, enabled) {
         clientId,
         dateFrom: range.from,
         dateTo: range.to,
+        ...(forceRefresh ? { forceRefresh: true } : {}),
       });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(data.error || `Request failed (${resp.status})`);
@@ -230,7 +239,13 @@ function useAnalyticsReport(endpoint, clientId, dateFromMs, dateToMs, enabled) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, clientId, range.from, range.to, endpoint]);
 
-  return { loading, error, report, load, range };
+  return {
+    loading,
+    error,
+    report,
+    load: () => load({ forceRefresh: true }),
+    range,
+  };
 }
 
 function EmailAnalyticsPanel({ client, dateFromMs, dateToMs }) {
@@ -271,7 +286,7 @@ function EmailAnalyticsPanel({ client, dateFromMs, dateToMs }) {
   return (
     <PanelShell
       title="Email"
-      subtitle={`Mailchimp · ${formatDay(range.from)} – ${formatDay(range.to)}`}
+      subtitle={`Mailchimp · ${formatDay(range.from)} – ${formatDay(range.to)}${cacheSubtitleSuffix(report)}`}
       onRefresh={load}
       loading={loading}
     >
@@ -439,7 +454,7 @@ function SocialAnalyticsPanel({ client, dateFromMs, dateToMs }) {
   return (
     <PanelShell
       title="Social Media"
-      subtitle={`Planable · ${formatDay(range.from)} – ${formatDay(range.to)}`}
+      subtitle={`Planable · ${formatDay(range.from)} – ${formatDay(range.to)}${cacheSubtitleSuffix(report)}`}
       onRefresh={load}
       loading={loading}
     >
@@ -663,7 +678,7 @@ function AdsAnalyticsPanel({ client, dateFromMs, dateToMs }) {
   return (
     <PanelShell
       title="Ads"
-      subtitle={`Google Ads · ${formatDay(range.from)} – ${formatDay(range.to)}`}
+      subtitle={`Google Ads · ${formatDay(range.from)} – ${formatDay(range.to)}${cacheSubtitleSuffix(report)}`}
       onRefresh={load}
       loading={loading}
     >
