@@ -1,3 +1,5 @@
+import CustomerJourneyBuilder from './customerJourney/CustomerJourneyBuilder.jsx';
+
 /**
  * Portal mini-app registry.
  *
@@ -6,22 +8,21 @@
  *     id: string,                 // stable key used for Firestore saves
  *     title: string,
  *     description: string,
- *     icon?: LucideIcon name key (optional; panel has a default)
- *     component: React component   // receives { client, user, save, load, savedData, saving }
+ *     component: React component   // { client, user, save, load, savedData, saving }
+ *     fullBleed?: boolean          // skip outer card chrome for immersive tools
  *     enabled?: boolean            // default true
  *   }
- *
- * Add Customer Journey Builder (and others) here when you provide the code.
  */
 
 export const PORTAL_TOOLS = [
-  // Example shape for the next mini-app:
-  // {
-  //   id: 'customer_journey_builder',
-  //   title: 'Customer Journey Builder',
-  //   description: 'Map and save your customer journey.',
-  //   component: CustomerJourneyBuilder,
-  // },
+  {
+    id: 'customer_journey_builder',
+    title: 'Customer Journey Builder',
+    description:
+      'Build a StoryBrand-style journey with AI copy, sound bites, deliverables, and a landing-page audit — saved to your portal.',
+    component: CustomerJourneyBuilder,
+    fullBleed: true,
+  },
 ];
 
 export function listEnabledPortalTools() {

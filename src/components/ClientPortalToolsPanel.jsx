@@ -10,6 +10,7 @@ export default function ClientPortalToolsPanel({ client, user }) {
   const tools = listEnabledPortalTools();
   const [activeToolId, setActiveToolId] = useState(null);
   const [saved, setSaved] = useState(null);
+  const [saveLoaded, setSaveLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [saveMessage, setSaveMessage] = useState('');
@@ -19,18 +20,24 @@ export default function ClientPortalToolsPanel({ client, user }) {
   useEffect(() => {
     if (!activeTool || !client?.id) {
       setSaved(null);
+      setSaveLoaded(false);
       setLoadError('');
       return undefined;
     }
     let cancelled = false;
+    setSaveLoaded(false);
     (async () => {
       setLoadError('');
       try {
         const row = await loadPortalToolSave(client.id, activeTool.id);
-        if (!cancelled) setSaved(row);
+        if (!cancelled) {
+          setSaved(row);
+          setSaveLoaded(true);
+        }
       } catch (err) {
         if (!cancelled) {
           setSaved(null);
+          setSaveLoaded(true);
           setLoadError(err?.message || 'Could not load saved work.');
         }
       }
@@ -80,6 +87,7 @@ export default function ClientPortalToolsPanel({ client, user }) {
 
   if (activeTool) {
     const Tool = activeTool.component;
+    const fullBleed = activeTool.fullBleed === true;
     return (
       <div className="space-y-4">
         <button
@@ -94,41 +102,85 @@ export default function ClientPortalToolsPanel({ client, user }) {
           <ArrowLeft className="w-3.5 h-3.5" />
           All tools
         </button>
-        <div className="bg-white border border-slate-200 rounded-[32px] p-6 sm:p-8 shadow-sm space-y-4">
-          <div>
-            <h3 className="font-black text-xl text-slate-900">{activeTool.title}</h3>
-            {activeTool.description ? (
-              <p className="text-sm text-slate-500 font-medium mt-1">
-                {activeTool.description}
-              </p>
-            ) : null}
-            {saved?.updatedAt ? (
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">
-                Last saved {new Date(saved.updatedAt).toLocaleString()}
-              </p>
-            ) : null}
-            {loadError ? (
-              <p className="text-xs font-bold text-amber-700 mt-2">{loadError}</p>
-            ) : null}
-            {saveMessage ? (
-              <p
-                className={`text-xs font-bold mt-2 ${
-                  saveMessage.includes('Saved') ? 'text-emerald-600' : 'text-red-500'
-                }`}
-              >
-                {saveMessage}
-              </p>
-            ) : null}
+        {fullBleed ? (
+          <div className="space-y-2">
+            {(loadError || saveMessage || saved?.updatedAt) && (
+              <div className="px-1">
+                {saved?.updatedAt ? (
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    Last saved {new Date(saved.updatedAt).toLocaleString()}
+                  </p>
+                ) : null}
+                {loadError ? (
+                  <p className="text-xs font-bold text-amber-700 mt-1">{loadError}</p>
+                ) : null}
+                {saveMessage ? (
+                  <p
+                    className={`text-xs font-bold mt-1 ${
+                      saveMessage.includes('Saved') ? 'text-emerald-600' : 'text-red-500'
+                    }`}
+                  >
+                    {saveMessage}
+                  </p>
+                ) : null}
+              </div>
+            )}
+            {!saveLoaded ? (
+              <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm font-bold text-slate-400">
+                Loading saved work…
+              </div>
+            ) : (
+              <Tool
+                client={client}
+                user={user}
+                save={save}
+                load={load}
+                savedData={saved?.data ?? null}
+                saving={saving}
+              />
+            )}
           </div>
-          <Tool
-            client={client}
-            user={user}
-            save={save}
-            load={load}
-            savedData={saved?.data ?? null}
-            saving={saving}
-          />
-        </div>
+        ) : (
+          <div className="bg-white border border-slate-200 rounded-[32px] p-6 sm:p-8 shadow-sm space-y-4">
+            <div>
+              <h3 className="font-black text-xl text-slate-900">{activeTool.title}</h3>
+              {activeTool.description ? (
+                <p className="text-sm text-slate-500 font-medium mt-1">
+                  {activeTool.description}
+                </p>
+              ) : null}
+              {saved?.updatedAt ? (
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">
+                  Last saved {new Date(saved.updatedAt).toLocaleString()}
+                </p>
+              ) : null}
+              {loadError ? (
+                <p className="text-xs font-bold text-amber-700 mt-2">{loadError}</p>
+              ) : null}
+              {saveMessage ? (
+                <p
+                  className={`text-xs font-bold mt-2 ${
+                    saveMessage.includes('Saved') ? 'text-emerald-600' : 'text-red-500'
+                  }`}
+                >
+                  {saveMessage}
+                </p>
+              ) : null}
+            </div>
+            {!saveLoaded ? (
+              <p className="text-sm font-bold text-slate-400">Loading saved work…</p>
+            ) : (
+              <Tool
+                client={client}
+                user={user}
+                save={save}
+                load={load}
+                savedData={saved?.data ?? null}
+                saving={saving}
+              />
+            )}
+          </div>
+        )}
       </div>
     );
   }
