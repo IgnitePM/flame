@@ -16,14 +16,22 @@ function parseMailchimpKey(raw) {
   const dash = key.lastIndexOf('-');
   if (dash <= 0) return null;
   const dc = key.slice(dash + 1).trim();
-  if (!dc) return null;
-  return { apiKey: key, dc };
+  if (!/^[a-z]+\d+$/i.test(dc)) return null;
+  return { apiKey: key, dc: dc.toLowerCase() };
 }
 
 function ymd(d = new Date()) {
   const x = d instanceof Date ? d : new Date(d);
   if (Number.isNaN(x.getTime())) return '';
   return x.toISOString().slice(0, 10);
+}
+
+function normalizeAudienceId(raw) {
+  // Audience IDs are short alphanumerics; strip spaces/URL junk.
+  return String(raw || '')
+    .trim()
+    .replace(/^.*[/=]/, '')
+    .replace(/[^a-zA-Z0-9]/g, '');
 }
 
 async function mcGet(apiKey, dc, path, params = {}) {
@@ -44,9 +52,22 @@ async function mcGet(apiKey, dc, path, params = {}) {
     const msg = data?.detail || data?.title || data?.error || `Mailchimp HTTP ${resp.status}`;
     const err = new Error(msg);
     err.status = resp.status;
+    err.mailchimp = data;
     throw err;
   }
   return data;
+}
+
+async function mcGetSoft(apiKey, dc, path, params = {}) {
+  try {
+    return { ok: true, data: await mcGet(apiKey, dc, path, params) };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err?.message || 'Request failed',
+      status: err?.status || 500,
+    };
+  }
 }
 
 export default async (req) => {
@@ -100,7 +121,7 @@ export default async (req) => {
     }
 
     const creds = parseMailchimpKey(process.env.MAILCHIMP_API_KEY);
-    const audienceId = String(client.mailchimpAudienceId || '').trim();
+    const audienceId = normalizeAudienceId(client.mailchimpAudienceId);
     const dateFrom = String(body.dateFrom || '').trim() || ymd(new Date(Date.now() - 30 * 86400000));
     const dateTo = String(body.dateTo || '').trim() || ymd();
 
@@ -127,7 +148,7 @@ export default async (req) => {
           ok: true,
           available: false,
           warning:
-            'No Mailchimp audience ID on this client. Ask Ignite to add mailchimpAudienceId on the CRM profile.',
+            'No Mailchimp audience ID on this client. Ask Ignite to add mailchimpAudienceId on the CRM profile (Audience → Settings → Audience name and defaults).',
           dateFrom,
           dateTo,
           audience: {},
@@ -138,26 +159,88 @@ export default async (req) => {
       );
     }
 
-    const list = await mcGet(creds.apiKey, creds.dc, `/lists/${encodeURIComponent(audienceId)}`, {
-      fields: 'id,name,stats.member_count',
-    });
+    const listResult = await mcGetSoft(
+      creds.apiKey,
+      creds.dc,
+      `/lists/${encodeURIComponent(audienceId)}`,
+      { fields: 'id,name,stats.member_count' },
+    );
 
-    // Campaigns for this list; filter by send date in range.
-    const campaignsPayload = await mcGet(creds.apiKey, creds.dc, '/campaigns', {
-      count: 50,
+    if (!listResult.ok) {
+      const listsResult = await mcGetSoft(creds.apiKey, creds.dc, '/lists', {
+        count: 50,
+        fields: 'lists.id,lists.name,lists.stats.member_count',
+      });
+      const availableLists = listsResult.ok
+        ? (Array.isArray(listsResult.data?.lists) ? listsResult.data.lists : []).map((l) => ({
+            id: String(l.id || ''),
+            name: String(l.name || ''),
+            memberCount: Number(l.stats?.member_count || 0),
+          }))
+        : [];
+
+      const hint =
+        availableLists.length > 0
+          ? ` Available audiences: ${availableLists
+              .slice(0, 8)
+              .map((l) => `${l.name} (${l.id})`)
+              .join('; ')}.`
+          : ' Confirm the Audience ID under Audience → Settings → Audience name and defaults (not the ID in the browser URL).';
+
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          available: false,
+          warning: `Mailchimp could not find audience “${audienceId}”.${hint}`,
+          dateFrom,
+          dateTo,
+          audience: { id: audienceId },
+          availableAudiences: availableLists,
+          campaigns: [],
+          totals: {},
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+
+    const list = listResult.data;
+
+    // Prefer Mailchimp send-time filters; also filter client-side as a safety net.
+    const campaignsResult = await mcGetSoft(creds.apiKey, creds.dc, '/campaigns', {
+      count: 100,
       offset: 0,
       status: 'sent',
       sort_field: 'send_time',
       sort_dir: 'DESC',
       list_id: audienceId,
-      fields:
-        'campaigns.id,campaigns.settings.title,campaigns.settings.subject_line,campaigns.send_time,campaigns.emails_sent,campaigns.report_summary',
+      since_send_time: `${dateFrom}T00:00:00+00:00`,
+      before_send_time: `${dateTo}T23:59:59+00:00`,
     });
 
-    const campaigns = (Array.isArray(campaignsPayload.campaigns) ? campaignsPayload.campaigns : [])
+    let rawCampaigns = [];
+    if (campaignsResult.ok) {
+      rawCampaigns = Array.isArray(campaignsResult.data?.campaigns)
+        ? campaignsResult.data.campaigns
+        : [];
+    } else {
+      // Fallback without list_id / time filters if the filtered call fails.
+      const fallback = await mcGetSoft(creds.apiKey, creds.dc, '/campaigns', {
+        count: 100,
+        status: 'sent',
+        sort_field: 'send_time',
+        sort_dir: 'DESC',
+      });
+      rawCampaigns = fallback.ok
+        ? (Array.isArray(fallback.data?.campaigns) ? fallback.data.campaigns : [])
+        : [];
+    }
+
+    const campaigns = rawCampaigns
       .map((c) => {
         const sendTime = String(c.send_time || '').slice(0, 10);
         const summary = c.report_summary || {};
+        const listMatch =
+          !c.recipients?.list_id || String(c.recipients.list_id) === audienceId;
         return {
           id: String(c.id || ''),
           title: String(c.settings?.title || c.settings?.subject_line || c.id || ''),
@@ -166,9 +249,17 @@ export default async (req) => {
           openRate: summary.open_rate != null ? Number(summary.open_rate) : null,
           clickRate: summary.click_rate != null ? Number(summary.click_rate) : null,
           unsubscribes: Number(summary.unsubscribed || 0),
+          listMatch,
         };
       })
-      .filter((c) => c.sendDate && c.sendDate >= dateFrom && c.sendDate <= dateTo);
+      .filter(
+        (c) =>
+          c.listMatch &&
+          c.sendDate &&
+          c.sendDate >= dateFrom &&
+          c.sendDate <= dateTo,
+      )
+      .map(({ listMatch, ...rest }) => rest);
 
     const emailsSent = campaigns.reduce((s, c) => s + (c.emailsSent || 0), 0);
     const openRates = campaigns.map((c) => c.openRate).filter((n) => n != null && Number.isFinite(n));
@@ -200,6 +291,11 @@ export default async (req) => {
             : null,
           unsubscribes,
         },
+        ...(campaignsResult.ok
+          ? {}
+          : {
+              warning: `Audience found, but campaign fetch had an issue: ${campaignsResult.error}`,
+            }),
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     );
@@ -207,7 +303,10 @@ export default async (req) => {
     console.error('[portal-mailchimp]', err);
     return new Response(
       JSON.stringify({ error: err?.message || 'Could not load Mailchimp analytics.' }),
-      { status: err?.status && err.status < 500 ? err.status : 500, headers: { 'Content-Type': 'application/json' } },
+      {
+        status: err?.status && err.status < 500 ? err.status : 500,
+        headers: { 'Content-Type': 'application/json' },
+      },
     );
   }
 };

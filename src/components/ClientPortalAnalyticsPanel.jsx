@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   BarChart3,
+  CalendarRange,
   Globe2,
   Loader2,
   Mail,
@@ -47,6 +48,76 @@ const TABS = [
     disabledTitle: 'Available with an active Ads / Social Ad Budget retainer',
   },
 ];
+
+function startOfLocalDay(d) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x.getTime();
+}
+
+function endOfLocalDay(d) {
+  const x = new Date(d);
+  x.setHours(23, 59, 59, 999);
+  return x.getTime();
+}
+
+function toYmdLocal(ms) {
+  const d = new Date(ms);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function fromYmdLocal(ymd, endOfDay = false) {
+  const [y, m, d] = String(ymd || '')
+    .split('-')
+    .map((n) => Number(n));
+  if (!y || !m || !d) return Date.now();
+  const dt = new Date(y, m - 1, d);
+  return endOfDay ? endOfLocalDay(dt) : startOfLocalDay(dt);
+}
+
+function daysAgoStart(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return startOfLocalDay(d);
+}
+
+const PRESETS = [
+  { id: 'billing', label: 'This billing cycle' },
+  { id: '7d', label: 'Past week' },
+  { id: '30d', label: 'Past month' },
+  { id: '90d', label: 'Past 90 days' },
+  { id: '365d', label: 'Past year' },
+  { id: 'custom', label: 'Custom' },
+];
+
+function resolvePresetRange(presetId, billingFromMs, billingToMs, customFrom, customTo) {
+  const nowEnd = endOfLocalDay(new Date());
+  switch (presetId) {
+    case '7d':
+      return { fromMs: daysAgoStart(7), toMs: nowEnd };
+    case '30d':
+      return { fromMs: daysAgoStart(30), toMs: nowEnd };
+    case '90d':
+      return { fromMs: daysAgoStart(90), toMs: nowEnd };
+    case '365d':
+      return { fromMs: daysAgoStart(365), toMs: nowEnd };
+    case 'custom': {
+      const fromMs = fromYmdLocal(customFrom, false);
+      const toMs = fromYmdLocal(customTo, true);
+      if (fromMs > toMs) return { fromMs: toMs, toMs: fromMs };
+      return { fromMs, toMs };
+    }
+    case 'billing':
+    default:
+      return {
+        fromMs: Number(billingFromMs) || daysAgoStart(30),
+        toMs: Number(billingToMs) || nowEnd,
+      };
+  }
+}
 
 function formatDay(ymd) {
   if (!ymd) return '';
@@ -193,6 +264,9 @@ function EmailAnalyticsPanel({ client, dateFromMs, dateToMs }) {
   const audience = report?.audience || {};
   const campaigns = Array.isArray(report?.campaigns) ? report.campaigns : [];
   const totals = report?.totals || {};
+  const availableAudiences = Array.isArray(report?.availableAudiences)
+    ? report.availableAudiences
+    : [];
 
   return (
     <PanelShell
@@ -202,95 +276,125 @@ function EmailAnalyticsPanel({ client, dateFromMs, dateToMs }) {
       loading={loading}
     >
       {report?.warning ? (
+        <div className="space-y-3">
+          <p className="text-sm font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3">
+            {report.warning}
+          </p>
+          {availableAudiences.length > 0 ? (
+            <div className="bg-white border border-slate-200 rounded-2xl p-4 text-sm">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
+                Audiences on this Mailchimp account
+              </p>
+              <ul className="space-y-1.5">
+                {availableAudiences.map((a) => (
+                  <li key={a.id} className="flex justify-between gap-3">
+                    <span className="font-bold text-slate-800">{a.name}</span>
+                    <span className="font-mono text-xs font-bold text-slate-500">{a.id}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-[10px] font-bold text-slate-400 mt-2">
+                Copy the correct ID into the client CRM field “Mailchimp audience ID”.
+              </p>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {report?.available === false && !report?.warning ? (
         <p className="text-sm font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3">
-          {report.warning}
+          Email analytics are not available yet.
         </p>
       ) : null}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="Audience size" value={formatNum(audience.memberCount)} />
-        <StatCard label="Campaigns sent" value={formatNum(totals.campaigns)} />
-        <StatCard label="Emails sent" value={formatNum(totals.emailsSent)} />
-        <StatCard
-          label="Avg open rate"
-          value={
-            totals.avgOpenRate != null
-              ? `${(Number(totals.avgOpenRate) * 100).toFixed(1)}%`
-              : '—'
-          }
-        />
-      </div>
-
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-        <StatCard
-          label="Avg click rate"
-          value={
-            totals.avgClickRate != null
-              ? `${(Number(totals.avgClickRate) * 100).toFixed(1)}%`
-              : '—'
-          }
-        />
-        <StatCard label="Unsubscribes" value={formatNum(totals.unsubscribes)} />
-        <StatCard
-          label="Audience"
-          value={audience.name || '—'}
-          hint={audience.id ? `List ${audience.id}` : undefined}
-        />
-      </div>
-
-      <div className="bg-white border border-slate-200 rounded-[28px] shadow-sm overflow-hidden">
-        <div className="px-6 py-5 border-b border-slate-100">
-          <h4 className="font-black text-slate-900">Campaigns this period</h4>
-        </div>
-        {campaigns.length === 0 ? (
-          <p className="p-8 text-sm font-bold text-slate-400">
-            No campaigns sent in this date range.
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">
-                  <th className="px-6 py-3">Campaign</th>
-                  <th className="px-4 py-3">Sent</th>
-                  <th className="px-4 py-3">Emails</th>
-                  <th className="px-4 py-3">Open rate</th>
-                  <th className="px-4 py-3">Click rate</th>
-                  <th className="px-6 py-3">Unsubs</th>
-                </tr>
-              </thead>
-              <tbody>
-                {campaigns.map((c) => (
-                  <tr key={c.id} className="border-b border-slate-50 last:border-0">
-                    <td className="px-6 py-3 font-bold text-slate-800 max-w-[240px] truncate">
-                      {c.title || c.id}
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 font-medium">
-                      {formatDay(c.sendDate)}
-                    </td>
-                    <td className="px-4 py-3 tabular-nums font-medium">
-                      {formatNum(c.emailsSent)}
-                    </td>
-                    <td className="px-4 py-3 tabular-nums font-medium">
-                      {c.openRate != null
-                        ? `${(Number(c.openRate) * 100).toFixed(1)}%`
-                        : '—'}
-                    </td>
-                    <td className="px-4 py-3 tabular-nums font-medium">
-                      {c.clickRate != null
-                        ? `${(Number(c.clickRate) * 100).toFixed(1)}%`
-                        : '—'}
-                    </td>
-                    <td className="px-6 py-3 tabular-nums font-medium">
-                      {formatNum(c.unsubscribes)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {report?.available !== false || campaigns.length > 0 ? (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatCard label="Audience size" value={formatNum(audience.memberCount)} />
+            <StatCard label="Campaigns sent" value={formatNum(totals.campaigns)} />
+            <StatCard label="Emails sent" value={formatNum(totals.emailsSent)} />
+            <StatCard
+              label="Avg open rate"
+              value={
+                totals.avgOpenRate != null
+                  ? `${(Number(totals.avgOpenRate) * 100).toFixed(1)}%`
+                  : '—'
+              }
+            />
           </div>
-        )}
-      </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+            <StatCard
+              label="Avg click rate"
+              value={
+                totals.avgClickRate != null
+                  ? `${(Number(totals.avgClickRate) * 100).toFixed(1)}%`
+                  : '—'
+              }
+            />
+            <StatCard label="Unsubscribes" value={formatNum(totals.unsubscribes)} />
+            <StatCard
+              label="Audience"
+              value={audience.name || '—'}
+              hint={audience.id ? `List ${audience.id}` : undefined}
+            />
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-[28px] shadow-sm overflow-hidden">
+            <div className="px-6 py-5 border-b border-slate-100">
+              <h4 className="font-black text-slate-900">Campaigns this period</h4>
+            </div>
+            {campaigns.length === 0 ? (
+              <p className="p-8 text-sm font-bold text-slate-400">
+                No campaigns sent in this date range.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">
+                      <th className="px-6 py-3">Campaign</th>
+                      <th className="px-4 py-3">Sent</th>
+                      <th className="px-4 py-3">Emails</th>
+                      <th className="px-4 py-3">Open rate</th>
+                      <th className="px-4 py-3">Click rate</th>
+                      <th className="px-6 py-3">Unsubs</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {campaigns.map((c) => (
+                      <tr key={c.id} className="border-b border-slate-50 last:border-0">
+                        <td className="px-6 py-3 font-bold text-slate-800 max-w-[240px] truncate">
+                          {c.title || c.id}
+                        </td>
+                        <td className="px-4 py-3 text-slate-500 font-medium">
+                          {formatDay(c.sendDate)}
+                        </td>
+                        <td className="px-4 py-3 tabular-nums font-medium">
+                          {formatNum(c.emailsSent)}
+                        </td>
+                        <td className="px-4 py-3 tabular-nums font-medium">
+                          {c.openRate != null
+                            ? `${(Number(c.openRate) * 100).toFixed(1)}%`
+                            : '—'}
+                        </td>
+                        <td className="px-4 py-3 tabular-nums font-medium">
+                          {c.clickRate != null
+                            ? `${(Number(c.clickRate) * 100).toFixed(1)}%`
+                            : '—'}
+                        </td>
+                        <td className="px-6 py-3 tabular-nums font-medium">
+                          {formatNum(c.unsubscribes)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      ) : null}
     </PanelShell>
   );
 }
@@ -520,6 +624,17 @@ export default function ClientPortalAnalyticsPanel({ client, dateFromMs, dateToM
 
   const firstEnabled = enabledTabs.find((t) => t.enabled)?.id || 'website';
   const [subTab, setSubTab] = useState(firstEnabled);
+  const [preset, setPreset] = useState('billing');
+  const [customFrom, setCustomFrom] = useState(() => toYmdLocal(dateFromMs || daysAgoStart(30)));
+  const [customTo, setCustomTo] = useState(() => toYmdLocal(dateToMs || Date.now()));
+
+  useEffect(() => {
+    // Keep custom inputs aligned when billing cycle changes and preset is billing.
+    if (preset === 'billing') {
+      setCustomFrom(toYmdLocal(dateFromMs || daysAgoStart(30)));
+      setCustomTo(toYmdLocal(dateToMs || Date.now()));
+    }
+  }, [dateFromMs, dateToMs, preset]);
 
   useEffect(() => {
     const current = enabledTabs.find((t) => t.id === subTab);
@@ -528,9 +643,14 @@ export default function ClientPortalAnalyticsPanel({ client, dateFromMs, dateToM
     }
   }, [enabledTabs, firstEnabled, subTab]);
 
+  const range = useMemo(
+    () => resolvePresetRange(preset, dateFromMs, dateToMs, customFrom, customTo),
+    [preset, dateFromMs, dateToMs, customFrom, customTo],
+  );
+
   return (
     <div className="space-y-6">
-      <div>
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
         <div className="flex items-center gap-3 mb-1">
           <div className="w-11 h-11 rounded-2xl bg-slate-100 flex items-center justify-center">
             <BarChart3 className="w-5 h-5 text-[#fd7414]" />
@@ -541,6 +661,55 @@ export default function ClientPortalAnalyticsPanel({ client, dateFromMs, dateToM
               Website · Email · Social · Ads
             </p>
           </div>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 shadow-sm space-y-3 w-full lg:w-auto lg:min-w-[360px]">
+          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
+            <CalendarRange className="w-3.5 h-3.5 text-[#fd7414]" />
+            Date range
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {PRESETS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setPreset(p.id)}
+                className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                  preset === p.id
+                    ? 'bg-[#fd7414] text-white'
+                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          {preset === 'custom' ? (
+            <div className="flex flex-col sm:flex-row gap-2">
+              <label className="flex-1 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                From
+                <input
+                  type="date"
+                  value={customFrom}
+                  onChange={(e) => setCustomFrom(e.target.value)}
+                  className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-[#fd7414]"
+                />
+              </label>
+              <label className="flex-1 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                To
+                <input
+                  type="date"
+                  value={customTo}
+                  onChange={(e) => setCustomTo(e.target.value)}
+                  className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-[#fd7414]"
+                />
+              </label>
+            </div>
+          ) : (
+            <p className="text-xs font-bold text-slate-500">
+              {toYmdLocal(range.fromMs)} → {toYmdLocal(range.toMs)}
+            </p>
+          )}
         </div>
       </div>
 
@@ -572,32 +741,32 @@ export default function ClientPortalAnalyticsPanel({ client, dateFromMs, dateToM
       {subTab === 'website' && clientHasActiveSeoRetainer(client) ? (
         <ClientPortalSeoPanel
           client={client}
-          dateFromMs={dateFromMs}
-          dateToMs={dateToMs}
+          dateFromMs={range.fromMs}
+          dateToMs={range.toMs}
         />
       ) : null}
 
       {subTab === 'email' && clientHasActiveEmailRetainer(client) ? (
         <EmailAnalyticsPanel
           client={client}
-          dateFromMs={dateFromMs}
-          dateToMs={dateToMs}
+          dateFromMs={range.fromMs}
+          dateToMs={range.toMs}
         />
       ) : null}
 
       {subTab === 'social' && clientHasActiveSocialMediaRetainer(client) ? (
         <SocialAnalyticsPanel
           client={client}
-          dateFromMs={dateFromMs}
-          dateToMs={dateToMs}
+          dateFromMs={range.fromMs}
+          dateToMs={range.toMs}
         />
       ) : null}
 
       {subTab === 'ads' && clientHasActiveAdsRetainer(client) ? (
         <AdsAnalyticsPanel
           client={client}
-          dateFromMs={dateFromMs}
-          dateToMs={dateToMs}
+          dateFromMs={range.fromMs}
+          dateToMs={range.toMs}
         />
       ) : null}
     </div>
