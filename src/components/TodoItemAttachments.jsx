@@ -25,6 +25,7 @@ export default function TodoItemAttachments({
   onAttachDriveFile,
   onRemove,
   compact = false,
+  maxAttachments = MAX_TODO_ATTACHMENTS,
 }) {
   const [uploading, setUploading] = React.useState(false);
   const [pickerOpen, setPickerOpen] = React.useState(false);
@@ -35,7 +36,7 @@ export default function TodoItemAttachments({
   const [pickerSearch, setPickerSearch] = React.useState('');
 
   const attachments = getTodoAttachments(item);
-  const atLimit = attachments.length >= MAX_TODO_ATTACHMENTS;
+  const atLimit = attachments.length >= maxAttachments;
   const clientFolderId = String(client?.googleDriveFolderId || '').trim();
 
   const openPicker = async () => {
@@ -229,7 +230,7 @@ export default function TodoItemAttachments({
                 )}
               </div>
               <div className="border-t border-slate-100 px-4 py-2 text-[10px] font-medium text-slate-400">
-                Choosing a file attaches it to this task. Upload puts the file in the folder you’re browsing.
+                Choosing a file attaches it here. Upload puts the file in the folder you’re browsing.
               </div>
             </div>
           </div>,

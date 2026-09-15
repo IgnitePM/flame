@@ -132,7 +132,9 @@ import { canMarkParentTodoDone } from './utils/todoSubtasks.js';
 import {
   addAttachmentToItem,
   buildDriveDocumentRecord,
+  getProjectAttachments,
   getTodoAttachments,
+  MAX_PROJECT_ATTACHMENTS,
   MAX_TODO_ATTACHMENTS,
   newContactId,
   normalizeClientContacts,
@@ -2957,6 +2959,64 @@ export default function App() {
     [clients, user?.email, myAdminDoc?.email, logClientActivity],
   );
 
+  /** Attach a Google Drive file to a custom project (+ client documents index). */
+  const attachProjectDriveFile = useCallback(
+    async (client, project, driveFile) => {
+      if (!client?.id || !project?.id || !driveFile?.id) {
+        throw new Error('Missing client, project, or Drive file.');
+      }
+      const existing = getProjectAttachments(project);
+      if (existing.length >= MAX_PROJECT_ATTACHMENTS) {
+        throw new Error(`Maximum ${MAX_PROJECT_ATTACHMENTS} attachments per project.`);
+      }
+
+      const record = buildDriveDocumentRecord({
+        driveFile,
+        uploadedBy: user?.email || myAdminDoc?.email || '',
+        linkedProjectId: project.id,
+        linkedProjectTitle: project.title || '',
+      });
+
+      if (
+        existing.some((a) => a.id === record.id || a.driveFileId === record.driveFileId)
+      ) {
+        return record;
+      }
+
+      await updateDoc(doc(db, 'projects', project.id), {
+        attachments: [...existing, record],
+      });
+
+      const freshClient = clients.find((c) => c.id === client.id) || client;
+      const existingDocs = Array.isArray(freshClient.documents) ? freshClient.documents : [];
+      if (
+        !existingDocs.some((d) => d.id === record.id || d.driveFileId === record.driveFileId)
+      ) {
+        await updateDoc(doc(db, 'clients', client.id), {
+          documents: [...existingDocs, record],
+        });
+      }
+
+      await logClientActivity({
+        clientId: client.id,
+        clientName: client.name || '',
+        type: 'file_upload',
+        title: `Drive file attached: ${record.name}`,
+        body: `Attached to project: ${project.title || project.id}`,
+        source: 'system',
+        meta: {
+          documentId: record.id,
+          driveFileId: record.driveFileId,
+          fileName: record.name,
+          sizeBytes: record.sizeBytes,
+          linkedProjectId: project.id,
+        },
+      });
+      return record;
+    },
+    [clients, user?.email, myAdminDoc?.email, logClientActivity],
+  );
+
   /** Remove a task/client attachment record (does not delete the Drive file). */
   const removeClientDocument = useCallback(
     async (client, documentId) => {
@@ -2968,6 +3028,23 @@ export default function App() {
         documentId,
       );
       await updateDoc(doc(db, 'clients', client.id), { documents, todoCycles });
+    },
+    [clients],
+  );
+
+  /** Remove a project attachment (and matching client documents entry). */
+  const removeProjectAttachment = useCallback(
+    async (client, project, documentId) => {
+      if (!project?.id || !documentId) return;
+      const next = getProjectAttachments(project).filter((a) => a.id !== documentId);
+      await updateDoc(doc(db, 'projects', project.id), { attachments: next });
+      if (client?.id) {
+        const freshClient = clients.find((c) => c.id === client.id) || client;
+        const documents = (freshClient.documents || []).filter((d) => d.id !== documentId);
+        if (documents.length !== (freshClient.documents || []).length) {
+          await updateDoc(doc(db, 'clients', client.id), { documents });
+        }
+      }
     },
     [clients],
   );
@@ -3480,6 +3557,8 @@ export default function App() {
     staffEmail: String(user?.email || myAdminDoc?.email || '').trim().toLowerCase(),
     attachClientDriveFile,
     removeClientDocument,
+    attachProjectDriveFile,
+    removeProjectAttachment,
     notifications: inboxNotifications,
     dismissNotification: dismissInboxNotification,
     dismissAllNotifications: dismissAllInboxNotifications,
@@ -3581,6 +3660,8 @@ export default function App() {
     deleteClientTodoItem,
     attachClientDriveFile,
     removeClientDocument,
+    attachProjectDriveFile,
+    removeProjectAttachment,
     todoCategoryKey,
     userTodos,
     updateUserTodos,
@@ -4428,7 +4509,12 @@ export default function App() {
                     </select>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Retainer / Billing Target</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                      Retainer or custom project
+                    </label>
+                    <p className="text-[11px] font-medium text-slate-500 -mt-1 mb-1">
+                      Change this to move hours off a retainer (e.g. SEO/Web) onto a custom project — updates cycle usage and carryover.
+                    </p>
                     <select
                       value={editValues.billingTarget || ''}
                       onChange={e => setEditValues({ ...editValues, billingTarget: e.target.value })}
@@ -4441,7 +4527,30 @@ export default function App() {
                         const retainers = client
                           ? getEnabledRetainerCategoryNames(client)
                           : [];
-                        const clientProjs = projects.filter(p => !p.archived && p.clientName === editValues.clientName && (p.status === 'active' || p.status === 'approved'));
+                        const clientProjs = projects
+                          .filter(
+                            (p) =>
+                              !p.archived &&
+                              p.clientName === editValues.clientName &&
+                              ['active', 'approved', 'closed', 'requested', 'estimate_sent'].includes(
+                                String(p.status || ''),
+                              ),
+                          )
+                          .sort((a, b) =>
+                            String(a.title || '').localeCompare(String(b.title || ''), undefined, {
+                              sensitivity: 'base',
+                            }),
+                          );
+                        const selectedProjectId = String(editValues.billingTarget || '').startsWith(
+                          'project_',
+                        )
+                          ? editValues.billingTarget.replace('project_', '')
+                          : '';
+                        const selectedMissing =
+                          selectedProjectId &&
+                          !clientProjs.some((p) => p.id === selectedProjectId)
+                            ? projects.find((p) => p.id === selectedProjectId)
+                            : null;
                         return (
                           <>
                             <optgroup label="Retainers">
@@ -4450,10 +4559,20 @@ export default function App() {
                                 <option key={name} value={`retainer_${name}`}>{name}</option>
                               ))}
                             </optgroup>
-                            {clientProjs.length > 0 && (
+                            {(clientProjs.length > 0 || selectedMissing) && (
                               <optgroup label="Custom Projects">
+                                {selectedMissing ? (
+                                  <option value={`project_${selectedMissing.id}`}>
+                                    {selectedMissing.title || 'Custom Project'} (current)
+                                  </option>
+                                ) : null}
                                 {clientProjs.map(p => (
-                                  <option key={p.id} value={`project_${p.id}`}>{p.title}</option>
+                                  <option key={p.id} value={`project_${p.id}`}>
+                                    {p.title}
+                                    {p.status && p.status !== 'active' && p.status !== 'approved'
+                                      ? ` (${p.status})`
+                                      : ''}
+                                  </option>
                                 ))}
                               </optgroup>
                             )}

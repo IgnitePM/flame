@@ -429,6 +429,12 @@ function SocialAnalyticsPanel({ client, dateFromMs, dateToMs }) {
 
   const totals = report?.totals || {};
   const pages = Array.isArray(report?.pages) ? report.pages : [];
+  const platforms = Array.isArray(report?.platforms) ? report.platforms : [];
+  const topPosts = Array.isArray(report?.topPosts) ? report.topPosts : [];
+  const maxPlatformEngagement = Math.max(
+    1,
+    ...platforms.map((p) => Number(p.engagement || p.impressions || 0)),
+  );
 
   return (
     <PanelShell
@@ -450,9 +456,74 @@ function SocialAnalyticsPanel({ client, dateFromMs, dateToMs }) {
         <StatCard label="Channels" value={formatNum(pages.length)} />
       </div>
 
+      {(totals.likes || totals.comments || totals.shares) ? (
+        <div className="grid grid-cols-3 gap-3">
+          <StatCard label="Likes / reactions" value={formatNum(totals.likes)} />
+          <StatCard label="Comments" value={formatNum(totals.comments)} />
+          <StatCard label="Shares" value={formatNum(totals.shares)} />
+        </div>
+      ) : null}
+
+      <div className="bg-white border border-slate-200 rounded-[28px] p-6 shadow-sm space-y-4">
+        <div>
+          <h4 className="font-black text-slate-900">By platform</h4>
+          <p className="text-xs text-slate-500 font-medium mt-1">
+            Rolled up from connected Planable channels in this date range
+          </p>
+        </div>
+        {platforms.length === 0 ? (
+          <p className="text-sm font-bold text-slate-400">No platform metrics yet.</p>
+        ) : (
+          <ul className="space-y-3">
+            {platforms.map((p) => {
+              const share = Math.min(
+                100,
+                Math.max(
+                  2,
+                  ((Number(p.engagement || p.impressions || 0) / maxPlatformEngagement) * 100) || 0,
+                ),
+              );
+              return (
+                <li key={p.platform}>
+                  <div className="flex items-center justify-between gap-3 text-sm mb-1">
+                    <span className="font-bold text-slate-800">
+                      {p.platform}
+                      <span className="text-slate-400 font-bold text-xs ml-2">
+                        {p.channels} channel{p.channels === 1 ? '' : 's'}
+                      </span>
+                    </span>
+                    <span className="tabular-nums font-black text-slate-900">
+                      {formatNum(p.engagement)} eng
+                      <span className="text-slate-400 font-bold text-xs ml-2">
+                        {formatNum(p.impressions)} impr
+                      </span>
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-[#fd7414]"
+                      style={{ width: `${share}%` }}
+                    />
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                    <span>Reach {formatNum(p.reach)}</span>
+                    {p.likes ? <span>Likes {formatNum(p.likes)}</span> : null}
+                    {p.comments ? <span>Comments {formatNum(p.comments)}</span> : null}
+                    {p.shares ? <span>Shares {formatNum(p.shares)}</span> : null}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
       <div className="bg-white border border-slate-200 rounded-[28px] shadow-sm overflow-hidden">
         <div className="px-6 py-5 border-b border-slate-100">
           <h4 className="font-black text-slate-900">Channels</h4>
+          <p className="text-xs text-slate-500 font-medium mt-0.5">
+            Individual connected pages in Planable
+          </p>
         </div>
         {pages.length === 0 ? (
           <p className="p-8 text-sm font-bold text-slate-400">
@@ -467,7 +538,8 @@ function SocialAnalyticsPanel({ client, dateFromMs, dateToMs }) {
                   <th className="px-4 py-3">Platform</th>
                   <th className="px-4 py-3">Impressions</th>
                   <th className="px-4 py-3">Reach</th>
-                  <th className="px-6 py-3">Engagement</th>
+                  <th className="px-4 py-3">Engagement</th>
+                  <th className="px-6 py-3">Likes</th>
                 </tr>
               </thead>
               <tbody>
@@ -476,7 +548,7 @@ function SocialAnalyticsPanel({ client, dateFromMs, dateToMs }) {
                     <td className="px-6 py-3 font-bold text-slate-800 max-w-[220px] truncate">
                       {p.name || p.id}
                     </td>
-                    <td className="px-4 py-3 font-medium text-slate-600 capitalize">
+                    <td className="px-4 py-3 font-medium text-slate-600">
                       {p.platform || p.type || '—'}
                     </td>
                     <td className="px-4 py-3 tabular-nums font-medium">
@@ -485,8 +557,66 @@ function SocialAnalyticsPanel({ client, dateFromMs, dateToMs }) {
                     <td className="px-4 py-3 tabular-nums font-medium">
                       {formatNum(p.reach)}
                     </td>
-                    <td className="px-6 py-3 tabular-nums font-medium">
+                    <td className="px-4 py-3 tabular-nums font-medium">
                       {formatNum(p.engagement)}
+                    </td>
+                    <td className="px-6 py-3 tabular-nums font-medium">
+                      {formatNum(p.likes)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-[28px] shadow-sm overflow-hidden">
+        <div className="px-6 py-5 border-b border-slate-100">
+          <h4 className="font-black text-slate-900">Top posts</h4>
+          <p className="text-xs text-slate-500 font-medium mt-0.5">
+            Highest engagement in this date range (when Planable has post metrics synced)
+          </p>
+        </div>
+        {topPosts.length === 0 ? (
+          <p className="p-8 text-sm font-bold text-slate-400">
+            No post metrics in this range yet. Posts need to be published and analytics synced in
+            Planable.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">
+                  <th className="px-6 py-3">Post</th>
+                  <th className="px-4 py-3">Platform</th>
+                  <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3">Engagement</th>
+                  <th className="px-4 py-3">Impr.</th>
+                  <th className="px-6 py-3">Reactions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topPosts.map((p) => (
+                  <tr key={p.id} className="border-b border-slate-50 last:border-0">
+                    <td className="px-6 py-3 font-bold text-slate-800 max-w-[280px]">
+                      <div className="truncate">{p.text || '(No caption)'}</div>
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5 truncate">
+                        {p.pageName}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 font-medium text-slate-600">{p.platform || '—'}</td>
+                    <td className="px-4 py-3 text-slate-500 font-medium">
+                      {formatDay(p.date)}
+                    </td>
+                    <td className="px-4 py-3 tabular-nums font-black text-slate-900">
+                      {formatNum(p.engagement)}
+                    </td>
+                    <td className="px-4 py-3 tabular-nums font-medium">
+                      {formatNum(p.impressions)}
+                    </td>
+                    <td className="px-6 py-3 tabular-nums font-medium">
+                      {formatNum(p.reactions || p.likes)}
                     </td>
                   </tr>
                 ))}

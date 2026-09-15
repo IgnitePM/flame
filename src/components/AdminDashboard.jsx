@@ -90,6 +90,7 @@ import RetainerCategoryStats from './RetainerCategoryStats.jsx';
 import TaskLogSessionDetail from './TaskLogSessionDetail.jsx';
 import TaskLogTimesheetRow from './TaskLogTimesheetRow.jsx';
 import TodoItemAttachments from './TodoItemAttachments.jsx';
+import ProjectAttachments from './ProjectAttachments.jsx';
 import TodoEstimateHoursSlider, {
   normalizeTodoEstimatedHours,
 } from './TodoEstimateHoursSlider.jsx';
@@ -215,6 +216,10 @@ function ClientCustomProjectsPanelInner({
   setManualTaskValues,
   user,
   onOpenTodoItemOptions,
+  attachProjectDriveFile,
+  removeProjectAttachment,
+  attachClientDriveFile,
+  removeClientDocument,
 }) {
   const c = client;
   const mStart = cycleStartMs;
@@ -450,6 +455,16 @@ function ClientCustomProjectsPanelInner({
                         </p>
                       )}
 
+                      {attachProjectDriveFile ? (
+                        <ProjectAttachments
+                          project={p}
+                          client={c}
+                          disabled={readOnly}
+                          onAttachDriveFile={attachProjectDriveFile}
+                          onRemove={removeProjectAttachment}
+                        />
+                      ) : null}
+
                       {/* Project to-do checklist (cycle-based like client Tasks) */}
                       <div className="mt-3 pt-3 border-t border-slate-100">
                         {(() => {
@@ -607,6 +622,24 @@ function ClientCustomProjectsPanelInner({
                                               )}
                                           </div>
                                         )}
+                                        {attachClientDriveFile ? (
+                                          <div className="pl-6">
+                                            <TodoItemAttachments
+                                              item={item}
+                                              client={c}
+                                              cycleStart={mStart}
+                                              categoryKey={catKey}
+                                              disabled={
+                                                readOnly ||
+                                                projectTodoSaving ||
+                                                isCycleLocked(c, mStart)
+                                              }
+                                              onAttachDriveFile={attachClientDriveFile}
+                                              onRemove={removeClientDocument}
+                                              compact
+                                            />
+                                          </div>
+                                        ) : null}
                                       </div>
                                     );
                                   })}
@@ -1061,6 +1094,8 @@ const AdminDashboard = ({
   setClientTodoItemDone,
   attachClientDriveFile,
   removeClientDocument,
+  attachProjectDriveFile,
+  removeProjectAttachment,
   todoCategoryKey,
   userTodos = [],
   updateUserTodos,
@@ -4688,7 +4723,8 @@ const AdminDashboard = ({
                         <p className="text-xs text-slate-500">
                           Retainer and custom-project clock-ins and expenses for{' '}
                           {new Date(mStart).toLocaleDateString()} –{' '}
-                          {new Date(mEnd).toLocaleDateString()}. Expand each
+                          {new Date(mEnd).toLocaleDateString()}. Use the pencil on a time entry to
+                          move hours between a retainer category and a custom project. Expand each
                           retainer category below for per-category detail.
                         </p>
                         {periodTasks.length === 0 &&
@@ -6983,6 +7019,10 @@ const AdminDashboard = ({
                       setManualTaskValues={setManualTaskValues}
                       user={user}
                       onOpenTodoItemOptions={openTodoEditOptionsModal}
+                      attachProjectDriveFile={attachProjectDriveFile}
+                      removeProjectAttachment={removeProjectAttachment}
+                      attachClientDriveFile={attachClientDriveFile}
+                      removeClientDocument={removeClientDocument}
                     />
                   )}
                   </div>
@@ -7033,6 +7073,10 @@ const AdminDashboard = ({
                       logAudit={logAudit}
                       readOnly={isRestrictedStaff}
                       onOpenTodoItemOptions={openTodoEditOptionsModal}
+                      attachProjectDriveFile={attachProjectDriveFile}
+                      removeProjectAttachment={removeProjectAttachment}
+                      attachClientDriveFile={attachClientDriveFile}
+                      removeClientDocument={removeClientDocument}
                     />
                     )}
                   </>

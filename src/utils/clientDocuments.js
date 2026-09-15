@@ -2,6 +2,7 @@ import { doc, getDoc, setDoc } from '../firebase.js';
 
 export const MAX_CLIENT_FILE_BYTES = 25 * 1024 * 1024;
 export const MAX_TODO_ATTACHMENTS = 10;
+export const MAX_PROJECT_ATTACHMENTS = 20;
 
 export function newDocumentId() {
   return `doc_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -71,6 +72,8 @@ export function buildClientDocumentRecord({
   linkedTodoText = null,
   linkedCategoryKey = null,
   linkedCycleStart = null,
+  linkedProjectId = null,
+  linkedProjectTitle = null,
   driveFileId = null,
   source = null,
 }) {
@@ -90,6 +93,8 @@ export function buildClientDocumentRecord({
       linkedCycleStart != null && linkedCycleStart !== ''
         ? Number(linkedCycleStart)
         : null,
+    linkedProjectId: linkedProjectId || null,
+    linkedProjectTitle: linkedProjectTitle || null,
     driveFileId: driveFileId || null,
     source: source || (driveFileId ? 'drive' : storagePath ? 'firebase' : null),
   };
@@ -103,6 +108,8 @@ export function buildDriveDocumentRecord({
   linkedTodoText = null,
   linkedCategoryKey = null,
   linkedCycleStart = null,
+  linkedProjectId = null,
+  linkedProjectTitle = null,
 }) {
   const driveFileId = String(driveFile?.id || '').trim();
   if (!driveFileId) throw new Error('Missing Drive file id.');
@@ -121,6 +128,8 @@ export function buildDriveDocumentRecord({
     linkedTodoText,
     linkedCategoryKey,
     linkedCycleStart,
+    linkedProjectId,
+    linkedProjectTitle,
     driveFileId,
     source: 'drive',
   });
@@ -128,6 +137,10 @@ export function buildDriveDocumentRecord({
 
 export function getTodoAttachments(item) {
   return Array.isArray(item?.attachments) ? item.attachments : [];
+}
+
+export function getProjectAttachments(project) {
+  return Array.isArray(project?.attachments) ? project.attachments : [];
 }
 
 export function addAttachmentToItem(item, record) {

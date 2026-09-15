@@ -191,6 +191,12 @@ export default function ClientCycleActivityPanel({
           title="Logged time & notes"
           empty={loggedTasks.length ? null : 'No time entries this cycle.'}
         >
+          {!isRestrictedStaff && startEditing ? (
+            <p className="text-[11px] font-medium text-slate-500 mb-2">
+              Use the pencil on a row to reassign hours from a retainer category to a custom project
+              (or the reverse).
+            </p>
+          ) : null}
           <ul className="space-y-2 max-h-72 overflow-y-auto pr-1">
             {loggedTasks.map((task) => (
               <li key={task.id}>

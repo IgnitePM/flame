@@ -8,6 +8,8 @@ import { clientHasActiveSocialMediaRetainer } from './lib/retainerAccess.mjs';
 /**
  * Portal/staff Planable social analytics proxy.
  * POST { clientId, dateFrom?: YYYY-MM-DD, dateTo?: YYYY-MM-DD }
+ *
+ * Returns page metrics, platform rollups, and top posts for the date range.
  */
 
 const PLANABLE_API = 'https://api.planable.io/api/v1';
@@ -24,6 +26,11 @@ function toIsoStart(ymdStr) {
 
 function toIsoEnd(ymdStr) {
   return `${ymdStr}T23:59:59.999Z`;
+}
+
+function ymdFromIso(iso) {
+  const s = String(iso || '');
+  return s.length >= 10 ? s.slice(0, 10) : '';
 }
 
 async function planableGet(token, path, params = {}) {
@@ -60,28 +67,42 @@ function pickMetric(obj, keys) {
   return 0;
 }
 
+function normalizePlatform(raw) {
+  const s = String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ');
+  if (!s) return 'Other';
+  if (s.includes('instagram') || s === 'ig') return 'Instagram';
+  if (s.includes('facebook') || s === 'fb') return 'Facebook';
+  if (s.includes('linkedin')) return 'LinkedIn';
+  if (s.includes('tiktok')) return 'TikTok';
+  if (s.includes('youtube') || s === 'yt') return 'YouTube';
+  if (s.includes('twitter') || s === 'x' || s.includes('x.com')) return 'X';
+  if (s.includes('threads')) return 'Threads';
+  if (s.includes('pinterest')) return 'Pinterest';
+  if (s.includes('google')) return 'Google';
+  return s.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function sumSnapshotMetrics(snapshots) {
   let impressions = 0;
   let reach = 0;
   let engagement = 0;
+  let likes = 0;
+  let comments = 0;
+  let shares = 0;
+  let clicks = 0;
+  let followers = 0;
   for (const snap of snapshots) {
     const platformBlocks = Object.entries(snap || {}).filter(
-      ([k, v]) => v && typeof v === 'object' && !['pageId', 'pageType', 'fetchedAt', 'id'].includes(k),
+      ([k, v]) =>
+        v &&
+        typeof v === 'object' &&
+        !['pageId', 'pageType', 'fetchedAt', 'id', 'postId'].includes(k),
     );
-    if (platformBlocks.length === 0) {
-      impressions += pickMetric(snap, ['impressions', 'impression', 'views', 'videoViews']);
-      reach += pickMetric(snap, ['reach', 'uniqueImpressions', 'followers']);
-      engagement += pickMetric(snap, [
-        'engagement',
-        'engagements',
-        'likes',
-        'comments',
-        'shares',
-        'reactions',
-      ]);
-      continue;
-    }
-    for (const [, block] of platformBlocks) {
+    const blocks = platformBlocks.length ? platformBlocks.map(([, b]) => b) : [snap];
+    for (const block of blocks) {
       impressions += pickMetric(block, [
         'impressions',
         'impression',
@@ -89,19 +110,71 @@ function sumSnapshotMetrics(snapshots) {
         'videoViews',
         'pageImpressions',
       ]);
-      reach += pickMetric(block, ['reach', 'uniqueImpressions', 'followers', 'pageFans']);
+      reach += pickMetric(block, ['reach', 'uniqueImpressions', 'pageReach']);
       engagement += pickMetric(block, [
         'engagement',
         'engagements',
-        'likes',
-        'comments',
-        'shares',
-        'reactions',
         'pageEngagedUsers',
       ]);
+      likes += pickMetric(block, ['likes', 'reactions', 'likeCount']);
+      comments += pickMetric(block, ['comments', 'commentCount', 'replies']);
+      shares += pickMetric(block, ['shares', 'reposts', 'retweets', 'shareCount']);
+      clicks += pickMetric(block, ['clicks', 'linkClicks', 'pageClicks']);
+      followers += pickMetric(block, ['followers', 'pageFans', 'subscribers']);
     }
   }
-  return { impressions, reach, engagement };
+  if (engagement <= 0 && (likes || comments || shares)) {
+    engagement = likes + comments + shares;
+  }
+  return { impressions, reach, engagement, likes, comments, shares, clicks, followers };
+}
+
+function extractPostMetrics(payload) {
+  const data = payload?.data && typeof payload.data === 'object' ? payload.data : payload;
+  if (!data || typeof data !== 'object') {
+    return { impressions: 0, engagement: 0, reactions: 0, reach: 0, likes: 0, comments: 0, shares: 0 };
+  }
+  const top = {
+    impressions: Number(data.impressions || 0),
+    engagement: Number(data.engagement || 0),
+    reactions: Number(data.reactions || 0),
+  };
+  const nested = sumSnapshotMetrics([data]);
+  return {
+    impressions: top.impressions || nested.impressions,
+    engagement: top.engagement || nested.engagement,
+    reactions: top.reactions || nested.likes,
+    reach: nested.reach,
+    likes: nested.likes || top.reactions,
+    comments: nested.comments,
+    shares: nested.shares,
+  };
+}
+
+function rollupPlatforms(pages) {
+  const map = new Map();
+  for (const p of pages) {
+    const platform = normalizePlatform(p.platform || p.type);
+    const prev = map.get(platform) || {
+      platform,
+      channels: 0,
+      impressions: 0,
+      reach: 0,
+      engagement: 0,
+      likes: 0,
+      comments: 0,
+      shares: 0,
+    };
+    prev.channels += 1;
+    prev.impressions += Number(p.impressions || 0);
+    prev.reach += Number(p.reach || 0);
+    prev.engagement += Number(p.engagement || 0);
+    prev.likes += Number(p.likes || 0);
+    prev.comments += Number(p.comments || 0);
+    prev.shares += Number(p.shares || 0);
+    map.set(platform, prev);
+  }
+  return [...map.values()].sort((a, b) => b.engagement - a.engagement || b.impressions - a.impressions);
 }
 
 export default async (req) => {
@@ -171,6 +244,8 @@ export default async (req) => {
           dateFrom,
           dateTo,
           pages: [],
+          platforms: [],
+          topPosts: [],
           totals: {},
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -187,6 +262,8 @@ export default async (req) => {
           dateFrom,
           dateTo,
           pages: [],
+          platforms: [],
+          topPosts: [],
           totals: {},
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -203,15 +280,32 @@ export default async (req) => {
         ? pagesPayload
         : [];
 
+    const pageNameById = new Map();
     const pages = [];
     let totalImpressions = 0;
     let totalReach = 0;
     let totalEngagement = 0;
+    let totalLikes = 0;
+    let totalComments = 0;
+    let totalShares = 0;
 
-    for (const page of rawPages.slice(0, 20)) {
+    for (const page of rawPages.slice(0, 25)) {
       const id = String(page.id || page._id || '');
       if (!id) continue;
-      let metrics = { impressions: 0, reach: 0, engagement: 0 };
+      const platform = normalizePlatform(page.type || page.pageType || page.platform);
+      const name = String(page.name || page.title || page.username || id);
+      pageNameById.set(id, { name, platform });
+
+      let metrics = {
+        impressions: 0,
+        reach: 0,
+        engagement: 0,
+        likes: 0,
+        comments: 0,
+        shares: 0,
+        clicks: 0,
+        followers: 0,
+      };
       try {
         const metricsPayload = await planableGet(token, `/pages/${encodeURIComponent(id)}/metrics`, {
           startDate: toIsoStart(dateFrom),
@@ -225,22 +319,107 @@ export default async (req) => {
             : [];
         metrics = sumSnapshotMetrics(snapshots);
       } catch (err) {
-        console.warn('[portal-planable] metrics', id, err?.message || err);
+        console.warn('[portal-planable] page metrics', id, err?.message || err);
       }
 
       totalImpressions += metrics.impressions;
       totalReach += metrics.reach;
       totalEngagement += metrics.engagement;
+      totalLikes += metrics.likes;
+      totalComments += metrics.comments;
+      totalShares += metrics.shares;
 
       pages.push({
         id,
-        name: String(page.name || page.title || page.username || id),
-        platform: String(page.type || page.pageType || page.platform || ''),
-        type: String(page.type || page.pageType || ''),
+        name,
+        platform,
+        type: platform,
         impressions: metrics.impressions,
         reach: metrics.reach,
         engagement: metrics.engagement,
+        likes: metrics.likes,
+        comments: metrics.comments,
+        shares: metrics.shares,
+        clicks: metrics.clicks,
+        followers: metrics.followers,
       });
+    }
+
+    const platforms = rollupPlatforms(pages);
+
+    // Top posts: list workspace posts, keep those scheduled/published in range, pull metrics.
+    let topPosts = [];
+    let postsWarning = '';
+    try {
+      const postsPayload = await planableGet(token, '/posts', {
+        workspaceId,
+        limit: 50,
+        offset: 0,
+      });
+      const rawPosts = Array.isArray(postsPayload?.data)
+        ? postsPayload.data
+        : Array.isArray(postsPayload)
+          ? postsPayload
+          : [];
+
+      const inRange = rawPosts
+        .map((p) => {
+          const when = ymdFromIso(p.scheduledAt || p.publishedAt || p.createdAt);
+          const status = String(p.status || '').toLowerCase();
+          const published =
+            status.includes('publish') ||
+            status === 'posted' ||
+            status === 'sent' ||
+            Boolean(p.scheduledAt);
+          return {
+            id: String(p.id || ''),
+            pageId: String(p.pageId || ''),
+            text: String(p.plainText || '').trim(),
+            status: String(p.status || ''),
+            when,
+            published,
+          };
+        })
+        .filter((p) => p.id && p.published && p.when && p.when >= dateFrom && p.when <= dateTo)
+        .slice(0, 20);
+
+      const scored = [];
+      for (const post of inRange) {
+        try {
+          const metricsPayload = await planableGet(
+            token,
+            `/posts/${encodeURIComponent(post.id)}/metrics`,
+          );
+          const m = extractPostMetrics(metricsPayload);
+          const pageMeta = pageNameById.get(post.pageId) || {};
+          scored.push({
+            id: post.id,
+            pageId: post.pageId,
+            pageName: pageMeta.name || post.pageId || '—',
+            platform: normalizePlatform(
+              metricsPayload?.data?.pageType || pageMeta.platform || '',
+            ),
+            text: post.text || '(No caption)',
+            date: post.when,
+            impressions: m.impressions,
+            engagement: m.engagement,
+            reactions: m.reactions,
+            likes: m.likes,
+            comments: m.comments,
+            shares: m.shares,
+            reach: m.reach,
+          });
+        } catch (err) {
+          console.warn('[portal-planable] post metrics', post.id, err?.message || err);
+        }
+      }
+
+      topPosts = scored
+        .sort((a, b) => b.engagement - a.engagement || b.impressions - a.impressions)
+        .slice(0, 12);
+    } catch (err) {
+      postsWarning = err?.message || 'Could not load post-level metrics.';
+      console.warn('[portal-planable] posts', postsWarning);
     }
 
     return new Response(
@@ -251,11 +430,17 @@ export default async (req) => {
         dateTo,
         workspaceId,
         pages,
+        platforms,
+        topPosts,
         totals: {
           impressions: totalImpressions,
           reach: totalReach,
           engagement: totalEngagement,
+          likes: totalLikes,
+          comments: totalComments,
+          shares: totalShares,
         },
+        ...(postsWarning ? { warning: postsWarning } : {}),
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     );
