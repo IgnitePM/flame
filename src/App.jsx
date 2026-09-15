@@ -4717,6 +4717,27 @@ export default function App() {
                     </p>
                   </div>
                   <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                      GA4 property ID
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={editingClient.ga4PropertyId ?? ''}
+                      onChange={(e) =>
+                        setEditingClient({
+                          ...editingClient,
+                          ga4PropertyId: e.target.value.replace(/[^\d]/g, ''),
+                        })
+                      }
+                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      placeholder="e.g. 123456789"
+                    />
+                    <p className="text-[10px] font-bold text-slate-400">
+                      Numeric Google Analytics 4 property ID (Admin → Config lists properties after GA4 is connected). Used for all-source traffic on the portal SEO tab.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">About</label>
                     <textarea
                       value={editingClient.companyDescription || ''}
@@ -5553,6 +5574,9 @@ export default function App() {
                           String(editingClient.seRankingSiteId || '').replace(/[^\d]/g, ''),
                         )
                       : null,
+                    ga4PropertyId: String(editingClient.ga4PropertyId || '')
+                      .replace(/[^\d]/g, '')
+                      .trim() || null,
                     ...normalizeCompanyProfileFields(editingClient),
                     ...normalizeClientConnectionFields(editingClient),
                     retainerCategoryEnabled: normalizeRetainerCategoryEnabled(

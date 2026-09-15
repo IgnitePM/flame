@@ -101,6 +101,7 @@ import EmailDigestCard from './EmailDigestCard.jsx';
 import FxRatesCard from './FxRatesCard.jsx';
 import GmailConnectCard from './GmailConnectCard.jsx';
 import DriveConnectCard from './DriveConnectCard.jsx';
+import Ga4ConnectCard from './Ga4ConnectCard.jsx';
 import ClientEmailComposeModal, {
   replySubject,
 } from './ClientEmailComposeModal.jsx';
@@ -7586,6 +7587,11 @@ const AdminDashboard = ({
           />
 
           <DriveConnectCard
+            canManage={canBilling}
+            onTabFocus={() => setAdminTab?.('tasks')}
+          />
+
+          <Ga4ConnectCard
             canManage={canBilling}
             onTabFocus={() => setAdminTab?.('tasks')}
           />
