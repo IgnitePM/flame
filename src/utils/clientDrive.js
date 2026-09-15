@@ -36,7 +36,34 @@ export async function uploadFileToDriveFolder(folderId, file) {
     throw new Error(startData.error || 'Could not start Drive upload.');
   }
 
-  const put = await fetch(startData.uploadUrl, {
+  return putResumableDriveUpload(startData.uploadUrl, file);
+}
+
+/**
+ * Portal-safe upload into the client's "Shared with client" folder only.
+ */
+export async function uploadFileToClientSharedFolder(clientId, file) {
+  const validationError = validateClientUploadFile(file);
+  if (validationError) throw new Error(validationError);
+  if (!clientId) throw new Error('Missing client.');
+
+  const start = await authedFetch('/.netlify/functions/drive-upload-client-shared', {
+    clientId,
+    name: file.name,
+    mimeType: file.type || 'application/octet-stream',
+    sizeBytes: file.size,
+    origin: typeof window !== 'undefined' ? window.location.origin : undefined,
+  });
+  const startData = await start.json().catch(() => ({}));
+  if (!start.ok || !startData.uploadUrl) {
+    throw new Error(startData.error || 'Could not start Drive upload.');
+  }
+
+  return putResumableDriveUpload(startData.uploadUrl, file);
+}
+
+async function putResumableDriveUpload(uploadUrl, file) {
+  const put = await fetch(uploadUrl, {
     method: 'PUT',
     headers: {
       'Content-Type': file.type || 'application/octet-stream',
@@ -46,7 +73,7 @@ export async function uploadFileToDriveFolder(folderId, file) {
   }).catch((err) => {
     throw new Error(
       err?.message === 'Failed to fetch'
-        ? 'Upload blocked by the browser (CORS). Try again after refresh — if it keeps failing, use a smaller file or attach an existing Drive file.'
+        ? 'Upload blocked by the browser (CORS). Try again after refresh — if it keeps failing, use a smaller file.'
         : err?.message || 'Upload failed.',
     );
   });
