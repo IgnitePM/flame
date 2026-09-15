@@ -17,7 +17,7 @@ export function buildRetainerCategorySummary(catStats, { baseFallback = 0 } = {}
   const addonThis = Number(catStats?.addonHoursThisCycle ?? 0);
   const hourMoveNet = Number(catStats?.hourMoveNet ?? 0);
   const adjustedAllotted = Number(
-    catStats?.adjustedAllotted ?? baseActive + carryover + addonPrior + addonThis + hourMoveNet,
+    catStats?.adjustedAllotted ?? baseActive + carryover + addonThis + hourMoveNet,
   );
   const remaining = adjustedAllotted - used;
   const isOver =

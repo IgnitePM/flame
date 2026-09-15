@@ -97,33 +97,61 @@ export const formatTime = (ms) => {
 // Dynamic Billing Period & Global Carryover Logic.
 // billingDay 29-31 is clamped to the last day of short months so cycle
 // boundaries never roll into the wrong month (e.g. Feb 31 → Mar 3).
+const clampBillingDay = (y, m, d) => {
+  const norm = new Date(y, m, 1); // normalize month overflow/underflow
+  const daysInMonth = new Date(norm.getFullYear(), norm.getMonth() + 1, 0).getDate();
+  return Math.min(d, daysInMonth);
+};
+
+/** Start timestamp of the billing cycle that begins on billingDay in year/month. */
+export const billingCycleStartAt = (billingDay, year, month) => {
+  let y = year;
+  let m = month;
+  while (m < 0) {
+    m += 12;
+    y--;
+  }
+  while (m > 11) {
+    m -= 12;
+    y++;
+  }
+  return new Date(y, m, clampBillingDay(y, m, billingDay), 0, 0, 0, 0).getTime();
+};
+
+/** Next cycle start after `cycleStartMs` (exclusive end of that cycle). */
+export const nextBillingCycleStart = (billingDay, cycleStartMs) => {
+  const d = new Date(cycleStartMs);
+  return billingCycleStartAt(billingDay, d.getFullYear(), d.getMonth() + 1);
+};
+
+/** Previous cycle start before `cycleStartMs`. */
+export const prevBillingCycleStart = (billingDay, cycleStartMs) => {
+  const d = new Date(cycleStartMs);
+  return billingCycleStartAt(billingDay, d.getFullYear(), d.getMonth() - 1);
+};
+
 export const getBillingPeriod = (billingDay = 1, offsetMonths = 0) => {
-  const clampDay = (y, m, d) => {
-    const norm = new Date(y, m, 1); // normalize month overflow/underflow
-    const daysInMonth = new Date(norm.getFullYear(), norm.getMonth() + 1, 0).getDate();
-    return Math.min(d, daysInMonth);
-  };
   const now = new Date();
   let currentMonth = now.getMonth();
   let currentYear = now.getFullYear();
 
-  if (now.getDate() < clampDay(currentYear, currentMonth, billingDay)) currentMonth--;
+  if (now.getDate() < clampBillingDay(currentYear, currentMonth, billingDay)) {
+    currentMonth--;
+  }
   currentMonth += offsetMonths;
 
-  while (currentMonth < 0) { currentMonth += 12; currentYear--; }
-  while (currentMonth > 11) { currentMonth -= 12; currentYear++; }
+  while (currentMonth < 0) {
+    currentMonth += 12;
+    currentYear--;
+  }
+  while (currentMonth > 11) {
+    currentMonth -= 12;
+    currentYear++;
+  }
 
-  const start = new Date(
-    currentYear, currentMonth, clampDay(currentYear, currentMonth, billingDay), 0, 0, 0, 0,
-  ).getTime();
-
-  let nextMonth = currentMonth + 1;
-  let nextYear = currentYear;
-  if (nextMonth > 11) { nextMonth = 0; nextYear++; }
+  const start = billingCycleStartAt(billingDay, currentYear, currentMonth);
   // End = the instant before the next cycle starts.
-  const end = new Date(
-    nextYear, nextMonth, clampDay(nextYear, nextMonth, billingDay), 0, 0, 0, 0,
-  ).getTime() - 1;
+  const end = nextBillingCycleStart(billingDay, start) - 1;
 
   return { start, end };
 };
@@ -173,16 +201,6 @@ export const computeGlobalRetainerStats = (client, mStart, mEnd, deps) => {
   const perCategoryReset = client.carryoverResetByCategory || {};
 
   const billingDay = client.billingDay || 1;
-  const cycleAnchor = new Date(mStart);
-  // Clamp like getBillingPeriod so billingDay 29-31 doesn't roll the
-  // previous-cycle anchor into the wrong month.
-  const prevStart = (() => {
-    let y = cycleAnchor.getFullYear();
-    let m = cycleAnchor.getMonth() - 1;
-    if (m < 0) { m += 12; y--; }
-    const daysInMonth = new Date(y, m + 1, 0).getDate();
-    return new Date(y, m, Math.min(billingDay, daysInMonth), 0, 0, 0, 0).getTime();
-  })();
 
   // Activity rows are matched by clientId when stamped (rename-safe);
   // legacy rows fall back to the name match.
@@ -198,11 +216,6 @@ export const computeGlobalRetainerStats = (client, mStart, mEnd, deps) => {
     }
     return a.date >= winStart && a.date < winEndExclusive;
   };
-
-  const previousCycleAddons = addons
-    .filter((a) => a.clientId === client.id && addonInWindow(a, prevStart, mStart))
-    .filter((a) => !clientStartMs || a.date >= clientStartMs)
-    .filter((a) => !globalResetMs || a.date >= globalResetMs);
 
   const retainerCategories = getEnabledRetainerCategoryNames(client);
   const normalizeCategory = (value) =>
@@ -290,10 +303,11 @@ export const computeGlobalRetainerStats = (client, mStart, mEnd, deps) => {
       return;
     }
 
-    // Carryover = surplus/deficit from the billing period immediately before this one
-    // (not lifetime cumulative). Prorate allotment if the client started mid-period.
-    const periodLen = mStart - prevStart;
-    if (periodLen <= 0 || effectiveStartMs >= mStart) {
+    // Carryover = ending remaining from prior cycles (rolling), not base−usage.
+    // Walking every completed cycle since the category became active means a
+    // deficit that started earlier keeps compounding instead of resetting when
+    // a later cycle is merely "over base but under available."
+    if (effectiveStartMs >= mStart) {
       perCategory[cat] = {
         isDollar: catIsDollar,
         baseActive: isPaused ? 0 : base,
@@ -302,39 +316,81 @@ export const computeGlobalRetainerStats = (client, mStart, mEnd, deps) => {
       return;
     }
 
-    const allottedPrev =
-      effectiveStartMs <= prevStart
-        ? base
-        : base * ((mStart - effectiveStartMs) / periodLen);
+    // Rewind to the billing cycle that contains (or starts at) effectiveStartMs.
+    let walkStart = mStart;
+    let guard = 0;
+    while (walkStart > effectiveStartMs && guard < 240) {
+      walkStart = prevBillingCycleStart(billingDay, walkStart);
+      guard += 1;
+    }
 
-    const prevTasks = !catIsDollar
-      ? pastTasksCat.filter(
-          (t) => t.clockInTime >= prevStart && t.clockInTime < mStart,
-        )
-      : [];
-    const prevExps = pastExpsCat.filter((e) => e.date >= prevStart && e.date < mStart);
+    let carry = 0;
+    let pStart = walkStart;
+    guard = 0;
+    while (pStart < mStart && guard < 240) {
+      guard += 1;
+      const pEnd = nextBillingCycleStart(billingDay, pStart);
+      if (pEnd <= pStart) break;
 
-    const prevTaskHours =
-      !catIsDollar
-        ? prevTasks.reduce((acc, t) => acc + durationOf(t), 0) / 3600000
+      if (effectiveStartMs >= pEnd) {
+        pStart = pEnd;
+        continue;
+      }
+
+      const periodLen = pEnd - pStart;
+      const allotted =
+        effectiveStartMs <= pStart
+          ? base
+          : base * ((pEnd - Math.max(effectiveStartMs, pStart)) / periodLen);
+
+      const periodTasks = !catIsDollar
+        ? pastTasksCat.filter(
+            (t) => t.clockInTime >= pStart && t.clockInTime < pEnd,
+          )
+        : [];
+      const periodExps = pastExpsCat.filter(
+        (e) => e.date >= pStart && e.date < pEnd,
+      );
+
+      const periodTaskHours = !catIsDollar
+        ? periodTasks.reduce((acc, t) => acc + durationOf(t), 0) / 3600000
         : 0;
-    const prevExpUsed = catIsDollar
-      ? prevExps.reduce((acc, e) => acc + Number(e.finalCost || 0), 0)
-      : prevExps.reduce(
-          (acc, e) => acc + resolveExpenseEquivalentHours(client, e, cat),
-          0,
-        );
+      const periodExpUsed = catIsDollar
+        ? periodExps.reduce((acc, e) => acc + Number(e.finalCost || 0), 0)
+        : periodExps.reduce(
+            (acc, e) => acc + resolveExpenseEquivalentHours(client, e, cat),
+            0,
+          );
 
-    const carryover = allottedPrev - (prevTaskHours + prevExpUsed);
+      const periodAddons = addons
+        .filter((a) => a.clientId === client.id && addonInWindow(a, pStart, pEnd))
+        .filter((a) => !clientStartMs || a.date >= clientStartMs)
+        .filter((a) => !effectiveResetMs || a.date >= effectiveResetMs);
+      const periodAddonByCat = allocateAddonHoursByCategory(periodAddons);
+      const periodAddon = catIsDollar ? 0 : Number(periodAddonByCat[cat] || 0);
+
+      let periodMove = 0;
+      if (!catIsDollar) {
+        const periodMoves = client.retainerHourMovesByCycle?.[String(pStart)] || [];
+        periodMoves.forEach((m) => {
+          const h = Number(m.hours || 0);
+          if (!Number.isFinite(h) || h <= 0 || m.from === m.to) return;
+          if (m.from === cat) periodMove -= h;
+          if (m.to === cat) periodMove += h;
+        });
+      }
+
+      const available = allotted + carry + periodAddon + periodMove;
+      carry = available - (periodTaskHours + periodExpUsed);
+      pStart = pEnd;
+    }
 
     perCategory[cat] = {
       isDollar: catIsDollar,
       baseActive: isPaused ? 0 : base,
-      carryover,
+      carryover: carry,
     };
   });
-
-  const prevAddonByCat = allocateAddonHoursByCategory(previousCycleAddons);
 
   const timelineEndMs = (t) => {
     if (t.status === 'active') {
@@ -418,19 +474,21 @@ export const computeGlobalRetainerStats = (client, mStart, mEnd, deps) => {
       (categoryBreakdown[cat] || 0) + expenseUsageAmount(client, e, cat);
   });
 
-  // Finalize per-category totals: base + carryover + prior-cycle add-ons + this cycle add-ons + hour moves.
+  // Finalize per-category totals: base + rolling carryover + this-cycle add-ons + hour moves.
+  // Prior-cycle add-ons are already reflected inside carryover (ending remaining), so they
+  // must not be added again here.
   Object.keys(perCategory).forEach((cat) => {
     const used = Number(categoryBreakdown?.[cat] || 0);
     const baseActive = Number(perCategory[cat]?.baseActive || 0);
     const catCarry = Number(perCategory[cat]?.carryover || 0);
-    const prevAdd = Number(prevAddonByCat[cat] || 0);
     const currAdd = Number(currAddonByCat[cat] || 0);
     const move = Number(netMove[cat] || 0);
-    const adjustedAllottedCat = baseActive + catCarry + prevAdd + currAdd + move;
+    const adjustedAllottedCat = baseActive + catCarry + currAdd + move;
     perCategory[cat] = {
       ...perCategory[cat],
       used,
-      addonHoursPriorCycle: prevAdd,
+      // Kept for older UI callers; always 0 so it is not shown as a separate additive line.
+      addonHoursPriorCycle: 0,
       addonHoursThisCycle: currAdd,
       hourMoveNet: move,
       adjustedAllotted: adjustedAllottedCat,

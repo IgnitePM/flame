@@ -2,14 +2,23 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArrowDownRight,
   ArrowUpRight,
+  LayoutDashboard,
   LineChart,
   Loader2,
   Minus,
   MousePointerClick,
   RefreshCw,
+  Search,
   TrendingUp,
 } from 'lucide-react';
 import { authedFetch } from '../utils/authedFetch.js';
+
+const SEO_TABS = [
+  { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { id: 'traffic', label: 'Website Traffic', icon: TrendingUp },
+  { id: 'gsc', label: 'Search Console', icon: MousePointerClick },
+  { id: 'keywords', label: 'Keyword Rankings', icon: Search },
+];
 
 function formatDay(ymd) {
   if (!ymd) return '';
@@ -150,6 +159,7 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [report, setReport] = useState(null);
+  const [seoTab, setSeoTab] = useState('overview');
 
   const range = useMemo(() => {
     const from = dateFromMs
@@ -240,7 +250,7 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
-          <h2 className="text-3xl font-black text-slate-900">SEO rankings</h2>
+          <h2 className="text-3xl font-black text-slate-900">SEO</h2>
           <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px] mt-1">
             {p.title || p.domain || 'SE Ranking'} · {formatDay(report.dateFrom)} –{' '}
             {formatDay(report.dateTo)}
@@ -255,314 +265,340 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
         </button>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard
-          label="Visibility"
-          value={
-            p.visibilityPercent != null ? `${Number(p.visibilityPercent).toFixed(1)}%` : '—'
-          }
-          hint={
-            <WowBadge delta={wow.visibility?.delta} digits={1} suffix=" pts" />
-          }
-        />
-        <StatCard
-          label="Avg position"
-          value={p.todayAvg != null ? Number(p.todayAvg).toFixed(1) : '—'}
-          hint={
-            <WowBadge delta={wow.avgPosition?.delta} digits={1} invert />
-          }
-        />
-        <StatCard label="Top 10 keywords" value={p.top10 ?? 0} />
-        <StatCard
-          label="Week-over-week"
-          value={
-            <span className="inline-flex items-center gap-3 text-lg">
-              <span className="text-emerald-600 inline-flex items-center gap-1">
-                <ArrowUpRight className="w-5 h-5" />
-                {wow.keywordsImproved ?? 0}
-              </span>
-              <span className="text-rose-500 inline-flex items-center gap-1">
-                <ArrowDownRight className="w-5 h-5" />
-                {wow.keywordsDeclined ?? 0}
-              </span>
-            </span>
-          }
-          hint="Keywords up / down vs ~7 days ago"
-        />
+      <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+        {SEO_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setSeoTab(tab.id)}
+            className={`shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+              seoTab === tab.id
+                ? 'bg-[#fd7414] text-white shadow-sm'
+                : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+            }`}
+          >
+            <tab.icon className="w-3.5 h-3.5" />
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white border border-slate-200 rounded-[28px] p-6 shadow-sm">
-          <div className="flex items-start justify-between gap-3 mb-1">
-            <div>
-              <h3 className="font-black text-slate-900">Visibility trend</h3>
-              <p className="text-xs text-slate-500 font-medium mt-1">
-                Higher is better · this reporting period
-              </p>
-            </div>
-            <WowBadge delta={wow.visibility?.delta} digits={1} suffix=" pts" />
+      {seoTab === 'overview' ? (
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatCard
+              label="Visibility"
+              value={
+                p.visibilityPercent != null
+                  ? `${Number(p.visibilityPercent).toFixed(1)}%`
+                  : '—'
+              }
+              hint={<WowBadge delta={wow.visibility?.delta} digits={1} suffix=" pts" />}
+            />
+            <StatCard
+              label="Avg position"
+              value={p.todayAvg != null ? Number(p.todayAvg).toFixed(1) : '—'}
+              hint={<WowBadge delta={wow.avgPosition?.delta} digits={1} invert />}
+            />
+            <StatCard label="Top 10 keywords" value={p.top10 ?? 0} />
+            <StatCard
+              label="Week-over-week"
+              value={
+                <span className="inline-flex items-center gap-3 text-lg">
+                  <span className="text-emerald-600 inline-flex items-center gap-1">
+                    <ArrowUpRight className="w-5 h-5" />
+                    {wow.keywordsImproved ?? 0}
+                  </span>
+                  <span className="text-rose-500 inline-flex items-center gap-1">
+                    <ArrowDownRight className="w-5 h-5" />
+                    {wow.keywordsDeclined ?? 0}
+                  </span>
+                </span>
+              }
+              hint="Keywords up / down vs ~7 days ago"
+            />
           </div>
-          <Sparkline points={visTrend} className="mt-4" />
-          {wow.visibility?.priorDate ? (
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-3">
-              WoW: {formatDay(wow.visibility.priorDate)} →{' '}
-              {formatDay(wow.visibility.currentDate)}
-            </p>
-          ) : null}
-        </div>
-        <div className="bg-white border border-slate-200 rounded-[28px] p-6 shadow-sm">
-          <div className="flex items-start justify-between gap-3 mb-1">
-            <div>
-              <h3 className="font-black text-slate-900">Average position trend</h3>
-              <p className="text-xs text-slate-500 font-medium mt-1">
-                Lower is better · this reporting period
-              </p>
-            </div>
-            <WowBadge delta={wow.avgPosition?.delta} digits={1} invert />
-          </div>
-          <Sparkline points={posTrend} invert className="mt-4" />
-          {wow.avgPosition?.priorDate ? (
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-3">
-              WoW: {formatDay(wow.avgPosition.priorDate)} →{' '}
-              {formatDay(wow.avgPosition.currentDate)}
-            </p>
-          ) : null}
-        </div>
-      </div>
 
-      <div className="bg-white border border-slate-200 rounded-[28px] p-6 shadow-sm space-y-5">
-        <div className="flex items-start gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-slate-100 flex items-center justify-center shrink-0">
-            <TrendingUp className="w-5 h-5 text-[#fd7414]" />
-          </div>
-          <div>
-            <h3 className="font-black text-slate-900">Website traffic (all sources)</h3>
-            <p className="text-xs text-slate-500 font-medium mt-1">
-              Google Analytics 4 · sessions by channel for this reporting period
-            </p>
-          </div>
-        </div>
-
-        {!analytics.available ? (
-          <p className="text-sm font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3">
-            {analytics.warning || 'Google Analytics data is not available yet.'}
-          </p>
-        ) : (
-          <>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <StatCard label="Sessions" value={formatNum(analytics.sessions)} />
-              <StatCard label="Users" value={formatNum(analytics.users)} />
-              <StatCard label="New users" value={formatNum(analytics.newUsers)} />
-              <StatCard
-                label="Engagement rate"
-                value={
-                  analytics.engagementRate != null
-                    ? `${Number(analytics.engagementRate).toFixed(1)}%`
-                    : '—'
-                }
-                hint={
-                  analytics.avgSessionDuration != null
-                    ? `Avg session ${formatDuration(analytics.avgSessionDuration)}`
-                    : undefined
-                }
-              />
-            </div>
-            {Array.isArray(analytics.channels) && analytics.channels.length > 0 ? (
-              <div className="space-y-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                  Traffic sources
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="bg-white border border-slate-200 rounded-[28px] p-6 shadow-sm">
+              <div className="flex items-start justify-between gap-3 mb-1">
+                <div>
+                  <h3 className="font-black text-slate-900">Visibility trend</h3>
+                  <p className="text-xs text-slate-500 font-medium mt-1">
+                    Higher is better · this reporting period
+                  </p>
+                </div>
+                <WowBadge delta={wow.visibility?.delta} digits={1} suffix=" pts" />
+              </div>
+              <Sparkline points={visTrend} className="mt-4" />
+              {wow.visibility?.priorDate ? (
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-3">
+                  WoW: {formatDay(wow.visibility.priorDate)} →{' '}
+                  {formatDay(wow.visibility.currentDate)}
                 </p>
-                <ul className="space-y-2">
-                  {analytics.channels.map((ch) => (
-                    <li key={ch.channel}>
-                      <div className="flex items-center justify-between gap-3 text-sm mb-1">
-                        <span className="font-bold text-slate-800">{ch.channel}</span>
-                        <span className="tabular-nums font-black text-slate-900">
-                          {formatNum(ch.sessions)}
-                          <span className="text-slate-400 font-bold text-xs ml-2">
-                            {Number(ch.share || 0).toFixed(0)}%
-                          </span>
-                        </span>
-                      </div>
-                      <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-[#fd7414]"
-                          style={{
-                            width: `${Math.min(100, Math.max(2, Number(ch.share) || 0))}%`,
-                          }}
-                        />
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+              ) : null}
+            </div>
+            <div className="bg-white border border-slate-200 rounded-[28px] p-6 shadow-sm">
+              <div className="flex items-start justify-between gap-3 mb-1">
+                <div>
+                  <h3 className="font-black text-slate-900">Average position trend</h3>
+                  <p className="text-xs text-slate-500 font-medium mt-1">
+                    Lower is better · this reporting period
+                  </p>
+                </div>
+                <WowBadge delta={wow.avgPosition?.delta} digits={1} invert />
               </div>
-            ) : null}
-          </>
-        )}
-      </div>
-
-      <div className="bg-white border border-slate-200 rounded-[28px] p-6 shadow-sm space-y-5">
-        <div className="flex items-start gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-slate-100 flex items-center justify-center shrink-0">
-            <MousePointerClick className="w-5 h-5 text-[#fd7414]" />
-          </div>
-          <div>
-            <h3 className="font-black text-slate-900">Google Search Console</h3>
-            <p className="text-xs text-slate-500 font-medium mt-1">
-              Organic search queries via SE Ranking (not all-site traffic)
-            </p>
+              <Sparkline points={posTrend} invert className="mt-4" />
+              {wow.avgPosition?.priorDate ? (
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-3">
+                  WoW: {formatDay(wow.avgPosition.priorDate)} →{' '}
+                  {formatDay(wow.avgPosition.currentDate)}
+                </p>
+              ) : null}
+            </div>
           </div>
         </div>
+      ) : null}
 
-        {traffic.warning && !traffic.clicks && traffic.source !== 'seo_potential' ? (
-          <p className="text-sm font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3">
-            {traffic.warning}
-            {traffic.estimatedTraffic != null ? (
-              <span className="block mt-2 text-slate-600 font-medium">
-                Estimated organic traffic potential:{' '}
-                <span className="font-black text-slate-900">
-                  {formatNum(traffic.estimatedTraffic)}
-                </span>
-                {traffic.estimatedTrafficValue != null ? (
-                  <>
-                    {' '}
-                    · est. value ${formatNum(traffic.estimatedTrafficValue, 0)}
-                  </>
-                ) : null}
-              </span>
-            ) : null}
-          </p>
-        ) : (
-          <>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <StatCard label="Clicks" value={formatNum(traffic.clicks)} />
-              <StatCard label="Impressions" value={formatNum(traffic.impressions)} />
-              <StatCard
-                label="Avg CTR"
-                value={
-                  traffic.avgCtr != null ? `${Number(traffic.avgCtr).toFixed(1)}%` : '—'
-                }
-              />
-              <StatCard
-                label="GSC avg position"
-                value={
-                  traffic.avgPosition != null
-                    ? Number(traffic.avgPosition).toFixed(1)
-                    : '—'
-                }
-              />
+      {seoTab === 'traffic' ? (
+        <div className="bg-white border border-slate-200 rounded-[28px] p-6 shadow-sm space-y-5">
+          <div className="flex items-start gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-slate-100 flex items-center justify-center shrink-0">
+              <TrendingUp className="w-5 h-5 text-[#fd7414]" />
             </div>
-            {traffic.estimatedTraffic != null ? (
-              <p className="text-xs font-medium text-slate-500 flex items-center gap-2">
-                <TrendingUp className="w-3.5 h-3.5 text-[#fd7414]" />
-                SE Ranking estimated traffic potential:{' '}
-                <span className="font-black text-slate-800">
-                  {formatNum(traffic.estimatedTraffic)}
-                </span>
-                {traffic.estimatedTrafficValue != null ? (
-                  <span>· ${formatNum(traffic.estimatedTrafficValue, 0)} value</span>
-                ) : null}
+            <div>
+              <h3 className="font-black text-slate-900">Website traffic (all sources)</h3>
+              <p className="text-xs text-slate-500 font-medium mt-1">
+                Google Analytics 4 · sessions by channel for this reporting period
               </p>
-            ) : null}
-            {Array.isArray(traffic.queries) && traffic.queries.length > 0 ? (
-              <div className="overflow-x-auto rounded-2xl border border-slate-100">
-                <table className="w-full text-left text-sm">
-                  <thead>
-                    <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100 bg-slate-50/80">
-                      <th className="px-4 py-3">Top query</th>
-                      <th className="px-3 py-3">Clicks</th>
-                      <th className="px-3 py-3">Impr.</th>
-                      <th className="px-3 py-3">CTR</th>
-                      <th className="px-4 py-3">Avg pos</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {traffic.queries.map((q) => (
-                      <tr
-                        key={q.query}
-                        className="border-b border-slate-50 last:border-0"
-                      >
-                        <td className="px-4 py-2.5 font-bold text-slate-800 max-w-[260px] truncate">
-                          {q.query}
-                        </td>
-                        <td className="px-3 py-2.5 tabular-nums font-medium">
-                          {formatNum(q.clicks)}
-                        </td>
-                        <td className="px-3 py-2.5 tabular-nums font-medium text-slate-600">
-                          {formatNum(q.impressions)}
-                        </td>
-                        <td className="px-3 py-2.5 tabular-nums font-medium text-slate-600">
-                          {Number(q.ctr || 0).toFixed(1)}%
-                        </td>
-                        <td className="px-4 py-2.5 tabular-nums font-medium">
-                          {q.avg != null ? Number(q.avg).toFixed(1) : '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : null}
-          </>
-        )}
-      </div>
+            </div>
+          </div>
 
-      <div className="bg-white border border-slate-200 rounded-[28px] shadow-sm overflow-hidden">
-        <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between gap-3">
-          <div>
+          {!analytics.available ? (
+            <p className="text-sm font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3">
+              {analytics.warning || 'Google Analytics data is not available yet.'}
+            </p>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <StatCard label="Sessions" value={formatNum(analytics.sessions)} />
+                <StatCard label="Users" value={formatNum(analytics.users)} />
+                <StatCard label="New users" value={formatNum(analytics.newUsers)} />
+                <StatCard
+                  label="Engagement rate"
+                  value={
+                    analytics.engagementRate != null
+                      ? `${Number(analytics.engagementRate).toFixed(1)}%`
+                      : '—'
+                  }
+                  hint={
+                    analytics.avgSessionDuration != null
+                      ? `Avg session ${formatDuration(analytics.avgSessionDuration)}`
+                      : undefined
+                  }
+                />
+              </div>
+              {Array.isArray(analytics.channels) && analytics.channels.length > 0 ? (
+                <div className="space-y-3">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    Traffic sources
+                  </p>
+                  <ul className="space-y-2">
+                    {analytics.channels.map((ch) => (
+                      <li key={ch.channel}>
+                        <div className="flex items-center justify-between gap-3 text-sm mb-1">
+                          <span className="font-bold text-slate-800">{ch.channel}</span>
+                          <span className="tabular-nums font-black text-slate-900">
+                            {formatNum(ch.sessions)}
+                            <span className="text-slate-400 font-bold text-xs ml-2">
+                              {Number(ch.share || 0).toFixed(0)}%
+                            </span>
+                          </span>
+                        </div>
+                        <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-[#fd7414]"
+                            style={{
+                              width: `${Math.min(100, Math.max(2, Number(ch.share) || 0))}%`,
+                            }}
+                          />
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </>
+          )}
+        </div>
+      ) : null}
+
+      {seoTab === 'gsc' ? (
+        <div className="bg-white border border-slate-200 rounded-[28px] p-6 shadow-sm space-y-5">
+          <div className="flex items-start gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-slate-100 flex items-center justify-center shrink-0">
+              <MousePointerClick className="w-5 h-5 text-[#fd7414]" />
+            </div>
+            <div>
+              <h3 className="font-black text-slate-900">Google Search Console</h3>
+              <p className="text-xs text-slate-500 font-medium mt-1">
+                Organic search queries via SE Ranking (not all-site traffic)
+              </p>
+            </div>
+          </div>
+
+          {traffic.warning && !traffic.clicks && traffic.source !== 'seo_potential' ? (
+            <p className="text-sm font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3">
+              {traffic.warning}
+              {traffic.estimatedTraffic != null ? (
+                <span className="block mt-2 text-slate-600 font-medium">
+                  Estimated organic traffic potential:{' '}
+                  <span className="font-black text-slate-900">
+                    {formatNum(traffic.estimatedTraffic)}
+                  </span>
+                  {traffic.estimatedTrafficValue != null ? (
+                    <>
+                      {' '}
+                      · est. value ${formatNum(traffic.estimatedTrafficValue, 0)}
+                    </>
+                  ) : null}
+                </span>
+              ) : null}
+            </p>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <StatCard label="Clicks" value={formatNum(traffic.clicks)} />
+                <StatCard label="Impressions" value={formatNum(traffic.impressions)} />
+                <StatCard
+                  label="Avg CTR"
+                  value={
+                    traffic.avgCtr != null ? `${Number(traffic.avgCtr).toFixed(1)}%` : '—'
+                  }
+                />
+                <StatCard
+                  label="GSC avg position"
+                  value={
+                    traffic.avgPosition != null
+                      ? Number(traffic.avgPosition).toFixed(1)
+                      : '—'
+                  }
+                />
+              </div>
+              {traffic.estimatedTraffic != null ? (
+                <p className="text-xs font-medium text-slate-500 flex items-center gap-2">
+                  <TrendingUp className="w-3.5 h-3.5 text-[#fd7414]" />
+                  SE Ranking estimated traffic potential:{' '}
+                  <span className="font-black text-slate-800">
+                    {formatNum(traffic.estimatedTraffic)}
+                  </span>
+                  {traffic.estimatedTrafficValue != null ? (
+                    <span>· ${formatNum(traffic.estimatedTrafficValue, 0)} value</span>
+                  ) : null}
+                </p>
+              ) : null}
+              {Array.isArray(traffic.queries) && traffic.queries.length > 0 ? (
+                <div className="overflow-x-auto rounded-2xl border border-slate-100">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100 bg-slate-50/80">
+                        <th className="px-4 py-3">Top query</th>
+                        <th className="px-3 py-3">Clicks</th>
+                        <th className="px-3 py-3">Impr.</th>
+                        <th className="px-3 py-3">CTR</th>
+                        <th className="px-4 py-3">Avg pos</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {traffic.queries.map((q) => (
+                        <tr
+                          key={q.query}
+                          className="border-b border-slate-50 last:border-0"
+                        >
+                          <td className="px-4 py-2.5 font-bold text-slate-800 max-w-[260px] truncate">
+                            {q.query}
+                          </td>
+                          <td className="px-3 py-2.5 tabular-nums font-medium">
+                            {formatNum(q.clicks)}
+                          </td>
+                          <td className="px-3 py-2.5 tabular-nums font-medium text-slate-600">
+                            {formatNum(q.impressions)}
+                          </td>
+                          <td className="px-3 py-2.5 tabular-nums font-medium text-slate-600">
+                            {Number(q.ctr || 0).toFixed(1)}%
+                          </td>
+                          <td className="px-4 py-2.5 tabular-nums font-medium">
+                            {q.avg != null ? Number(q.avg).toFixed(1) : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+            </>
+          )}
+        </div>
+      ) : null}
+
+      {seoTab === 'keywords' ? (
+        <div className="bg-white border border-slate-200 rounded-[28px] shadow-sm overflow-hidden">
+          <div className="px-6 py-5 border-b border-slate-100">
             <h3 className="font-black text-slate-900">Keyword rankings</h3>
             <p className="text-xs text-slate-500 font-medium mt-0.5">
               Best position across tracked engines · WoW vs ~7 days prior · top{' '}
               {keywords.length}
             </p>
           </div>
-        </div>
-        {keywords.length === 0 ? (
-          <p className="p-8 text-sm font-bold text-slate-400">No keyword data for this range.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">
-                  <th className="px-6 py-3">Keyword</th>
-                  <th className="px-4 py-3">Pos</th>
-                  <th className="px-4 py-3">WoW</th>
-                  <th className="px-4 py-3">Prev</th>
-                  <th className="px-4 py-3">Volume</th>
-                  <th className="px-6 py-3">Checked</th>
-                </tr>
-              </thead>
-              <tbody>
-                {keywords.map((row) => (
-                  <tr
-                    key={row.id}
-                    className="border-b border-slate-50 last:border-0 hover:bg-slate-50/80"
-                  >
-                    <td className="px-6 py-3 font-bold text-slate-800 max-w-[280px] truncate">
-                      {row.name}
-                    </td>
-                    <td className="px-4 py-3 font-black tabular-nums text-slate-900">
-                      {row.position > 0 ? row.position : '—'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <PositionDelta delta={row.wowDelta} />
-                    </td>
-                    <td className="px-4 py-3 tabular-nums text-slate-500 font-medium">
-                      {row.priorPosition > 0 ? row.priorPosition : '—'}
-                    </td>
-                    <td className="px-4 py-3 tabular-nums text-slate-600 font-medium">
-                      {row.volume ? row.volume.toLocaleString() : '—'}
-                    </td>
-                    <td className="px-6 py-3 text-slate-500 font-medium">
-                      {formatDay(row.date)}
-                    </td>
+          {keywords.length === 0 ? (
+            <p className="p-8 text-sm font-bold text-slate-400">
+              No keyword data for this range.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">
+                    <th className="px-6 py-3">Keyword</th>
+                    <th className="px-4 py-3">Pos</th>
+                    <th className="px-4 py-3">WoW</th>
+                    <th className="px-4 py-3">Prev</th>
+                    <th className="px-4 py-3">Volume</th>
+                    <th className="px-6 py-3">Checked</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                </thead>
+                <tbody>
+                  {keywords.map((row) => (
+                    <tr
+                      key={row.id}
+                      className="border-b border-slate-50 last:border-0 hover:bg-slate-50/80"
+                    >
+                      <td className="px-6 py-3 font-bold text-slate-800 max-w-[280px] truncate">
+                        {row.name}
+                      </td>
+                      <td className="px-4 py-3 font-black tabular-nums text-slate-900">
+                        {row.position > 0 ? row.position : '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <PositionDelta delta={row.wowDelta} />
+                      </td>
+                      <td className="px-4 py-3 tabular-nums text-slate-500 font-medium">
+                        {row.priorPosition > 0 ? row.priorPosition : '—'}
+                      </td>
+                      <td className="px-4 py-3 tabular-nums text-slate-600 font-medium">
+                        {row.volume ? row.volume.toLocaleString() : '—'}
+                      </td>
+                      <td className="px-6 py-3 text-slate-500 font-medium">
+                        {formatDay(row.date)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
