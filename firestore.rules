@@ -109,6 +109,14 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Per-client third-party API secrets (e.g. Mailchimp keys). Never on the
+    // clients doc — portal users can read clients. Digest bot reads for Netlify
+    // portal proxies; staff manage via CRM.
+    match /clientIntegrationSecrets/{clientId} {
+      allow read, write: if isAnyStaff() ||
+        (isSignedIn() && emailLower().matches('digest-bot@.*'));
+    }
+
     match /projects/{projectId} {
       allow read: if isAnyStaff() ||
         (isSignedIn() && resource.data.clientId is string && clientAllowsEmail(resource.data.clientId));

@@ -403,6 +403,35 @@ export default function App() {
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [archiveConfirm, setArchiveConfirm] = useState(null);
   const [editingClient, setEditingClient] = useState(null);
+
+  // Load whether a Mailchimp API key is saved (never load the raw key into UI state).
+  useEffect(() => {
+    const clientId = editingClient?.id;
+    if (!clientId) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'clientIntegrationSecrets', clientId));
+        if (cancelled) return;
+        const hasKey = Boolean(String(snap.data()?.mailchimpApiKey || '').trim());
+        setEditingClient((prev) =>
+          prev && prev.id === clientId
+            ? {
+                ...prev,
+                mailchimpApiKeyConfigured: hasKey,
+                mailchimpApiKeyDraft: prev.mailchimpApiKeyDraft || '',
+                mailchimpApiKeyClear: false,
+              }
+            : prev,
+        );
+      } catch {
+        /* ignore — staff without access still see blank field */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [editingClient?.id]);
   const [clientEnrichBusy, setClientEnrichBusy] = useState(false);
   const [clientEnrichPreview, setClientEnrichPreview] = useState(null);
   const [portalInvitesByEmail, setPortalInvitesByEmail] = useState({});
@@ -4739,6 +4768,49 @@ export default function App() {
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                      Mailchimp API key (this client’s account)
+                    </label>
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      value={editingClient.mailchimpApiKeyDraft ?? ''}
+                      onChange={(e) =>
+                        setEditingClient({
+                          ...editingClient,
+                          mailchimpApiKeyDraft: e.target.value,
+                        })
+                      }
+                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      placeholder={
+                        editingClient.mailchimpApiKeyConfigured
+                          ? 'Key saved — paste a new key to replace'
+                          : 'Paste API key from client Mailchimp (ends in -usXX)'
+                      }
+                    />
+                    <p className="text-[10px] font-bold text-slate-400">
+                      {editingClient.mailchimpApiKeyConfigured
+                        ? 'A Mailchimp API key is saved for this client (stored separately from the profile so portal users cannot see it). Leave blank to keep it.'
+                        : 'Each client needs the API key from their own Mailchimp account (Account → Extras → API keys), not Ignite’s agency key.'}
+                    </p>
+                    {editingClient.mailchimpApiKeyConfigured ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditingClient({
+                            ...editingClient,
+                            mailchimpApiKeyClear: true,
+                            mailchimpApiKeyDraft: '',
+                            mailchimpApiKeyConfigured: false,
+                          })
+                        }
+                        className="text-[10px] font-black uppercase tracking-widest text-rose-600 hover:text-rose-700"
+                      >
+                        Remove saved API key
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
                       Mailchimp audience ID
                     </label>
                     <input
@@ -4754,7 +4826,7 @@ export default function App() {
                       placeholder="e.g. a1b2c3d4e5"
                     />
                     <p className="text-[10px] font-bold text-slate-400">
-                      Mailchimp list/audience ID for portal Analytics → Email.
+                      Audience ID from that same client account (Audience → Settings → Audience name and defaults). If the account has only one audience, it can be detected automatically.
                     </p>
                   </div>
                   <div className="space-y-2">
@@ -5653,6 +5725,24 @@ export default function App() {
                     primaryContact: normalizePrimaryContact(editingClient.primaryContact),
                     contacts: normalizeClientContacts(editingClient.contacts),
                   });
+                  const secretRef = doc(db, 'clientIntegrationSecrets', editingClient.id);
+                  const draftKey = String(editingClient.mailchimpApiKeyDraft || '').trim();
+                  if (editingClient.mailchimpApiKeyClear && !draftKey) {
+                    await setDoc(
+                      secretRef,
+                      { mailchimpApiKey: deleteField(), updatedAt: Date.now() },
+                      { merge: true },
+                    );
+                  } else if (draftKey) {
+                    await setDoc(
+                      secretRef,
+                      {
+                        mailchimpApiKey: draftKey,
+                        updatedAt: Date.now(),
+                      },
+                      { merge: true },
+                    );
+                  }
                   if (currentUserRole === 'admin' && removed.length) {
                     await Promise.all(
                       removed.map(async (email) => {

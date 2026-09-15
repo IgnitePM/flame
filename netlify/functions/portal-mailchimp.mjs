@@ -120,8 +120,11 @@ export default async (req) => {
       );
     }
 
-    const creds = parseMailchimpKey(process.env.MAILCHIMP_API_KEY);
-    const audienceId = normalizeAudienceId(client.mailchimpAudienceId);
+    const secrets = await fetchDoc(db, `clientIntegrationSecrets/${clientId}`);
+    const creds =
+      parseMailchimpKey(secrets?.mailchimpApiKey) ||
+      parseMailchimpKey(process.env.MAILCHIMP_API_KEY);
+    let audienceId = normalizeAudienceId(client.mailchimpAudienceId);
     const dateFrom = String(body.dateFrom || '').trim() || ymd(new Date(Date.now() - 30 * 86400000));
     const dateTo = String(body.dateTo || '').trim() || ymd();
 
@@ -131,7 +134,7 @@ export default async (req) => {
           ok: true,
           available: false,
           warning:
-            'Mailchimp is not configured yet. Add MAILCHIMP_API_KEY in Netlify (key ending in -usXX).',
+            'No Mailchimp API key for this client. In the CRM, paste the API key from that client’s own Mailchimp account (Account → Extras → API keys).',
           dateFrom,
           dateTo,
           audience: {},
@@ -143,20 +146,40 @@ export default async (req) => {
     }
 
     if (!audienceId) {
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          available: false,
-          warning:
-            'No Mailchimp audience ID on this client. Ask Ignite to add mailchimpAudienceId on the CRM profile (Audience → Settings → Audience name and defaults).',
-          dateFrom,
-          dateTo,
-          audience: {},
-          campaigns: [],
-          totals: {},
-        }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      );
+      // With a valid client key, list audiences so staff can pick the right ID.
+      const listsResult = await mcGetSoft(creds.apiKey, creds.dc, '/lists', {
+        count: 50,
+        fields: 'lists.id,lists.name,lists.stats.member_count',
+      });
+      const availableLists = listsResult.ok
+        ? (Array.isArray(listsResult.data?.lists) ? listsResult.data.lists : []).map((l) => ({
+            id: String(l.id || ''),
+            name: String(l.name || ''),
+            memberCount: Number(l.stats?.member_count || 0),
+          }))
+        : [];
+
+      if (availableLists.length === 1) {
+        audienceId = availableLists[0].id;
+      } else {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            available: false,
+            warning:
+              availableLists.length > 0
+                ? 'Mailchimp API key works, but no audience ID is set on this client. Pick one below and save it on the CRM profile.'
+                : 'No Mailchimp audience ID on this client. Add mailchimpAudienceId on the CRM profile (Audience → Settings → Audience name and defaults).',
+            dateFrom,
+            dateTo,
+            audience: {},
+            availableAudiences: availableLists,
+            campaigns: [],
+            totals: {},
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
     }
 
     const listResult = await mcGetSoft(
