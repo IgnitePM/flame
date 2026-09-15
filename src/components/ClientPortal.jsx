@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { orderTodosForDisplay } from '../utils/todoListOrder.js';
 import {
   clientHasEnabledRetainers,
+  clientHasActiveSeoRetainer,
   getEnabledRetainerCategoryEntries,
   getEnabledRetainerCategoryNames,
 } from '../utils/retainerCategories.js';
@@ -25,6 +26,7 @@ import ClientPortalFilesPanel from './ClientPortalFilesPanel.jsx';
 import PortalTaskRequestForm from './PortalTaskRequestForm.jsx';
 import PortalCompanyProfilePanel from './PortalCompanyProfilePanel.jsx';
 import ClientPortalToolsPanel from './ClientPortalToolsPanel.jsx';
+import ClientPortalSeoPanel from './ClientPortalSeoPanel.jsx';
 import {
   ChevronLeft,
   ChevronRight,
@@ -41,6 +43,7 @@ import {
   Calendar,
   ExternalLink,
   Wrench,
+  LineChart,
 } from 'lucide-react';
 
 const STRATEGY_BOOKING_URL = 'https://calendar.app.google/nsL6wM7189fAM1Vd7';
@@ -252,6 +255,12 @@ const ClientPortal = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [portalSection, latestStaffMessageAt]);
 
+  useEffect(() => {
+    if (portalSection === 'seo' && !clientHasActiveSeoRetainer(clientProfile)) {
+      setPortalSection('dashboard');
+    }
+  }, [portalSection, clientProfile]);
+
   const minPortalOffset = (() => {
     if (!clientProfile.clientStartDate) return -1e9;
     let o = 0;
@@ -365,6 +374,13 @@ const ClientPortal = ({
           {[
             { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
             { id: 'company', label: 'Company', icon: Building2 },
+            {
+              id: 'seo',
+              label: 'SEO',
+              icon: LineChart,
+              disabled: !clientHasActiveSeoRetainer(clientProfile),
+              disabledTitle: 'Available with an active SEO retainer',
+            },
             { id: 'tools', label: 'Tools', icon: Wrench },
             { id: 'messages', label: 'Messages', icon: MessageSquare },
             { id: 'approvals', label: 'Approvals', icon: ClipboardCheck },
@@ -373,14 +389,19 @@ const ClientPortal = ({
             <button
               key={tab.id}
               type="button"
+              disabled={!!tab.disabled}
+              title={tab.disabled ? tab.disabledTitle : undefined}
               onClick={() => {
+                if (tab.disabled) return;
                 setPortalSection(tab.id);
                 if (tab.id === 'messages') markMessagesRead();
               }}
               className={`relative shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
-                portalSection === tab.id
-                  ? 'bg-[#fd7414] text-white shadow-sm'
-                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                tab.disabled
+                  ? 'bg-slate-50 text-slate-300 cursor-not-allowed opacity-60'
+                  : portalSection === tab.id
+                    ? 'bg-[#fd7414] text-white shadow-sm'
+                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
               }`}
             >
               <tab.icon className="w-3.5 h-3.5" />
@@ -426,6 +447,14 @@ const ClientPortal = ({
           <ClientPortalToolsPanel
             client={clientProfile}
             user={user || auth?.currentUser || null}
+          />
+        ) : null}
+
+        {portalSection === 'seo' && clientHasActiveSeoRetainer(clientProfile) ? (
+          <ClientPortalSeoPanel
+            client={clientProfile}
+            dateFromMs={mStart}
+            dateToMs={mEnd}
           />
         ) : null}
 

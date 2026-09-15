@@ -69,6 +69,15 @@ export function clientHasEnabledRetainers(client) {
   return getEnabledRetainerCategoryNames(client).length > 0;
 }
 
+/** True when any enabled retainer category name mentions SEO (e.g. "SEO", "SEO/Web Development"). */
+export function clientHasActiveSeoRetainer(client) {
+  return getEnabledRetainerCategoryNames(client).some((name) =>
+    String(name || '')
+      .toLowerCase()
+      .includes('seo'),
+  );
+}
+
 export function isRetainerCategoryDollar(client, categoryName) {
   if (!categoryName) return false;
   return (

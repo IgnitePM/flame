@@ -4696,6 +4696,27 @@ export default function App() {
                     </p>
                   </div>
                   <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                      SE Ranking project ID
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={editingClient.seRankingSiteId ?? ''}
+                      onChange={(e) =>
+                        setEditingClient({
+                          ...editingClient,
+                          seRankingSiteId: e.target.value.replace(/[^\d]/g, ''),
+                        })
+                      }
+                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      placeholder="e.g. 11991701"
+                    />
+                    <p className="text-[10px] font-bold text-slate-400">
+                      Links this client’s portal SEO tab to their SE Ranking project (Project API site_id). Leave blank until SEO is set up.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">About</label>
                     <textarea
                       value={editingClient.companyDescription || ''}
@@ -5525,6 +5546,13 @@ export default function App() {
                     logoUrl: editingClient.logoUrl || null,
                     website: String(editingClient.website || '').trim(),
                     phone: String(editingClient.phone || '').trim(),
+                    seRankingSiteId: String(editingClient.seRankingSiteId || '')
+                      .replace(/[^\d]/g, '')
+                      .trim()
+                      ? Number(
+                          String(editingClient.seRankingSiteId || '').replace(/[^\d]/g, ''),
+                        )
+                      : null,
                     ...normalizeCompanyProfileFields(editingClient),
                     ...normalizeClientConnectionFields(editingClient),
                     retainerCategoryEnabled: normalizeRetainerCategoryEnabled(
