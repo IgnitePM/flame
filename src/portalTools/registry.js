@@ -1,4 +1,5 @@
 import CustomerJourneyBuilder from './customerJourney/CustomerJourneyBuilder.jsx';
+import SocialPolicyArchitect from './socialPolicy/SocialPolicyArchitect.jsx';
 
 /**
  * Portal mini-app registry.
@@ -21,6 +22,14 @@ export const PORTAL_TOOLS = [
     description:
       'Build a StoryBrand-style journey with AI copy, sound bites, deliverables, and a landing-page audit — saved to your portal.',
     component: CustomerJourneyBuilder,
+    fullBleed: true,
+  },
+  {
+    id: 'social_policy_architect',
+    title: 'Social Media Policy Architect',
+    description:
+      'Walk through governance prompts and generate a downloadable social media policy for your team — saved to your portal.',
+    component: SocialPolicyArchitect,
     fullBleed: true,
   },
 ];
