@@ -269,6 +269,21 @@ service cloud.firestore {
          clientAllowsEmail(resource.data.clientId));
     }
 
+    // Per-contact "last read" for portal Messages tab badge.
+    match /clientPortalMessageReads/{readId} {
+      allow read: if isAnyStaff() ||
+        (isSignedIn() &&
+         resource.data.clientId is string &&
+         clientAllowsEmail(resource.data.clientId) &&
+         resource.data.email == emailLower());
+      allow create, update: if isAnyStaff() ||
+        (isSignedIn() &&
+         request.resource.data.clientId is string &&
+         request.resource.data.email == emailLower() &&
+         clientAllowsEmail(request.resource.data.clientId));
+      allow delete: if isAdmin();
+    }
+
     // Opaque set-password tokens for portal invites (digest bot only).
     match /portalInviteTokens/{tokenId} {
       allow read, write: if isBilling();

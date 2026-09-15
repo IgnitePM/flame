@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { orderTodosForDisplay } from '../utils/todoListOrder.js';
 import {
   clientHasEnabledRetainers,
@@ -7,6 +7,17 @@ import {
 } from '../utils/retainerCategories.js';
 import { computeRetainerDaysLeft } from '../utils/retainerCategoryStats.js';
 import { resolveExpenseEquivalentHours } from '../utils/billingEngine.js';
+import {
+  db,
+  collection,
+  query,
+  where,
+  orderBy,
+  limit,
+  onSnapshot,
+  doc,
+  setDoc,
+} from '../firebase.js';
 import RetainerCategoryStats from './RetainerCategoryStats.jsx';
 import ClientMessagesPanel from './ClientMessagesPanel.jsx';
 import ClientReviewsPanel from './ClientReviewsPanel.jsx';
@@ -33,6 +44,24 @@ import {
 } from 'lucide-react';
 
 const STRATEGY_BOOKING_URL = 'https://calendar.app.google/nsL6wM7189fAM1Vd7';
+
+function portalMessageReadDocId(clientId, email) {
+  const c = String(clientId || '').trim();
+  const e = String(email || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9@._+-]+/g, '_')
+    .slice(0, 120);
+  return `${c}__${e || 'unknown'}`;
+}
+
+function isStaffAuthoredMessage(m) {
+  if (!m) return false;
+  if (m.authorType === 'staff') return true;
+  if (m.authorType === 'client') return false;
+  const email = String(m.authorEmail || '').toLowerCase();
+  return email.endsWith('@ignitepm.com');
+}
 
 const IDLE_NOTE_MARKERS = [
   '[Clock stopped automatically: session was idle — Ignite PM]',
@@ -79,6 +108,150 @@ const ClientPortal = ({
   user,
 }) => {
   const [portalSection, setPortalSection] = useState('dashboard');
+  const [latestStaffMessageAt, setLatestStaffMessageAt] = useState(0);
+  const [messagesQueryReady, setMessagesQueryReady] = useState(false);
+  const [messagesLastReadAt, setMessagesLastReadAt] = useState(0);
+  const [messagesReadReady, setMessagesReadReady] = useState(false);
+  const [needsReadSeed, setNeedsReadSeed] = useState(false);
+
+  const portalEmail = String(
+    user?.email || auth?.currentUser?.email || '',
+  )
+    .trim()
+    .toLowerCase();
+
+  const hasNewMessages =
+    messagesReadReady &&
+    !needsReadSeed &&
+    latestStaffMessageAt > 0 &&
+    latestStaffMessageAt > (Number(messagesLastReadAt) || 0);
+
+  useEffect(() => {
+    const clientId = clientProfile?.id;
+    if (!clientId || clientId === 'demo') {
+      setLatestStaffMessageAt(0);
+      setMessagesQueryReady(true);
+      return undefined;
+    }
+    setMessagesQueryReady(false);
+    const q = query(
+      collection(db, 'clientMessages'),
+      where('clientId', '==', clientId),
+      orderBy('createdAt', 'desc'),
+      limit(40),
+    );
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        let latest = 0;
+        snap.docs.forEach((d) => {
+          const row = d.data() || {};
+          if (!isStaffAuthoredMessage(row)) return;
+          const t = Number(row.createdAt || 0);
+          if (t > latest) latest = t;
+        });
+        setLatestStaffMessageAt(latest);
+        setMessagesQueryReady(true);
+      },
+      () => {
+        setLatestStaffMessageAt(0);
+        setMessagesQueryReady(true);
+      },
+    );
+    return () => unsub();
+  }, [clientProfile?.id]);
+
+  useEffect(() => {
+    const clientId = clientProfile?.id;
+    if (!clientId || clientId === 'demo' || !portalEmail) {
+      setMessagesLastReadAt(0);
+      setNeedsReadSeed(false);
+      setMessagesReadReady(true);
+      return undefined;
+    }
+    setMessagesReadReady(false);
+    const readId = portalMessageReadDocId(clientId, portalEmail);
+    const unsub = onSnapshot(
+      doc(db, 'clientPortalMessageReads', readId),
+      (snap) => {
+        if (!snap.exists()) {
+          setMessagesLastReadAt(0);
+          setNeedsReadSeed(true);
+          setMessagesReadReady(true);
+          return;
+        }
+        const t = Number(snap.data()?.lastReadAt || 0);
+        setMessagesLastReadAt(t);
+        setNeedsReadSeed(false);
+        setMessagesReadReady(true);
+      },
+      () => {
+        setMessagesLastReadAt(0);
+        setNeedsReadSeed(false);
+        setMessagesReadReady(true);
+      },
+    );
+    return () => unsub();
+  }, [clientProfile?.id, portalEmail]);
+
+  // First visit: catch up silently so the existing thread doesn't flash "New".
+  useEffect(() => {
+    const clientId = clientProfile?.id;
+    if (!needsReadSeed || !messagesQueryReady || !clientId || !portalEmail) return;
+    const seed = Math.max(Number(latestStaffMessageAt) || 0, 1);
+    setMessagesLastReadAt(seed);
+    setNeedsReadSeed(false);
+    setDoc(
+      doc(db, 'clientPortalMessageReads', portalMessageReadDocId(clientId, portalEmail)),
+      {
+        clientId,
+        email: portalEmail,
+        lastReadAt: seed,
+        updatedAt: Date.now(),
+      },
+      { merge: true },
+    ).catch((err) => console.warn('[ClientPortal] seed messages read failed', err));
+  }, [
+    needsReadSeed,
+    messagesQueryReady,
+    latestStaffMessageAt,
+    clientProfile?.id,
+    portalEmail,
+  ]);
+
+  const markMessagesRead = async () => {
+    const clientId = clientProfile?.id;
+    if (!clientId || clientId === 'demo' || !portalEmail) return;
+    const now = Date.now();
+    // Optimistic clear so the badge disappears immediately on click.
+    setMessagesLastReadAt((prev) => Math.max(prev, now, latestStaffMessageAt));
+    setNeedsReadSeed(false);
+    try {
+      await setDoc(
+        doc(db, 'clientPortalMessageReads', portalMessageReadDocId(clientId, portalEmail)),
+        {
+          clientId,
+          email: portalEmail,
+          lastReadAt: Math.max(now, latestStaffMessageAt),
+          updatedAt: now,
+        },
+        { merge: true },
+      );
+    } catch (err) {
+      console.warn('[ClientPortal] mark messages read failed', err);
+    }
+  };
+
+  useEffect(() => {
+    if (portalSection !== 'messages') return undefined;
+    if (!latestStaffMessageAt) return undefined;
+    if (latestStaffMessageAt <= (Number(messagesLastReadAt) || 0)) return undefined;
+    markMessagesRead();
+    return undefined;
+    // Intentionally depend on section + latest message so viewing clears new arrivals.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [portalSection, latestStaffMessageAt]);
+
   const minPortalOffset = (() => {
     if (!clientProfile.clientStartDate) return -1e9;
     let o = 0;
@@ -200,8 +373,11 @@ const ClientPortal = ({
             <button
               key={tab.id}
               type="button"
-              onClick={() => setPortalSection(tab.id)}
-              className={`shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+              onClick={() => {
+                setPortalSection(tab.id);
+                if (tab.id === 'messages') markMessagesRead();
+              }}
+              className={`relative shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
                 portalSection === tab.id
                   ? 'bg-[#fd7414] text-white shadow-sm'
                   : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
@@ -209,6 +385,11 @@ const ClientPortal = ({
             >
               <tab.icon className="w-3.5 h-3.5" />
               {tab.label}
+              {tab.id === 'messages' && hasNewMessages ? (
+                <span className="absolute -top-1.5 -right-1.5 z-10 rounded-full bg-rose-500 text-white text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 shadow-sm ring-2 ring-white leading-none">
+                  New
+                </span>
+              ) : null}
             </button>
           ))}
         </div>

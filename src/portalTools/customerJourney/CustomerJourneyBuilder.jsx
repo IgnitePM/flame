@@ -985,8 +985,8 @@ export default function CustomerJourneyBuilder({
       value={{ state, dispatch, clientId: client?.id, client }}
     >
       <UIContext.Provider value={{ showToast }}>
-        <div className="flex flex-col md:flex-row h-[min(78vh,860px)] bg-stone-100 text-stone-900 rounded-2xl overflow-hidden border border-stone-200 shadow-sm">
-          <aside className="w-full md:w-72 bg-white border-b md:border-b-0 md:border-r border-stone-200 flex flex-col shrink-0 max-h-48 md:max-h-none">
+        <div className="flex flex-col md:flex-row bg-stone-100 text-stone-900 rounded-2xl border border-stone-200 shadow-sm">
+          <aside className="w-full md:w-72 bg-white border-b md:border-b-0 md:border-r border-stone-200 flex flex-col shrink-0 md:sticky md:top-24 md:self-start">
             <div className="p-5 border-b border-stone-100 bg-stone-50/80 flex items-center gap-3">
               <img
                 src="/logo.png"
@@ -1002,7 +1002,7 @@ export default function CustomerJourneyBuilder({
                 </p>
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-3 space-y-1 hidden md:block">
+            <div className="p-3 space-y-1 hidden md:block">
               {STEPS.map((step, index) => {
                 const isActive = state.currentStep === index;
                 const isCompleted = state.data[step.id]?.output != null;
@@ -1035,9 +1035,28 @@ export default function CustomerJourneyBuilder({
                 );
               })}
             </div>
+            <div className="md:hidden flex gap-2 overflow-x-auto p-3">
+              {STEPS.map((step, index) => {
+                const isActive = state.currentStep === index;
+                return (
+                  <button
+                    key={step.id}
+                    type="button"
+                    onClick={() => dispatch({ type: 'SET_STEP', payload: index })}
+                    className={`shrink-0 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider ${
+                      isActive
+                        ? 'bg-[#fd7414] text-white'
+                        : 'bg-stone-100 text-stone-500'
+                    }`}
+                  >
+                    {step.title}
+                  </button>
+                );
+              })}
+            </div>
           </aside>
 
-          <main className="flex-1 flex flex-col min-h-0 relative">
+          <main className="flex-1 flex flex-col min-w-0 relative">
             <header className="bg-white border-b border-stone-200 p-3 sm:p-4 flex justify-between items-center gap-2 shrink-0">
               <div className="flex-1 flex justify-center items-center gap-1.5 min-w-0">
                 {STEPS.map((_, i) => (
@@ -1084,12 +1103,12 @@ export default function CustomerJourneyBuilder({
               </div>
             </header>
 
-            <div className="flex-1 overflow-y-auto">
+            <div>
               <CurrentStepComponent />
             </div>
 
             {toast ? (
-              <div className="absolute bottom-4 right-4 z-50">
+              <div className="fixed bottom-6 right-6 z-50">
                 <div
                   className={`flex items-center gap-3 px-5 py-3 rounded-xl shadow-xl border ${
                     toast.type === 'error'
