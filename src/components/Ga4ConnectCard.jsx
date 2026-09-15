@@ -47,8 +47,13 @@ export default function Ga4ConnectCard({ canManage = false, onTabFocus }) {
         const listData = await listResp.json().catch(() => ({}));
         if (listResp.ok) {
           setProperties(Array.isArray(listData.properties) ? listData.properties : []);
+          setBanner('');
         } else {
           setProperties([]);
+          setBanner(
+            listData.error ||
+              'Could not list GA4 properties. Disconnect and Connect Google Analytics again (token may have expired).',
+          );
         }
       } else {
         setProperties([]);
@@ -190,8 +195,9 @@ export default function Ga4ConnectCard({ canManage = false, onTabFocus }) {
             </div>
           ) : (
             <p className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
-              No GA4 properties found for this Google account. Add it as a Viewer on each client’s
-              GA4 property, then refresh.
+              No GA4 properties returned for this Google account. If this used to work, click
+              Disconnect then Connect again. Also confirm this account is a Viewer on each client’s
+              GA4 property, and that the Analytics Admin API is enabled in Google Cloud.
             </p>
           )}
 

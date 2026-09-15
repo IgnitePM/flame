@@ -8,6 +8,9 @@ import { fetchDoc, getDigestDb, mergeDoc, removeDoc } from './firebaseDigestClie
 
 export const GA4_SCOPES = [
   'https://www.googleapis.com/auth/analytics.readonly',
+  'openid',
+  'email',
+  'profile',
 ].join(' ');
 
 export const COMPANY_CONNECTION_ID = 'company';
@@ -163,7 +166,7 @@ export async function fetchGoogleUserEmail(accessToken) {
   });
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {
-    throw new Error(data?.error?.message || 'Could not load Google profile.');
+    return '';
   }
   return String(data?.email || '').trim().toLowerCase();
 }

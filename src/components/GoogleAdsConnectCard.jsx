@@ -193,9 +193,10 @@ export default function GoogleAdsConnectCard({ canManage = false, onTabFocus }) 
             </div>
           ) : (
             <p className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
-              No Ads customers listed yet. Confirm Google Ads API access on this Cloud project,
-              set GOOGLE_ADS_LOGIN_CUSTOMER_ID to your MCC ID (digits only), and that this Google
-              account can access client accounts — then refresh.
+              No Ads customers listed yet. Confirm the Google Ads API is enabled on this Cloud
+              project, API access is approved in Cloud Console → Google Ads API Overview, and
+              GOOGLE_ADS_LOGIN_CUSTOMER_ID is your MCC ID (digits only) — then refresh. If connect
+              just succeeded, wait a moment and refresh again.
             </p>
           )}
 

@@ -6,12 +6,18 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { fetchDoc, getDigestDb, mergeDoc, removeDoc } from './firebaseDigestClient.mjs';
 
-export const GOOGLE_ADS_SCOPES = 'https://www.googleapis.com/auth/adwords';
+export const GOOGLE_ADS_SCOPES = [
+  'https://www.googleapis.com/auth/adwords',
+  'openid',
+  'email',
+  'profile',
+].join(' ');
 
 export const COMPANY_CONNECTION_ID = 'company';
 
 function apiVersion() {
-  return String(process.env.GOOGLE_ADS_API_VERSION || 'v19').replace(/^\/*/, '');
+  // Default to a current Ads API version; override with GOOGLE_ADS_API_VERSION if needed.
+  return String(process.env.GOOGLE_ADS_API_VERSION || 'v21').replace(/^\/*/, '');
 }
 
 function oauthConfig() {
@@ -177,7 +183,8 @@ export async function fetchGoogleUserEmail(accessToken) {
   });
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {
-    throw new Error(data?.error?.message || 'Could not load Google profile.');
+    // Ads-only tokens may lack profile/email; callers should fall back to OAuth state email.
+    return '';
   }
   return String(data?.email || '').trim().toLowerCase();
 }
