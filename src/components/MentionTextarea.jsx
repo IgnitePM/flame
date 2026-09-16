@@ -1,11 +1,13 @@
 import React from 'react';
-import { staffDisplayName, staffHandle } from '../utils/staffDirectory.js';
+import { buildMentionDirectory } from '../utils/taskComments.js';
 
 export default function MentionTextarea({
   value,
   onChange,
   staffEmails = [],
   adminUsers = [],
+  clientEmails = [],
+  clientName = '',
   placeholder = 'Write a note. Use @name to tag someone…',
   disabled = false,
   onSubmit,
@@ -18,22 +20,16 @@ export default function MentionTextarea({
   const [active, setActive] = React.useState(0);
   const ref = React.useRef(null);
 
-  const directory = React.useMemo(() => {
-    const byEmail = new Map();
-    for (const row of adminUsers || []) {
-      const email = String(row?.email || row?.id || '').trim().toLowerCase();
-      if (email) byEmail.set(email, staffDisplayName(row));
-    }
-    for (const email of staffEmails || []) {
-      const key = String(email || '').trim().toLowerCase();
-      if (key && !byEmail.has(key)) byEmail.set(key, staffHandle(key));
-    }
-    return [...byEmail.entries()].map(([email, name]) => ({
-      email,
-      name,
-      handle: staffHandle(email),
-    }));
-  }, [adminUsers, staffEmails]);
+  const directory = React.useMemo(
+    () =>
+      buildMentionDirectory({
+        staffEmails,
+        adminUsers,
+        clientEmails,
+        clientName,
+      }),
+    [adminUsers, clientEmails, clientName, staffEmails],
+  );
 
   const matches = React.useMemo(() => {
     if (!open) return [];
@@ -46,7 +42,7 @@ export default function MentionTextarea({
           row.name.toLowerCase().includes(q) ||
           row.email.includes(q),
       )
-      .slice(0, 6);
+      .slice(0, 8);
   }, [directory, open, query]);
 
   const insertMention = (handle) => {
@@ -124,18 +120,25 @@ export default function MentionTextarea({
       {open && matches.length > 0 && (
         <ul className="absolute bottom-full z-20 mb-1 max-h-40 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 shadow-xl">
           {matches.map((row, idx) => (
-            <li key={row.email}>
+            <li key={`${row.kind}-${row.email}`}>
               <button
                 type="button"
                 onMouseDown={(e) => {
                   e.preventDefault();
                   insertMention(row.handle);
                 }}
-                className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-xs ${
+                className={`flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs ${
                   idx === active ? 'bg-orange-50 text-[#fd7414]' : 'text-slate-700'
                 }`}
               >
-                <span className="font-black">@{row.handle}</span>
+                <span className="min-w-0 flex items-center gap-1.5">
+                  <span className="font-black">@{row.handle}</span>
+                  {row.kind === 'client' ? (
+                    <span className="shrink-0 rounded bg-sky-50 px-1 py-0.5 text-[8px] font-black uppercase tracking-widest text-sky-700">
+                      Client
+                    </span>
+                  ) : null}
+                </span>
                 <span className="truncate pl-2 text-[10px] text-slate-400">{row.email}</span>
               </button>
             </li>

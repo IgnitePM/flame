@@ -1,9 +1,25 @@
 import React from 'react';
 import { MessageSquare } from 'lucide-react';
 import MentionTextarea from './MentionTextarea.jsx';
-import { appendTaskComment, buildTaskComment, getTaskComments } from '../utils/taskComments.js';
+import {
+  appendTaskComment,
+  buildMentionDirectory,
+  buildTaskComment,
+  getTaskComments,
+} from '../utils/taskComments.js';
 import { staffHandle } from '../utils/staffDirectory.js';
 import { safeDisplayForReact } from '../utils/safeReactText.js';
+import { authedFetch } from '../utils/authedFetch.js';
+
+function clientEmailsFromClient(client) {
+  return [
+    ...new Set(
+      (Array.isArray(client?.clientEmails) ? client.clientEmails : [])
+        .map((e) => String(e || '').trim().toLowerCase())
+        .filter((e) => e.includes('@')),
+    ),
+  ];
+}
 
 export default function TaskNotesSection({
   item,
@@ -12,6 +28,10 @@ export default function TaskNotesSection({
   user,
   staffEmails = [],
   adminUsers = [],
+  client = null,
+  clientEmails: clientEmailsProp = null,
+  cycleStart = null,
+  categoryKey = null,
   disabled = false,
   compact = false,
 }) {
@@ -19,14 +39,31 @@ export default function TaskNotesSection({
   const [draft, setDraft] = React.useState('');
   const [saving, setSaving] = React.useState(false);
   const comments = getTaskComments(item);
+  const clientEmails =
+    clientEmailsProp != null
+      ? [
+          ...new Set(
+            (clientEmailsProp || [])
+              .map((e) => String(e || '').trim().toLowerCase())
+              .filter((e) => e.includes('@')),
+          ),
+        ]
+      : clientEmailsFromClient(client);
+  const clientName = String(client?.name || '').trim();
 
   const save = async () => {
     if (disabled || saving || !onPersistItems) return;
+    const directory = buildMentionDirectory({
+      staffEmails,
+      adminUsers,
+      clientEmails,
+      clientName,
+    });
     const comment = buildTaskComment({
       text: draft,
       authorEmail: user?.email,
       authorName: user?.displayName || staffHandle(user?.email),
-      staffEmails,
+      directory,
     });
     if (!comment) return;
     setSaving(true);
@@ -36,6 +73,36 @@ export default function TaskNotesSection({
       );
       await onPersistItems(next);
       setDraft('');
+
+      if (client?.id && comment.clientMentions?.length) {
+        try {
+          const resp = await authedFetch(
+            '/.netlify/functions/client-todo-note-mention',
+            {
+              clientId: client.id,
+              itemId: item.id,
+              categoryKey,
+              cycleStart,
+              taskTitle: item.text || 'Task',
+              commentText: comment.text,
+              commentId: comment.id,
+              mentionedEmails: comment.clientMentions,
+            },
+          );
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok) {
+            window.alert(
+              data.error ||
+                'Note saved, but the client mention email could not be sent.',
+            );
+          }
+        } catch (err) {
+          window.alert(
+            err?.message ||
+              'Note saved, but the client mention email could not be sent.',
+          );
+        }
+      }
     } catch (err) {
       window.alert(err?.message || 'Could not save note.');
     } finally {
@@ -56,11 +123,16 @@ export default function TaskNotesSection({
       {open && (
         <div className="mt-2 space-y-2 rounded-xl border border-slate-100 bg-slate-50/80 p-2">
           {comments.length === 0 ? (
-            <p className="text-[11px] italic text-slate-400">No notes yet. Add a comment for the audit trail.</p>
+            <p className="text-[11px] italic text-slate-400">
+              No notes yet. Add a comment for the audit trail.
+            </p>
           ) : (
             <ul className="max-h-40 space-y-2 overflow-y-auto pr-1">
               {comments.map((c) => (
-                <li key={c.id} className="rounded-lg bg-white px-2 py-1.5 text-xs text-slate-700">
+                <li
+                  key={c.id}
+                  className="rounded-lg bg-white px-2 py-1.5 text-xs text-slate-700"
+                >
                   <div className="flex items-baseline justify-between gap-2">
                     <span className="font-black text-slate-800">
                       {c.authorName || staffHandle(c.authorEmail)}
@@ -77,6 +149,12 @@ export default function TaskNotesSection({
                   <p className="mt-0.5 whitespace-pre-wrap break-words">
                     {safeDisplayForReact(c.text)}
                   </p>
+                  {Array.isArray(c.clientMentions) && c.clientMentions.length > 0 ? (
+                    <p className="mt-1 text-[9px] font-black uppercase tracking-widest text-sky-700">
+                      Tagged client
+                      {c.clientMentions.length === 1 ? '' : 's'}
+                    </p>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -86,18 +164,27 @@ export default function TaskNotesSection({
             onChange={setDraft}
             staffEmails={staffEmails}
             adminUsers={adminUsers}
+            clientEmails={clientEmails}
+            clientName={clientName}
             disabled={disabled || saving}
             onSubmit={save}
+            placeholder={
+              clientEmails.length
+                ? 'Write a note. Use @ to tag a teammate or client…'
+                : 'Write a note. Use @name to tag a teammate…'
+            }
           />
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <p className="text-[9px] font-bold text-slate-400">
-              Type @ to tag a teammate · Ctrl/Cmd+Enter to post
+              {clientEmails.length
+                ? 'Type @ to tag a teammate or client · Ctrl/Cmd+Enter to post'
+                : 'Type @ to tag a teammate · Ctrl/Cmd+Enter to post'}
             </p>
             <button
               type="button"
               disabled={disabled || saving || !draft.trim()}
               onClick={save}
-              className="rounded-lg bg-[#fd7414] px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white disabled:opacity-40"
+              className="shrink-0 rounded-lg bg-[#fd7414] px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white disabled:opacity-40"
             >
               {saving ? 'Saving…' : 'Post note'}
             </button>

@@ -12,6 +12,7 @@ import {
   notifyPortalTodoApprovalSent,
   notifyStaffTodoReviewRequested,
   writeClientActivity,
+  writeStaffInboxNotifications,
 } from './lib/clientMessaging.mjs';
 
 /**
@@ -144,6 +145,30 @@ export default async (req) => {
           byEmail: caller.email,
           reviewerEmails: nextItem.approvalReviewerEmails,
         });
+        try {
+          await writeStaffInboxNotifications({
+            recipientEmails: nextItem.approvalReviewerEmails || [],
+            type: 'todo_approval',
+            title: `Review requested: ${title}`,
+            body: note
+              ? `${caller.email || 'Teammate'} · ${client.name || 'Client'}: ${note}`
+              : `${caller.email || 'Teammate'} asked you to review on ${
+                  client.name || 'a client'
+                }`,
+            actorEmail: caller.email,
+            actorName: caller.email,
+            clientId,
+            clientName: client.name || '',
+            categoryKey,
+            itemId,
+            idPrefix: 'todo_staff_review',
+          });
+        } catch (inboxErr) {
+          console.warn(
+            '[client-todo-approval-send] inbox:',
+            inboxErr?.message || inboxErr,
+          );
+        }
       }
     } catch (err) {
       console.warn('[client-todo-approval-send] notify:', err?.message || err);

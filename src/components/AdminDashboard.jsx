@@ -3084,6 +3084,9 @@ const AdminDashboard = ({
                             user={user}
                             staffEmails={assignableEmails}
                             adminUsers={adminUsers}
+                            client={rowClient}
+                            cycleStart={row.cycleStart}
+                            categoryKey={row.categoryKey}
                             disabled={
                               todoSaving || isCycleLocked(rowClient, row.cycleStart)
                             }
@@ -6130,6 +6133,9 @@ const AdminDashboard = ({
                                                                 user={user}
                                                                 staffEmails={assignableEmails}
                                                                 adminUsers={adminUsers}
+                                                                client={c}
+                                                                cycleStart={cycleStart}
+                                                                categoryKey={catKey}
                                                                 disabled={
                                                                   todoSaving || isCycleLocked(c, cycleStart)
                                                                 }

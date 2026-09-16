@@ -190,6 +190,42 @@ export async function notifyPortalTodoApprovalSent({ client, title, note }) {
   return { sent: to.length };
 }
 
+export async function notifyPortalTodoNoteMention({
+  client,
+  taskTitle,
+  commentText,
+  authorName,
+  mentionedEmails = [],
+}) {
+  const allowed = new Set(portalEmails(client));
+  const to = [
+    ...new Set(
+      (mentionedEmails || [])
+        .map((e) => String(e || '').trim().toLowerCase())
+        .filter((e) => e.includes('@') && allowed.has(e)),
+    ),
+  ];
+  if (!to.length) return { sent: 0, skipped: 'no_matching_portal_emails' };
+  const href = appBaseUrl();
+  const title = String(taskTitle || 'Task').trim() || 'Task';
+  const { text, html } = emailShell({
+    eyebrow: 'Ignite PM · Task note',
+    title: `You were tagged on: ${title}`,
+    bodyText: `${authorName || 'Ignite'} tagged you on ${
+      client.name || 'your account'
+    }:\n\n${commentText || '(no note text)'}`,
+    ctaLabel: 'Open portal',
+    ctaHref: href,
+  });
+  await sendDigestEmail({
+    to,
+    subject: `Tagged on task: ${title} — ${client.name || 'Client'}`,
+    text,
+    html,
+  });
+  return { sent: to.length };
+}
+
 export async function notifyStaffTodoReviewRequested({
   client,
   title,
@@ -303,6 +339,74 @@ export async function createMessageDoc(fields) {
   };
   await mergeDoc(db, `clientMessages/${id}`, doc);
   return doc;
+}
+
+/**
+ * Write kiosk/admin inbox rows under `notifications` for staff recipients.
+ * Skips the actor email. Uses Admin SDK (bypasses client Firestore rules).
+ */
+export async function writeStaffInboxNotifications({
+  recipientEmails = [],
+  type,
+  title,
+  body = '',
+  actorEmail = '',
+  actorName = '',
+  clientId = null,
+  clientName = null,
+  categoryKey = null,
+  itemId = null,
+  idPrefix = 'inbox',
+}) {
+  const recipients = [
+    ...new Set(
+      (recipientEmails || [])
+        .map((e) => String(e || '').trim().toLowerCase())
+        .filter((e) => e.includes('@')),
+    ),
+  ];
+  const actor = String(actorEmail || '').trim().toLowerCase();
+  const targets = recipients.filter((e) => e && e !== actor);
+  if (!targets.length || !type || !title) return { written: 0 };
+
+  const db = await getDigestDb();
+  const now = Date.now();
+  let written = 0;
+  for (const email of targets) {
+    const safeEmail = email.replace(/[^a-z0-9]/gi, '_').slice(0, 48);
+    const notifId = `${idPrefix}_${now}_${safeEmail}_${Math.random()
+      .toString(36)
+      .slice(2, 7)}`;
+    await mergeDoc(db, `notifications/${notifId}`, {
+      recipientEmail: email,
+      type: String(type),
+      title: String(title).slice(0, 200),
+      body: String(body || '').slice(0, 500),
+      createdAt: now,
+      dismissed: false,
+      dismissedAt: null,
+      actorEmail: actor || null,
+      actorName: String(actorName || '').slice(0, 80),
+      clientId: clientId || null,
+      clientName: clientName || null,
+      categoryKey: categoryKey || null,
+      itemId: itemId || null,
+      commentId: null,
+    });
+    written += 1;
+  }
+  return { written };
+}
+
+/** Staff emails that typically get client-scoped alerts. */
+export function collectClientStaffNotifyEmails(client, extra = []) {
+  return [
+    ...new Set(
+      [...staffNotifyEmails(client), ...(extra || [])]
+        .map((e) => String(e || '').trim().toLowerCase())
+        .filter((e) => e.includes('@')),
+    ),
+  ];
 }
 
 export async function createReviewDoc(fields) {

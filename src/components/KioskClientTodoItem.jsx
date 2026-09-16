@@ -846,6 +846,9 @@ export default function KioskClientTodoItem({
         user={user}
         staffEmails={staffEmails.length ? staffEmails : assignableEmails}
         adminUsers={adminUsers}
+        client={client}
+        cycleStart={cycleStart}
+        categoryKey={catKey}
         disabled={todoSaving || isCycleLocked}
       />
     </li>

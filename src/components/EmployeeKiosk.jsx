@@ -3205,6 +3205,9 @@ const EmployeeKiosk = ({
                         user={user}
                         staffEmails={assignableEmails}
                         adminUsers={adminUsers}
+                        client={client}
+                        cycleStart={row.cycleStart}
+                        categoryKey={row.categoryKey}
                         disabled={todoSaving || isCycleLocked(client, row.cycleStart)}
                         compact
                       />

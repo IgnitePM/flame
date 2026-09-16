@@ -20,6 +20,8 @@ import {
   mergeDoc,
   notifyStaffTodoApprovalDecision,
   writeClientActivity,
+  writeStaffInboxNotifications,
+  collectClientStaffNotifyEmails,
 } from './lib/clientMessaging.mjs';
 
 /**
@@ -200,11 +202,14 @@ export default async (req) => {
     }
 
     let emailResult = { sent: 0 };
+    const notifyEmails = collectClientStaffNotifyEmails(client, [
+      item.approvalRequestedByEmail,
+      ...(Array.isArray(item.assigneeEmails) ? item.assigneeEmails : []),
+      ...(Array.isArray(item.approvalReviewerEmails)
+        ? item.approvalReviewerEmails
+        : []),
+    ]);
     try {
-      const notifyEmails = [
-        item.approvalRequestedByEmail,
-        ...(Array.isArray(item.assigneeEmails) ? item.assigneeEmails : []),
-      ];
       emailResult = await notifyStaffTodoApprovalDecision({
         client,
         title,
@@ -216,6 +221,30 @@ export default async (req) => {
     } catch (err) {
       console.warn('[client-todo-approval-decide] email:', err?.message || err);
       emailResult = { sent: 0, error: err?.message || String(err) };
+    }
+
+    try {
+      const who =
+        caller.authorType === 'client' || !caller.isStaff
+          ? 'Client'
+          : caller.email || 'Staff';
+      await writeStaffInboxNotifications({
+        recipientEmails: notifyEmails,
+        type: 'todo_approval',
+        title: `${label}: ${title}`,
+        body: note
+          ? `${who} · ${client.name || 'Client'}: ${note}`
+          : `${who} · ${client.name || 'Client'}`,
+        actorEmail: caller.email,
+        actorName: who,
+        clientId,
+        clientName: client.name || '',
+        categoryKey,
+        itemId,
+        idPrefix: `todo_appr_${decision === 'approved' ? 'ok' : 'rev'}`,
+      });
+    } catch (err) {
+      console.warn('[client-todo-approval-decide] inbox:', err?.message || err);
     }
 
     try {
