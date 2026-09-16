@@ -94,8 +94,9 @@ export default async (req) => {
     });
   }
 
+  let caller;
   try {
-    await requireClientOrStaffCaller(req.headers, clientId);
+    caller = await requireClientOrStaffCaller(req.headers, clientId);
   } catch (err) {
     const { status, message } = describeAuthError(err);
     return new Response(JSON.stringify({ error: message }), {
@@ -114,7 +115,7 @@ export default async (req) => {
       });
     }
 
-    if (!clientHasActiveEmailRetainer(client)) {
+    if (!caller?.isStaff && !clientHasActiveEmailRetainer(client)) {
       return new Response(
         JSON.stringify({ error: 'Email analytics requires an active Email Marketing retainer.' }),
         { status: 403, headers: { 'Content-Type': 'application/json' } },

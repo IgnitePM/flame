@@ -239,7 +239,7 @@ export default async (req) => {
       });
     }
 
-    if (!clientHasActiveSeoRetainer(client)) {
+    if (!caller?.isStaff && !clientHasActiveSeoRetainer(client)) {
       return new Response(
         JSON.stringify({
           error: 'SEO reports are available with an active SEO retainer.',

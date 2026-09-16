@@ -755,16 +755,23 @@ function AdsAnalyticsPanel({ client, dateFromMs, dateToMs }) {
 }
 
 /**
- * Portal Analytics hub — Website (SEO), Email, Social, Ads with retainer gates.
+ * Portal / staff Analytics hub — Website (SEO), Email, Social, Ads.
+ * @param {'portal'|'staff'} variant — staff sees all sub-tabs (retainer gates skipped in UI).
  */
-export default function ClientPortalAnalyticsPanel({ client, dateFromMs, dateToMs }) {
+export default function ClientPortalAnalyticsPanel({
+  client,
+  dateFromMs,
+  dateToMs,
+  variant = 'portal',
+}) {
+  const isStaffView = variant === 'staff';
   const enabledTabs = useMemo(
     () =>
       TABS.map((tab) => ({
         ...tab,
-        enabled: tab.gate(client),
+        enabled: isStaffView ? true : tab.gate(client),
       })),
-    [client],
+    [client, isStaffView],
   );
 
   const firstEnabled = enabledTabs.find((t) => t.enabled)?.id || 'website';
@@ -803,7 +810,9 @@ export default function ClientPortalAnalyticsPanel({ client, dateFromMs, dateToM
           <div>
             <h2 className="text-3xl font-black text-slate-900">Analytics</h2>
             <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px] mt-0.5">
-              Website · Email · Social · Ads
+              {isStaffView
+                ? 'Staff view · Website · Email · Social · Ads'
+                : 'Website · Email · Social · Ads'}
             </p>
           </div>
         </div>
@@ -883,7 +892,7 @@ export default function ClientPortalAnalyticsPanel({ client, dateFromMs, dateToM
         ))}
       </div>
 
-      {subTab === 'website' && clientHasActiveSeoRetainer(client) ? (
+      {subTab === 'website' && (isStaffView || clientHasActiveSeoRetainer(client)) ? (
         <ClientPortalSeoPanel
           client={client}
           dateFromMs={range.fromMs}
@@ -891,7 +900,7 @@ export default function ClientPortalAnalyticsPanel({ client, dateFromMs, dateToM
         />
       ) : null}
 
-      {subTab === 'email' && clientHasActiveEmailRetainer(client) ? (
+      {subTab === 'email' && (isStaffView || clientHasActiveEmailRetainer(client)) ? (
         <EmailAnalyticsPanel
           client={client}
           dateFromMs={range.fromMs}
@@ -899,7 +908,7 @@ export default function ClientPortalAnalyticsPanel({ client, dateFromMs, dateToM
         />
       ) : null}
 
-      {subTab === 'social' && clientHasActiveSocialMediaRetainer(client) ? (
+      {subTab === 'social' && (isStaffView || clientHasActiveSocialMediaRetainer(client)) ? (
         <SocialAnalyticsPanel
           client={client}
           dateFromMs={range.fromMs}
@@ -907,7 +916,7 @@ export default function ClientPortalAnalyticsPanel({ client, dateFromMs, dateToM
         />
       ) : null}
 
-      {subTab === 'ads' && clientHasActiveAdsRetainer(client) ? (
+      {subTab === 'ads' && (isStaffView || clientHasActiveAdsRetainer(client)) ? (
         <AdsAnalyticsPanel
           client={client}
           dateFromMs={range.fromMs}

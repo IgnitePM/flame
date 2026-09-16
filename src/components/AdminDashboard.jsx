@@ -110,6 +110,7 @@ import ClientEmailComposeModal, {
 import ClientEmailHistory from './ClientEmailHistory.jsx';
 import ClientActivityTimeline from './ClientActivityTimeline.jsx';
 import TodoDeleteConfirmModal from './TodoDeleteConfirmModal.jsx';
+import ClientPortalAnalyticsPanel from './ClientPortalAnalyticsPanel.jsx';
 import {
   exportClientCyclePDF,
   exportClientInvoicePDF,
@@ -133,6 +134,7 @@ function parseClientSubTabFromSearch(search) {
   if (t === 'approvals' || t === 'approval' || t === 'reviews' || t === 'review')
     return 'approvals';
   if (t === 'files' || t === 'drive') return 'files';
+  if (t === 'analytics' || t === 'seo' || t === 'website') return 'analytics';
   return 'summary';
 }
 
@@ -3725,6 +3727,8 @@ const AdminDashboard = ({
                 !isClientPage || clientDetailSubTab === 'timesheets';
               const showClientCycleActivity =
                 !isClientPage || clientDetailSubTab === 'cycle_activity';
+              const showClientAnalytics =
+                isClientPage && clientDetailSubTab === 'analytics';
               const offset = clientCycleOffsets[c.id] ?? 0;
               const minCycleOffset = (() => {
                 if (!c.clientStartDate) return -1e9;
@@ -4014,6 +4018,7 @@ const AdminDashboard = ({
                           { id: 'tasks', label: 'Tasks' },
                           { id: 'custom_projects', label: 'Custom projects' },
                           { id: 'timesheets', label: 'Timesheets' },
+                          { id: 'analytics', label: 'Analytics' },
                         ].map((tab) => (
                           <button
                             key={tab.id}
@@ -4662,6 +4667,15 @@ const AdminDashboard = ({
                           canShare={!isRestrictedStaff}
                         />
                       </div>
+                    )}
+
+                    {isClientPage && showClientAnalytics && (
+                      <ClientPortalAnalyticsPanel
+                        client={c}
+                        dateFromMs={mStart}
+                        dateToMs={mEnd}
+                        variant="staff"
+                      />
                     )}
 
                     {isClientPage && showClientCycleActivity && (

@@ -45,8 +45,9 @@ export default async (req) => {
     });
   }
 
+  let caller;
   try {
-    await requireClientOrStaffCaller(req.headers, clientId);
+    caller = await requireClientOrStaffCaller(req.headers, clientId);
   } catch (err) {
     const { status, message } = describeAuthError(err);
     return new Response(JSON.stringify({ error: message }), {
@@ -65,7 +66,7 @@ export default async (req) => {
       });
     }
 
-    if (!clientHasActiveAdsRetainer(client)) {
+    if (!caller?.isStaff && !clientHasActiveAdsRetainer(client)) {
       return new Response(
         JSON.stringify({ error: 'Ads analytics requires an active Ads / Social Ad Budget retainer.' }),
         { status: 403, headers: { 'Content-Type': 'application/json' } },
