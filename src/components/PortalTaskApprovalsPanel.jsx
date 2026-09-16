@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { authedFetch } from '../utils/authedFetch.js';
 import { isTodoAwaitingClientApproval } from '../utils/todoApproval.js';
+import { TextWithLinks } from '../utils/textWithLinks.jsx';
 
 /**
  * Client portal: retainer tasks awaiting client approval (not Planable / deliverable reviews).
@@ -63,10 +64,10 @@ export default function PortalTaskApprovalsPanel({
   if (!pending.length) {
     return (
       <div className="bg-white p-6 sm:p-8 rounded-[32px] border border-slate-100 shadow-sm">
-        <h3 className="font-black text-lg text-slate-900">Tasks awaiting your approval</h3>
+        <h3 className="font-black text-lg text-slate-900">Retainer tasks</h3>
         <p className="text-sm text-slate-500 font-medium mt-2">
-          When Ignite sends a retainer task for review, it will show up here. Social Media
-          creative is still approved in Planable.
+          Nothing waiting on you right now. When Ignite marks a cycle task ready for your
+          review, it will show up here. Social Media creative is still approved in Planable.
         </p>
       </div>
     );
@@ -75,9 +76,10 @@ export default function PortalTaskApprovalsPanel({
   return (
     <div className="bg-white p-6 sm:p-8 rounded-[32px] border border-slate-100 shadow-sm space-y-5">
       <div>
-        <h3 className="font-black text-lg text-slate-900">Tasks awaiting your approval</h3>
+        <h3 className="font-black text-lg text-slate-900">Retainer tasks</h3>
         <p className="text-sm text-slate-500 font-medium mt-1">
-          Approve to mark complete, or request revisions. Social Media creative stays in Planable.
+          Approve to mark the task complete, or request revisions. Social Media creative
+          stays in Planable.
         </p>
       </div>
       {banner ? (
@@ -97,6 +99,7 @@ export default function PortalTaskApprovalsPanel({
               labelForCategoryKey(row.categoryKey)) ||
             row.categoryKey;
           const busy = busyId === row.item.id;
+          const detail = String(row.item.approvalNote || '').trim();
           return (
             <li
               key={`${row.categoryKey}__${row.item.id}`}
@@ -106,19 +109,19 @@ export default function PortalTaskApprovalsPanel({
                 <span className="text-[10px] font-black uppercase tracking-widest text-violet-700">
                   {label}
                 </span>
-                {row.item.approvalNote ? (
-                  <span className="text-[10px] font-bold text-slate-500">
-                    Note from Ignite
-                  </span>
-                ) : null}
               </div>
               <p className="text-sm font-bold text-slate-900">
                 {row.item.text || '(No description)'}
               </p>
-              {row.item.approvalNote ? (
-                <p className="text-xs text-slate-600 font-medium italic">
-                  &quot;{row.item.approvalNote}&quot;
-                </p>
+              {detail ? (
+                <div className="rounded-xl bg-white border border-violet-100 px-3 py-2.5 space-y-1">
+                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    What to review
+                  </div>
+                  <p className="text-sm text-slate-700 font-medium whitespace-pre-wrap break-words">
+                    <TextWithLinks text={detail} />
+                  </p>
+                </div>
               ) : null}
               <textarea
                 value={notes[row.item.id] || ''}
@@ -126,7 +129,7 @@ export default function PortalTaskApprovalsPanel({
                   setNotes((prev) => ({ ...prev, [row.item.id]: e.target.value }))
                 }
                 rows={2}
-                placeholder="Optional feedback…"
+                placeholder="Optional feedback for Ignite…"
                 className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
               />
               <div className="flex flex-wrap gap-2">

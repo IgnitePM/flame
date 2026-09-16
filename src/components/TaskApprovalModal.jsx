@@ -6,6 +6,7 @@ import {
   isTodoPendingApproval,
   todoApprovalBadgeLabel,
 } from '../utils/todoApproval.js';
+import { TextWithLinks } from '../utils/textWithLinks.jsx';
 
 /**
  * Modal to finish a task (complete / send for approval), send for review, or decide.
@@ -25,7 +26,7 @@ export default function TaskApprovalModal({
   const [mode, setMode] = useState(initialMode);
   const [target, setTarget] = useState('client');
   const [reviewers, setReviewers] = useState([]);
-  const [note, setNote] = useState('');
+  const [note, setNote] = useState(() => String(item?.approvalNote || '').trim());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -37,6 +38,37 @@ export default function TaskApprovalModal({
         .filter((e) => e !== me)
         .sort(),
     [staffEmails, me],
+  );
+
+  const noteField = (
+    <div>
+      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+        {mode === 'decide'
+          ? 'Your feedback (optional)'
+          : target === 'client' || mode === 'finish'
+            ? 'Details for the client'
+            : 'Details for the reviewer'}
+        {mode === 'send' && target === 'client' ? (
+          <span className="text-[#fd7414]"> *</span>
+        ) : null}
+      </label>
+      <textarea
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        rows={mode === 'decide' ? 3 : 5}
+        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414] whitespace-pre-wrap"
+        placeholder={
+          mode === 'decide'
+            ? 'Feedback for the team…'
+            : 'What should they review?\nPaste page URLs, Drive links, or short instructions…'
+        }
+      />
+      {mode !== 'decide' ? (
+        <p className="mt-1 text-[10px] font-medium text-slate-400">
+          URLs become clickable links in the portal and are included in the email.
+        </p>
+      ) : null}
+    </div>
   );
 
   const markCompleteNow = async () => {
@@ -56,6 +88,10 @@ export default function TaskApprovalModal({
 
   const send = async () => {
     if (!client?.id || !item?.id || busy) return;
+    if (target === 'client' && !String(note || '').trim()) {
+      setError('Add details or a URL so the client knows what to approve.');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
@@ -105,7 +141,7 @@ export default function TaskApprovalModal({
 
   return (
     <div className="fixed inset-0 z-[200] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 p-5 space-y-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 p-5 space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-start justify-between gap-2">
           <div>
             <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">
@@ -132,6 +168,7 @@ export default function TaskApprovalModal({
               Mark it done now, or send it for client or staff approval first. Social Media
               creative still goes through Planable — this covers the retainer task itself.
             </p>
+            {noteField}
             <div className="flex flex-col gap-2">
               <button
                 type="button"
@@ -143,12 +180,17 @@ export default function TaskApprovalModal({
               </button>
               <button
                 type="button"
-                disabled={busy}
+                disabled={busy || !String(note || '').trim()}
                 onClick={() => {
                   setTarget('client');
                   setMode('send');
                 }}
                 className="w-full px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest text-white bg-[#fd7414] hover:brightness-95 disabled:opacity-40"
+                title={
+                  !String(note || '').trim()
+                    ? 'Add details or a URL above first'
+                    : undefined
+                }
               >
                 Send for client approval
               </button>
@@ -233,38 +275,32 @@ export default function TaskApprovalModal({
               </div>
             ) : (
               <p className="text-[11px] font-medium text-slate-500">
-                The client will see this on their portal Tasks tab and can approve or request
-                revisions. (Social Media content still goes through Planable — this covers the
-                retainer task itself.)
+                The client will see your details and links on the Approvals tab and can approve
+                or request revisions. (Social Media creative still goes through Planable.)
               </p>
             )}
+            {noteField}
           </>
         ) : (
-          <p className="text-[11px] font-medium text-slate-500">
-            {isTodoAwaitingClientApproval(item)
-              ? 'Approve to mark the task complete, or request revisions to send it back to Ignite.'
-              : 'Approve to mark complete, or request revisions for the assignee.'}
-          </p>
+          <>
+            {item?.approvalNote ? (
+              <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 space-y-1">
+                <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  Original request note
+                </div>
+                <p className="text-xs text-slate-700 whitespace-pre-wrap break-words">
+                  <TextWithLinks text={item.approvalNote} />
+                </p>
+              </div>
+            ) : null}
+            <p className="text-[11px] font-medium text-slate-500">
+              {isTodoAwaitingClientApproval(item)
+                ? 'Approve to mark the task complete, or request revisions to send it back to Ignite.'
+                : 'Approve to mark complete, or request revisions for the assignee.'}
+            </p>
+            {noteField}
+          </>
         )}
-
-        {mode !== 'finish' ? (
-          <div>
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-              Note (optional)
-            </label>
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              rows={3}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
-              placeholder={
-                mode === 'decide'
-                  ? 'Feedback for the team…'
-                  : 'Context for the reviewer…'
-              }
-            />
-          </div>
-        ) : null}
 
         {error ? (
           <p className="text-xs font-bold text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
@@ -272,12 +308,16 @@ export default function TaskApprovalModal({
           </p>
         ) : null}
 
-        {mode !== 'finish' ? (
+        {mode === 'send' || mode === 'decide' ? (
           <div className="flex flex-wrap justify-end gap-2 pt-1">
             {mode === 'send' ? (
               <button
                 type="button"
-                disabled={busy || (target === 'staff' && reviewers.length === 0)}
+                disabled={
+                  busy ||
+                  (target === 'staff' && reviewers.length === 0) ||
+                  (target === 'client' && !String(note || '').trim())
+                }
                 onClick={send}
                 className="px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest text-white bg-[#fd7414] hover:brightness-95 disabled:opacity-40"
               >

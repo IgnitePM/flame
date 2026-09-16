@@ -201,17 +201,22 @@ export default function ClientReviewsPanel({ client, mode = 'staff' }) {
 
   if (!clientId) return null;
 
+  // Portal: don't show an empty second "Approvals" block — task approvals live above.
+  if (mode === 'portal' && reviews.length === 0 && !loadError && !busy) {
+    return null;
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-            Approvals
+            Deliverable packages
           </h5>
           <p className="text-xs font-medium text-slate-500 mt-1">
             {mode === 'staff'
-              ? 'Send deliverables for the client to approve or request revisions.'
-              : 'Review deliverables from Ignite and approve or request changes.'}
+              ? 'Send files or write-ups for the client to approve (separate from retainer task checkboxes).'
+              : 'Larger deliverables with files attached — separate from the retainer tasks above.'}
           </p>
         </div>
         {mode === 'staff' ? (
@@ -221,7 +226,7 @@ export default function ClientReviewsPanel({ client, mode = 'staff' }) {
             className="inline-flex items-center gap-2 rounded-xl bg-black px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white"
           >
             <Plus className="w-3.5 h-3.5" />
-            {composeOpen ? 'Cancel' : 'New approval'}
+            {composeOpen ? 'Cancel' : 'New deliverable'}
           </button>
         ) : null}
       </div>
@@ -301,7 +306,7 @@ export default function ClientReviewsPanel({ client, mode = 'staff' }) {
 
       {reviews.length === 0 && !loadError ? (
         <p className="text-xs italic text-slate-400 bg-slate-50 border border-slate-200 rounded-2xl p-6 text-center">
-          No approvals yet.
+          No deliverable packages yet.
         </p>
       ) : (
         <ul className="space-y-3">
