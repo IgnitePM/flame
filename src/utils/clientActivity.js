@@ -19,6 +19,8 @@ export const CLIENT_ACTIVITY_TYPES = {
   review_decision: { label: 'Approval decision', group: 'portal' },
   todo_request: { label: 'Task request', group: 'portal' },
   todo_request_decision: { label: 'Task request decision', group: 'portal' },
+  todo_approval_sent: { label: 'Task sent for approval', group: 'tasks' },
+  todo_approval_decision: { label: 'Task approval decision', group: 'tasks' },
   addon_request: { label: 'Add-on hours', group: 'portal' },
 };
 

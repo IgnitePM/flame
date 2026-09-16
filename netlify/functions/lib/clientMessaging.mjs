@@ -168,6 +168,99 @@ export async function notifyStaffReviewDecision({ client, title, status, note, b
   return { sent: to.length };
 }
 
+export async function notifyPortalTodoApprovalSent({ client, title, note }) {
+  const to = portalEmails(client);
+  if (!to.length) return { sent: 0, skipped: 'no_portal_emails' };
+  const href = `${appBaseUrl()}?tab=tasks`;
+  const { text, html } = emailShell({
+    eyebrow: 'Ignite PM · Task approval',
+    title: `Please review: ${title}`,
+    bodyText:
+      note ||
+      'A task is ready for your review in the client portal. Approve it or request revisions.',
+    ctaLabel: 'Open portal tasks',
+    ctaHref: href,
+  });
+  await sendDigestEmail({
+    to,
+    subject: `Please review task: ${title}`,
+    text,
+    html,
+  });
+  return { sent: to.length };
+}
+
+export async function notifyStaffTodoReviewRequested({
+  client,
+  title,
+  note,
+  byEmail,
+  reviewerEmails = [],
+}) {
+  const to = [
+    ...new Set(
+      (reviewerEmails || [])
+        .map((e) => String(e || '').trim().toLowerCase())
+        .filter((e) => e.includes('@')),
+    ),
+  ];
+  if (!to.length) return { sent: 0, skipped: 'no_reviewers' };
+  const href = `${appBaseUrl()}/clients/${client.id}?tab=tasks`;
+  const { text, html } = emailShell({
+    eyebrow: 'Ignite PM · Staff review',
+    title: `Review requested: ${title}`,
+    bodyText: `${byEmail || 'A teammate'} asked you to review this task on ${
+      client.name || 'a client'
+    }.\n\n${note || '(no note)'}`,
+    ctaLabel: 'Open tasks',
+    ctaHref: href,
+  });
+  await sendDigestEmail({
+    to,
+    subject: `Review task: ${title} — ${client.name || 'Client'}`,
+    text,
+    html,
+  });
+  return { sent: to.length };
+}
+
+export async function notifyStaffTodoApprovalDecision({
+  client,
+  title,
+  status,
+  note,
+  byEmail,
+  notifyEmails = [],
+}) {
+  const fallback = staffNotifyEmails(client);
+  const to = [
+    ...new Set(
+      [...(notifyEmails || []), ...fallback]
+        .map((e) => String(e || '').trim().toLowerCase())
+        .filter((e) => e.includes('@')),
+    ),
+  ];
+  if (!to.length) return { sent: 0, skipped: 'no_staff_emails' };
+  const label = status === 'approved' ? 'Approved' : 'Revisions requested';
+  const href = `${appBaseUrl()}/clients/${client.id}?tab=tasks`;
+  const { text, html } = emailShell({
+    eyebrow: 'Ignite PM · Task approval',
+    title: `${label}: ${title}`,
+    bodyText: `${byEmail || 'Someone'} responded on ${client.name || 'client'}.\n\n${
+      note || '(no note)'
+    }`,
+    ctaLabel: 'Open tasks',
+    ctaHref: href,
+  });
+  await sendDigestEmail({
+    to,
+    subject: `${label}: ${title} — ${client.name || 'Client'}`,
+    text,
+    html,
+  });
+  return { sent: to.length };
+}
+
 export async function notifyStaffMentions({
   client,
   messageBody,

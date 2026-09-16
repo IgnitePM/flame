@@ -23,6 +23,11 @@ import {
 } from '../utils/todoSubtasks.js';
 import TodoItemAttachments from './TodoItemAttachments.jsx';
 import TaskNotesSection from './TaskNotesSection.jsx';
+import {
+  canCurrentUserDecideStaffApproval,
+  TodoApprovalBadge,
+} from './TaskApprovalModal.jsx';
+import { isTodoPendingApproval } from '../utils/todoApproval.js';
 
 function parseDateInputToMs(value) {
   if (!value) return null;
@@ -246,6 +251,8 @@ export default function KioskClientTodoItem({
   onAssigneesChange,
   onSubtaskAssigneesChange,
   onOpenOptions,
+  onRequestComplete = null,
+  onOpenApproval = null,
   attachClientDriveFile,
   removeClientDocument,
   canAttachFiles = false,
@@ -434,6 +441,16 @@ export default function KioskClientTodoItem({
 
   const renderPrimaryControls = () => (
     <div className="flex shrink-0 items-center justify-end gap-1">
+      {canCurrentUserDecideStaffApproval(item, meLower) && onOpenApproval ? (
+        <button
+          type="button"
+          disabled={pickerDisabled}
+          onClick={() => onOpenApproval(item, 'decide')}
+          className="kiosk-light-control shrink-0 px-2 py-1 rounded-lg bg-violet-50 border border-violet-200 text-[9px] font-black uppercase tracking-widest text-violet-800"
+        >
+          Review
+        </button>
+      ) : null}
       <AssigneePicker
         openKey={itemAssigneeOpenKey}
         assigneeOpenKey={assigneeOpenKey}
@@ -525,10 +542,20 @@ export default function KioskClientTodoItem({
             checked={!!item.done}
             onChange={async () => {
               if (todoSaving) return;
+              if (!item.done && isTodoPendingApproval(item)) {
+                if (canCurrentUserDecideStaffApproval(item, meLower) && onOpenApproval) {
+                  onOpenApproval(item, 'decide');
+                }
+                return;
+              }
               if (!item.done && !canMarkParentTodoDone(item)) {
                 window.alert(
                   'Complete every sub-task before marking this primary task complete.',
                 );
+                return;
+              }
+              if (!item.done && typeof onRequestComplete === 'function') {
+                onRequestComplete(item);
                 return;
               }
               setTodoSaving(true);
@@ -572,6 +599,9 @@ export default function KioskClientTodoItem({
                   Recurring
                 </span>
               )}
+            </div>
+            <div className="mt-0.5 flex flex-wrap gap-1.5 items-center">
+              <TodoApprovalBadge item={item} />
             </div>
             {(item.dueDate || (subs.length > 0 && !item.done)) && (
               <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] font-black uppercase tracking-widest">

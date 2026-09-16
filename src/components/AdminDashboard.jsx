@@ -31,6 +31,13 @@ import {
   X,
 } from 'lucide-react';
 import SalesFunnelPanel from './sales/SalesFunnelPanel.jsx';
+import TaskApprovalModal, {
+  canCurrentUserDecideStaffApproval,
+  TodoApprovalBadge,
+} from './TaskApprovalModal.jsx';
+import {
+  isTodoPendingApproval,
+} from '../utils/todoApproval.js';
 import {
   orderTodosForDisplay,
   toggleTodoPinnedById,
@@ -1326,6 +1333,7 @@ const AdminDashboard = ({
   const [todoEditOptionsDue, setTodoEditOptionsDue] = useState('');
   const [todoEditOptionsRecurrence, setTodoEditOptionsRecurrence] = useState('none');
   const [todoEditOptionsEstimate, setTodoEditOptionsEstimate] = useState('');
+  const [taskApprovalModal, setTaskApprovalModal] = useState(null);
   /** Global Tasks tab: inline add sub-task (one parent at a time). */
   const [globalSubtaskComposer, setGlobalSubtaskComposer] = useState(null);
   const [globalSubtaskText, setGlobalSubtaskText] = useState('');
@@ -1677,6 +1685,101 @@ const AdminDashboard = ({
     else if (t === 'monthly_fixed_day') editMode = 'monthly';
     else if (recurrenceSource?.recurring) editMode = 'monthly';
     setTodoEditOptionsRecurrence(editMode);
+  };
+
+  const openTaskApprovalForItem = (
+    client,
+    cycleStart,
+    categoryKey,
+    item,
+    mode = 'send',
+  ) => {
+    if (!client || !item) return;
+    setTaskApprovalModal({ mode, client, cycleStart, categoryKey, item });
+  };
+
+  const markClientTodoCompleteNow = async (
+    client,
+    cycleStart,
+    categoryKey,
+    item,
+  ) => {
+    if (!client || !item) return;
+    if (!canMarkParentTodoDone(item)) {
+      throw new Error(
+        'Complete every sub-task before marking this primary task complete.',
+      );
+    }
+    setTodoSaving(true);
+    try {
+      if (setClientTodoItemDone) {
+        const ok = await setClientTodoItemDone(
+          client,
+          cycleStart,
+          categoryKey,
+          item,
+          true,
+        );
+        if (!ok) {
+          throw new Error(
+            'Could not mark this task complete. Finish every sub-task first, then try again.',
+          );
+        }
+        return;
+      }
+      const todoState = getTodoStateForCycle(client, cycleStart);
+      const catTodo = todoState[categoryKey] || { closed: false, items: [] };
+      const next = (catTodo.items || []).map((i) =>
+        i.id === item.id ? { ...i, done: true, doneAt: Date.now() } : i,
+      );
+      await updateClientTodo(client, cycleStart, categoryKey, {
+        ...catTodo,
+        items: next,
+      });
+    } finally {
+      setTodoSaving(false);
+    }
+  };
+
+  const handleTodoCompleteClick = async (
+    client,
+    cycleStart,
+    categoryKey,
+    item,
+    catTodo,
+  ) => {
+    if (!client || !item) return;
+    const me = String(user?.email || '').trim().toLowerCase();
+    if (!item.done && isTodoPendingApproval(item)) {
+      if (canCurrentUserDecideStaffApproval(item, me)) {
+        openTaskApprovalForItem(client, cycleStart, categoryKey, item, 'decide');
+      }
+      return;
+    }
+    if (!item.done && !canMarkParentTodoDone(item)) {
+      window.alert(
+        'Complete every sub-task before marking this primary task complete.',
+      );
+      return;
+    }
+    if (!item.done) {
+      openTaskApprovalForItem(client, cycleStart, categoryKey, item, 'finish');
+      return;
+    }
+    if (todoSaving) return;
+    setTodoSaving(true);
+    try {
+      const items = catTodo?.items || [];
+      const next = items.map((i) =>
+        i.id === item.id ? { ...i, done: false, doneAt: null } : i,
+      );
+      await updateClientTodo(client, cycleStart, categoryKey, {
+        ...catTodo,
+        items: next,
+      });
+    } finally {
+      setTodoSaving(false);
+    }
   };
 
   const applyTodoEditOptionsModal = async () => {
@@ -2811,6 +2914,7 @@ const AdminDashboard = ({
                 className="w-full bg-slate-50 border border-slate-200 p-3.5 rounded-2xl outline-none focus:ring-2 focus:ring-[#fd7414]/50 transition-all font-bold text-sm"
               >
                 <option value="open">Open</option>
+                <option value="pending_approval">Pending approval</option>
                 <option value="completed">Completed</option>
               </select>
             </div>
@@ -2906,54 +3010,18 @@ const AdminDashboard = ({
                         type="checkbox"
                         checked={!!row.item.done}
                         onChange={async () => {
-                          if (!row.item.done && !canMarkParentTodoDone(row.item)) {
-                            window.alert(
-                              'Complete every sub-task before marking this primary task complete.',
-                            );
+                          const client = clients.find((c) => c.id === row.clientId);
+                          if (!client) {
+                            window.alert('Client not found for this task. It may have been deleted.');
                             return;
                           }
-                          if (todoSaving) return;
-                          setTodoSaving(true);
-                          try {
-                            const client = clients.find((c) => c.id === row.clientId);
-                            if (!client) {
-                              window.alert('Client not found for this task. It may have been deleted.');
-                              return;
-                            }
-                            if (!row.item.done && setClientTodoItemDone) {
-                              const ok = await setClientTodoItemDone(
-                                client,
-                                row.cycleStart,
-                                row.categoryKey,
-                                row.item,
-                                true,
-                              );
-                              if (!ok) {
-                                window.alert(
-                                  'Could not mark this task complete. Finish every sub-task first, then try again.',
-                                );
-                              }
-                              return;
-                            }
-                            const items = row.catTodo.items || [];
-                            const next = items.map((i) =>
-                              i.id === row.item.id
-                                ? {
-                                    ...i,
-                                    done: !i.done,
-                                    doneAt: !i.done ? Date.now() : null,
-                                  }
-                                : i,
-                            );
-                            await updateClientTodo(
-                              client,
-                              row.cycleStart,
-                              row.categoryKey,
-                              { ...row.catTodo, items: next },
-                            );
-                          } finally {
-                            setTodoSaving(false);
-                          }
+                          await handleTodoCompleteClick(
+                            client,
+                            row.cycleStart,
+                            row.categoryKey,
+                            row.item,
+                            row.catTodo,
+                          );
                         }}
                         disabled={todoSaving}
                         className="w-4 h-4"
@@ -2966,6 +3034,9 @@ const AdminDashboard = ({
                               ({subs.filter((s) => !s.done).length}/{subs.length} sub-tasks)
                             </span>
                           )}
+                          <span className="ml-2 inline-flex align-middle">
+                            <TodoApprovalBadge item={row.item} />
+                          </span>
                         </div>
                         <div className={`text-[10px] font-bold uppercase tracking-widest ${styles.metaClass}`}>
                           <button
@@ -3064,6 +3135,27 @@ const AdminDashboard = ({
                           >
                             Options
                           </button>
+                          {canCurrentUserDecideStaffApproval(
+                            row.item,
+                            String(user?.email || '').trim().toLowerCase(),
+                          ) ? (
+                            <button
+                              type="button"
+                              disabled={todoSaving}
+                              onClick={() =>
+                                openTaskApprovalForItem(
+                                  rowClient,
+                                  row.cycleStart,
+                                  row.categoryKey,
+                                  row.item,
+                                  'decide',
+                                )
+                              }
+                              className="shrink-0 px-3 py-2 rounded-xl border border-violet-200 bg-violet-50 text-[10px] font-black uppercase tracking-widest text-violet-800 hover:bg-violet-100 disabled:opacity-40"
+                            >
+                              Review
+                            </button>
+                          ) : null}
                         </div>
                       )}
                       {!row.item.done && (
@@ -4066,6 +4158,7 @@ const AdminDashboard = ({
                             className="w-full bg-white border border-slate-200 p-2.5 rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-[#fd7414]/40"
                           >
                             <option value="open">Open</option>
+                            <option value="pending_approval">Pending approval</option>
                             <option value="completed">Completed</option>
                           </select>
                         </div>
@@ -5829,23 +5922,13 @@ const AdminDashboard = ({
                                                                 checked={!!item.done}
                                                                 onChange={async () => {
                                                                   if (isCycleLocked(c, cycleStart)) return;
-                                                                  if (!item.done && !canMarkParentTodoDone(item)) {
-                                                                    window.alert(
-                                                                      'Complete every sub-task before marking this primary task complete.',
-                                                                    );
-                                                                    return;
-                                                                  }
-                                                                  setTodoSaving(true);
-                                                                  try {
-                                                                    const next = items.map((i) =>
-                                                                      i.id === item.id
-                                                                        ? { ...i, done: !i.done, doneAt: !i.done ? Date.now() : null }
-                                                                        : i
-                                                                    );
-                                                                    await updateClientTodo(c, cycleStart, catKey, { ...catTodo, items: next });
-                                                                  } finally {
-                                                                    setTodoSaving(false);
-                                                                  }
+                                                                  await handleTodoCompleteClick(
+                                                                    c,
+                                                                    cycleStart,
+                                                                    catKey,
+                                                                    item,
+                                                                    catTodo,
+                                                                  );
                                                                 }}
                                                                 disabled={todoSaving}
                                                                 className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414]"
@@ -5886,10 +5969,11 @@ const AdminDashboard = ({
                                                                     setTodoEditText(item.text || '');
                                                                   }}
                                                                 >
-                                                                  <span className="flex items-center gap-2">
+                                                                  <span className="flex items-center gap-2 flex-wrap">
                                                                     <span>
                                                                       {item.text || '(no text)'}
                                                                     </span>
+                                                                    <TodoApprovalBadge item={item} />
                                                                     {item.recurring && (
                                                                       <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${urgency.metaClass}`}>
                                                                         Recurring
@@ -7806,6 +7890,68 @@ const AdminDashboard = ({
                 })()}
               </div>
             ) : null}
+            {!todoEditOptionsTarget.subtaskId && (() => {
+              const cl = clients.find((x) => x.id === todoEditOptionsTarget.clientId);
+              if (!cl || !getTodoStateForCycle) return null;
+              const st = getTodoStateForCycle(cl, todoEditOptionsTarget.cycleStart);
+              const cat = st[todoEditOptionsTarget.categoryKey] || { items: [] };
+              const item = (cat.items || []).find(
+                (i) => i.id === todoEditOptionsTarget.itemId,
+              );
+              if (!item || item.done) return null;
+              const me = String(user?.email || '').trim().toLowerCase();
+              const pending = isTodoPendingApproval(item);
+              const canDecide = canCurrentUserDecideStaffApproval(item, me);
+              return (
+                <div className="rounded-xl border border-slate-100 bg-slate-50 p-3 space-y-2">
+                  <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    Approval
+                  </div>
+                  <TodoApprovalBadge item={item} />
+                  {pending && canDecide ? (
+                    <button
+                      type="button"
+                      disabled={todoSaving}
+                      onClick={() => {
+                        setTodoEditOptionsTarget(null);
+                        openTaskApprovalForItem(
+                          cl,
+                          todoEditOptionsTarget.cycleStart,
+                          todoEditOptionsTarget.categoryKey,
+                          item,
+                          'decide',
+                        );
+                      }}
+                      className="w-full px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest text-violet-800 bg-violet-50 hover:bg-violet-100 disabled:opacity-50"
+                    >
+                      Review approval
+                    </button>
+                  ) : !pending ? (
+                    <button
+                      type="button"
+                      disabled={todoSaving}
+                      onClick={() => {
+                        setTodoEditOptionsTarget(null);
+                        openTaskApprovalForItem(
+                          cl,
+                          todoEditOptionsTarget.cycleStart,
+                          todoEditOptionsTarget.categoryKey,
+                          item,
+                          'send',
+                        );
+                      }}
+                      className="w-full px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest text-white bg-[#fd7414] hover:brightness-95 disabled:opacity-50"
+                    >
+                      Send for approval
+                    </button>
+                  ) : (
+                    <p className="text-[11px] font-medium text-slate-500">
+                      Waiting on {item.approvalTarget === 'staff' ? 'staff' : 'client'} review.
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
             <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"
@@ -7848,6 +7994,28 @@ const AdminDashboard = ({
         taskTitle={todoDeletePrompt?.taskTitle || ''}
         saving={todoSaving}
       />
+
+      {taskApprovalModal ? (
+        <TaskApprovalModal
+          key={`${taskApprovalModal.mode}-${taskApprovalModal.item?.id}`}
+          mode={taskApprovalModal.mode}
+          client={taskApprovalModal.client}
+          cycleStart={taskApprovalModal.cycleStart}
+          categoryKey={taskApprovalModal.categoryKey}
+          item={taskApprovalModal.item}
+          staffEmails={staffEmails}
+          currentUserEmail={user?.email || ''}
+          onClose={() => setTaskApprovalModal(null)}
+          onMarkComplete={() =>
+            markClientTodoCompleteNow(
+              taskApprovalModal.client,
+              taskApprovalModal.cycleStart,
+              taskApprovalModal.categoryKey,
+              taskApprovalModal.item,
+            )
+          }
+        />
+      ) : null}
 
       {todoAddOptionsModalCatKey && (
         <div className="fixed inset-0 z-[150] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">

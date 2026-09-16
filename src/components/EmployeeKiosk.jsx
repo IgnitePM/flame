@@ -49,6 +49,11 @@ import {
 import { safeDisplayForReact } from '../utils/safeReactText.js';
 import RetainerCategoryStats from './RetainerCategoryStats.jsx';
 import TodoDeleteConfirmModal from './TodoDeleteConfirmModal.jsx';
+import TaskApprovalModal, {
+  canCurrentUserDecideStaffApproval,
+  TodoApprovalBadge,
+} from './TaskApprovalModal.jsx';
+import { isTodoPendingApproval } from '../utils/todoApproval.js';
 import {
   filterClientsForTeamMember,
   teamMemberCanViewClient,
@@ -209,6 +214,7 @@ const EmployeeKiosk = ({
   const [clientTodoAssigneeOpenKey, setClientTodoAssigneeOpenKey] =
     React.useState(null);
   const [todoAddAssignees, setTodoAddAssignees] = React.useState([]);
+  const [taskApprovalModal, setTaskApprovalModal] = React.useState(null);
 
   /** Sidebar: retainer lines ending soon with unused budget. */
   const [kioskRetainerWindowFilter, setKioskRetainerWindowFilter] = React.useState('all');
@@ -703,35 +709,43 @@ const EmployeeKiosk = ({
       window.alert('This billing cycle is locked.');
       return;
     }
+    if (!item.done && isTodoPendingApproval(item)) {
+      const email = String(staffEmail || user?.email || '').trim().toLowerCase();
+      if (canCurrentUserDecideStaffApproval(item, email)) {
+        setTaskApprovalModal({
+          mode: 'decide',
+          client,
+          cycleStart,
+          categoryKey,
+          item,
+        });
+      }
+      return;
+    }
     if (!item.done && !canMarkParentTodoDone(item)) {
       window.alert(
         'Complete every sub-task before marking this primary task complete.',
       );
       return;
     }
+    if (!item.done) {
+      setTaskApprovalModal({
+        mode: 'finish',
+        client,
+        cycleStart,
+        categoryKey,
+        item,
+      });
+      return;
+    }
     setTodoSaving(true);
     try {
-      if (!item.done && setClientTodoItemDone) {
-        const ok = await setClientTodoItemDone(
-          client,
-          cycleStart,
-          categoryKey,
-          item,
-          true,
-        );
-        if (!ok) {
-          window.alert(
-            'Could not mark this task complete. Finish every sub-task first, then try again.',
-          );
-        }
-        return;
-      }
       const todoState = getTodoStateForCycle(client, cycleStart);
       const catTodo = todoState[categoryKey] || { closed: false, items: [] };
       const items = catTodo.items || [];
       const next = items.map((i) =>
         i.id === item.id
-          ? { ...i, done: !i.done, doneAt: !i.done ? Date.now() : null }
+          ? { ...i, done: false, doneAt: null }
           : i,
       );
       await updateClientTodo(client, cycleStart, categoryKey, {
@@ -741,6 +755,93 @@ const EmployeeKiosk = ({
     } finally {
       setTodoSaving(false);
     }
+  };
+
+  const markClientTodoCompleteNow = async (
+    client,
+    cycleStart,
+    categoryKey,
+    item,
+  ) => {
+    if (!client || !item) return;
+    if (isCycleLocked(client, cycleStart)) {
+      throw new Error('This billing cycle is locked.');
+    }
+    if (!canMarkParentTodoDone(item)) {
+      throw new Error(
+        'Complete every sub-task before marking this primary task complete.',
+      );
+    }
+    setTodoSaving(true);
+    try {
+      if (setClientTodoItemDone) {
+        const ok = await setClientTodoItemDone(
+          client,
+          cycleStart,
+          categoryKey,
+          item,
+          true,
+        );
+        if (!ok) {
+          throw new Error(
+            'Could not mark this task complete. Finish every sub-task first, then try again.',
+          );
+        }
+        return;
+      }
+      const todoState = getTodoStateForCycle(client, cycleStart);
+      const catTodo = todoState[categoryKey] || { closed: false, items: [] };
+      const next = (catTodo.items || []).map((i) =>
+        i.id === item.id ? { ...i, done: true, doneAt: Date.now() } : i,
+      );
+      await updateClientTodo(client, cycleStart, categoryKey, {
+        ...catTodo,
+        items: next,
+      });
+    } finally {
+      setTodoSaving(false);
+    }
+  };
+
+  const openTaskApprovalForItem = (
+    client,
+    cycleStart,
+    categoryKey,
+    item,
+    mode = 'send',
+  ) => {
+    if (!client || !item) return;
+    setTaskApprovalModal({
+      mode,
+      client,
+      cycleStart,
+      categoryKey,
+      item,
+    });
+  };
+
+  const resolveClientTodoEditItem = () => {
+    if (!clientTodoEditTarget || !getTodoStateForCycle) return null;
+    const client = (clientsFull || []).find(
+      (cl) => cl.id === clientTodoEditTarget.clientId,
+    );
+    if (!client) return null;
+    const todoState = getTodoStateForCycle(
+      client,
+      clientTodoEditTarget.cycleStart,
+    );
+    const catTodo =
+      todoState[clientTodoEditTarget.categoryKey] || { items: [] };
+    const item = (catTodo.items || []).find(
+      (i) => i.id === clientTodoEditTarget.itemId,
+    );
+    if (!item) return null;
+    return {
+      client,
+      cycleStart: clientTodoEditTarget.cycleStart,
+      categoryKey: clientTodoEditTarget.categoryKey,
+      item,
+    };
   };
 
   const renderClientTodoAssigneePicker = ({
@@ -1827,6 +1928,24 @@ const EmployeeKiosk = ({
                                         subtask,
                                       )
                                     }
+                                    onRequestComplete={(todoItem) =>
+                                      openTaskApprovalForItem(
+                                        selectedClientObj,
+                                        row.cycleStart,
+                                        row.categoryKey,
+                                        todoItem,
+                                        'finish',
+                                      )
+                                    }
+                                    onOpenApproval={(todoItem, mode) =>
+                                      openTaskApprovalForItem(
+                                        selectedClientObj,
+                                        row.cycleStart,
+                                        row.categoryKey,
+                                        todoItem,
+                                        mode || 'decide',
+                                      )
+                                    }
                                   />
                                   );
                                 })}
@@ -2221,6 +2340,24 @@ const EmployeeKiosk = ({
                                         row.categoryKey,
                                         todoItem,
                                         subtask,
+                                      )
+                                    }
+                                    onRequestComplete={(todoItem) =>
+                                      openTaskApprovalForItem(
+                                        selectedClientObj,
+                                        row.cycleStart,
+                                        row.categoryKey,
+                                        todoItem,
+                                        'finish',
+                                      )
+                                    }
+                                    onOpenApproval={(todoItem, mode) =>
+                                      openTaskApprovalForItem(
+                                        selectedClientObj,
+                                        row.cycleStart,
+                                        row.categoryKey,
+                                        todoItem,
+                                        mode || 'decide',
                                       )
                                     }
                                   />
@@ -2883,6 +3020,7 @@ const EmployeeKiosk = ({
               className="bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-[#fd7414]/40"
             >
               <option value="open">Open</option>
+              <option value="pending_approval">Pending approval</option>
               <option value="completed">Completed</option>
             </select>
             <select
@@ -2948,6 +3086,9 @@ const EmployeeKiosk = ({
                     <div className={`text-[10px] font-black truncate ${titleClass}`}>{row.clientName}</div>
                     <div className={`text-[9px] truncate ${metaClass}`}>{row.categoryLabel}</div>
                     <div className={`text-xs font-bold leading-snug line-clamp-2 ${titleClass}`}>{safeDisplayForReact(row.item.text) || '(no text)'}</div>
+                    <div className="mt-0.5">
+                      <TodoApprovalBadge item={row.item} />
+                    </div>
                     {row.item.dueDate ? (
                       <div className={`text-[9px] font-bold mt-0.5 ${dueClass}`}>
                         Due {new Date(row.item.dueDate).toLocaleDateString()}
@@ -2974,6 +3115,24 @@ const EmployeeKiosk = ({
                           className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
                           title="Mark complete"
                         />
+                        {canCurrentUserDecideStaffApproval(row.item, meLower) && (
+                          <button
+                            type="button"
+                            disabled={todoSaving || isCycleLocked(client, row.cycleStart)}
+                            onClick={() =>
+                              openTaskApprovalForItem(
+                                client,
+                                row.cycleStart,
+                                row.categoryKey,
+                                row.item,
+                                'decide',
+                              )
+                            }
+                            className="px-2 py-1 rounded-lg bg-violet-50 border border-violet-200 text-[9px] font-black uppercase tracking-widest text-violet-800"
+                          >
+                            Review
+                          </button>
+                        )}
                         {canManageClientTodos &&
                           renderClientTodoAssigneePicker({
                           openKey: `sidebar__${row.clientId}__${row.cycleStart}__${row.categoryKey}__${row.item.id}`,
@@ -3754,6 +3913,64 @@ const EmployeeKiosk = ({
                 </p>
               </div>
             )}
+            {!clientTodoEditTarget.subtaskId && (() => {
+              const resolved = resolveClientTodoEditItem();
+              if (!resolved || resolved.item.done) return null;
+              const pending = isTodoPendingApproval(resolved.item);
+              const canDecide = canCurrentUserDecideStaffApproval(
+                resolved.item,
+                meLower,
+              );
+              return (
+                <div className="rounded-xl border border-slate-100 bg-slate-50 p-3 space-y-2">
+                  <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    Approval
+                  </div>
+                  <TodoApprovalBadge item={resolved.item} />
+                  {pending && canDecide ? (
+                    <button
+                      type="button"
+                      disabled={todoSaving}
+                      onClick={() => {
+                        setClientTodoEditTarget(null);
+                        openTaskApprovalForItem(
+                          resolved.client,
+                          resolved.cycleStart,
+                          resolved.categoryKey,
+                          resolved.item,
+                          'decide',
+                        );
+                      }}
+                      className="w-full px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest text-violet-800 bg-violet-50 hover:bg-violet-100 disabled:opacity-50"
+                    >
+                      Review approval
+                    </button>
+                  ) : !pending ? (
+                    <button
+                      type="button"
+                      disabled={todoSaving}
+                      onClick={() => {
+                        setClientTodoEditTarget(null);
+                        openTaskApprovalForItem(
+                          resolved.client,
+                          resolved.cycleStart,
+                          resolved.categoryKey,
+                          resolved.item,
+                          'send',
+                        );
+                      }}
+                      className="w-full px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest text-white bg-[#fd7414] hover:brightness-95 disabled:opacity-50"
+                    >
+                      Send for approval
+                    </button>
+                  ) : (
+                    <p className="text-[11px] font-medium text-slate-500">
+                      Waiting on {resolved.item.approvalTarget === 'staff' ? 'staff' : 'client'} review.
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
             <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"
@@ -3796,6 +4013,28 @@ const EmployeeKiosk = ({
         taskTitle={clientTodoDeletePrompt?.taskTitle || ''}
         saving={todoSaving}
       />
+
+      {taskApprovalModal ? (
+        <TaskApprovalModal
+          key={`${taskApprovalModal.mode}-${taskApprovalModal.item?.id}`}
+          mode={taskApprovalModal.mode}
+          client={taskApprovalModal.client}
+          cycleStart={taskApprovalModal.cycleStart}
+          categoryKey={taskApprovalModal.categoryKey}
+          item={taskApprovalModal.item}
+          staffEmails={staffEmails.length ? staffEmails : assignableEmails}
+          currentUserEmail={staffEmail || user?.email || ''}
+          onClose={() => setTaskApprovalModal(null)}
+          onMarkComplete={() =>
+            markClientTodoCompleteNow(
+              taskApprovalModal.client,
+              taskApprovalModal.cycleStart,
+              taskApprovalModal.categoryKey,
+              taskApprovalModal.item,
+            )
+          }
+        />
+      ) : null}
     </div>
   );
 };

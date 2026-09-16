@@ -5,6 +5,7 @@ import {
   collectEffectiveAssigneesForTodoTree,
   getSubtasks,
 } from './todoSubtasks.js';
+import { isTodoPendingApproval } from './todoApproval.js';
 
 export function startOfTodayMs(now = Date.now()) {
   const d = new Date(now);
@@ -17,8 +18,13 @@ export function addDaysMs(ms, days) {
 }
 
 export function taskMatchesStatus(item, statusFilter) {
-  if (statusFilter === "open") return !item?.done;
+  if (statusFilter === "open") {
+    return !item?.done;
+  }
   if (statusFilter === "completed") return !!item?.done;
+  if (statusFilter === "pending_approval") {
+    return !item?.done && isTodoPendingApproval(item);
+  }
   return true;
 }
 

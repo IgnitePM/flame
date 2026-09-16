@@ -22,7 +22,10 @@ import {
 import RetainerCategoryStats from './RetainerCategoryStats.jsx';
 import ClientMessagesPanel from './ClientMessagesPanel.jsx';
 import ClientReviewsPanel from './ClientReviewsPanel.jsx';
+import PortalTaskApprovalsPanel from './PortalTaskApprovalsPanel.jsx';
 import ClientPortalFilesPanel from './ClientPortalFilesPanel.jsx';
+import { TodoApprovalBadge } from './TaskApprovalModal.jsx';
+import { isTodoAwaitingClientApproval } from '../utils/todoApproval.js';
 import PortalTaskRequestForm from './PortalTaskRequestForm.jsx';
 import PortalCompanyProfilePanel from './PortalCompanyProfilePanel.jsx';
 import ClientPortalToolsPanel from './ClientPortalToolsPanel.jsx';
@@ -432,7 +435,15 @@ const ClientPortal = ({
         ) : null}
 
         {portalSection === 'approvals' ? (
-          <ClientReviewsPanel client={clientProfile} mode="portal" />
+          <div className="space-y-8">
+            <PortalTaskApprovalsPanel
+              client={clientProfile}
+              todoState={todoState}
+              cycleStart={mStart}
+              labelForCategoryKey={labelForTodoCategoryKey}
+            />
+            <ClientReviewsPanel client={clientProfile} mode="portal" />
+          </div>
         ) : null}
 
         {portalSection === 'files' ? (
@@ -911,6 +922,12 @@ const ClientPortal = ({
                             {item.requestStatus === 'pending' ? (
                               <span className="text-[9px] font-black uppercase tracking-widest text-sky-700 bg-sky-50 px-1.5 py-0.5 rounded">
                                 Pending approval
+                              </span>
+                            ) : null}
+                            <TodoApprovalBadge item={item} />
+                            {isTodoAwaitingClientApproval(item) ? (
+                              <span className="text-[9px] font-black uppercase tracking-widest text-violet-700">
+                                See Approvals tab
                               </span>
                             ) : null}
                           </li>
