@@ -325,6 +325,13 @@ service cloud.firestore {
         emailLower().matches('digest-bot@.*');
     }
 
+    // Per-staff Google Calendar OAuth tokens (kiosk agenda). Same lockdown —
+    // browsers never read tokens; Netlify status/events APIs only.
+    match /calendarConnections/{userId} {
+      allow read, write: if isSignedIn() &&
+        emailLower().matches('digest-bot@.*');
+    }
+
     // Company Google Drive OAuth tokens (CRM file cabinet). Same lockdown —
     // browsers never read tokens; Netlify status/list/upload APIs only.
     match /driveConnections/{docId} {

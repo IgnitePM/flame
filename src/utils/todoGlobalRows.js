@@ -26,7 +26,8 @@ function buildLabelMap(c, projects, todoCategoryKey) {
       labelMap[catKey] = resolved || catKey;
     }
   }
-  labelMap[keyOf("General / Unclassified")] = "General / Unclassified";
+  // Display label for leftover unclassified todos (no longer seeded for new work).
+  labelMap[keyOf("General / Unclassified")] = "General / Unclassified (legacy)";
   (projects || [])
     .filter((p) => p && p.clientId === c.id && !p.archived)
     .forEach((p) => {

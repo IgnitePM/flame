@@ -307,7 +307,7 @@ const ClientPortal = ({
     );
     if (hit) return hit;
     if (key === todoCategoryKey('General / Unclassified')) {
-      return 'General / Unclassified';
+      return 'General / Unclassified (legacy)';
     }
     return key;
   };

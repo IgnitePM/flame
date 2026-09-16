@@ -1314,7 +1314,9 @@ const AdminDashboard = ({
   const [todoAddDueDraft, setTodoAddDueDraft] = useState({});
   const [todoAddAssigneesDraft, setTodoAddAssigneesDraft] = useState({});
   const [todoAddRecurrenceDraft, setTodoAddRecurrenceDraft] = useState({});
-  /** Which retainer category's add-to-do "Options" modal is open (due date + recurrence). */
+  /** Draft estimated hours (string) keyed by category when adding a new to-do. */
+  const [todoAddEstimateDraft, setTodoAddEstimateDraft] = useState({});
+  /** Which retainer category's add-to-do "Options" modal is open (due date + recurrence + estimate). */
   const [todoAddOptionsModalCatKey, setTodoAddOptionsModalCatKey] = useState(null);
   /** Existing to-do row: which item's due/recurrence is being edited in the Options modal. */
   const [todoEditOptionsTarget, setTodoEditOptionsTarget] = useState(null);
@@ -1640,7 +1642,11 @@ const AdminDashboard = ({
   const resetTodoAddDraftOptionsForCategory = (categoryKey) => {
     setTodoAddDueDraft((prev) => ({ ...prev, [categoryKey]: '' }));
     setTodoAddRecurrenceDraft((prev) => ({ ...prev, [categoryKey]: 'none' }));
+    setTodoAddEstimateDraft((prev) => ({ ...prev, [categoryKey]: '' }));
   };
+
+  const getDraftEstimatedHours = (categoryKey) =>
+    normalizeTodoEstimatedHours(todoAddEstimateDraft?.[categoryKey]);
 
   const openTodoEditOptionsModal = (c, cycleStart, categoryKey, item, subtask = null) => {
     setTodoAddOptionsModalCatKey(null);
@@ -4604,6 +4610,12 @@ const AdminDashboard = ({
                               setEmailComposeClient(client);
                             }}
                             onExtractTasks={({ text }) => {
+                              if (!clientHasEnabledRetainers(c)) {
+                                window.alert(
+                                  'Enable at least one retainer category before extracting tasks. Unclassified tasks have no retainer balance.',
+                                );
+                                return;
+                              }
                               setAiTodoSource('email');
                               setAiTodoTranscript(String(text || '').trim());
                               setAiTodoCandidates([]);
@@ -4949,578 +4961,45 @@ const AdminDashboard = ({
                       </div>
                     )}
 
-                    {/* General / Unclassified — Tasks tab: full controls + AI */}
+                    {/* Tasks tab: AI extract into retainer categories only */}
                     {isClientPage && showClientTasks && getTodoStateForCycle && updateClientTodo && (
-                      (() => {
-                        const cycleStart = mStart;
-                        const generalLabel = 'General / Unclassified';
-                        const catKey = todoCategoryKey(generalLabel);
-                        const todoState = getTodoStateForCycle(c, cycleStart);
-                        const catTodo = todoState[catKey] || {
-                          closed: false,
-                          items: [],
-                        };
-                        const items = catTodo.items || [];
-                        const displayItems = orderTodosForDisplay(items).filter(
-                          (item) =>
-                            taskMatchesStatus(item, clientTaskStatusFilter) &&
-                            taskMatchesDueWindow(item, clientTaskDueFilter),
-                        );
-                        const allDone =
-                          items.length > 0 && items.every((i) => i.done);
-
-                        return (
-                          <div className="pt-2 border-t border-slate-100">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setAiTodoSource('transcript');
-                                setAiTodoTranscript('');
-                                setAiTodoCandidates([]);
-                                setAiTodoSelected({});
-                                setAiTodoModalOpen(true);
-                              }}
-                              className="w-full px-4 py-2 rounded-2xl bg-slate-900 text-white font-black text-[10px] uppercase tracking-widest hover:bg-black transition-colors mb-4"
-                              title="Extract action items from a meeting transcript and add them to this cycle"
-                            >
-                              AI Extract to-dos from transcript
-                            </button>
-
-                            <div className="flex items-center justify-between gap-3 mb-3">
-                              <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                                To-do — {generalLabel}
-                              </h5>
-                              {catTodo.closed && (
-                                <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[9px] font-bold uppercase">
-                                  Closed
-                                </span>
-                              )}
-                            </div>
-                            {!catTodo.closed && items.length > 0 && clientTodoFiltersAllowReorder && (
-                              <p className="text-[10px] text-slate-400 mb-2">
-                                Drag the grip to reorder. Pin keeps tasks at the top of the
-                                list.
-                              </p>
-                            )}
-                            {!catTodo.closed && items.length > 0 && !clientTodoFiltersAllowReorder && (
-                              <p className="text-[10px] text-amber-800/90 mb-2">
-                                Switch filters to Open + Next 7 days to drag-reorder.
-                              </p>
-                            )}
-
-                            {catTodo.closed ? (
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  if (isCycleLocked(c, cycleStart))
-                                    return;
-                                  setTodoSaving(true);
-                                  try {
-                                    await updateClientTodo(c, cycleStart, catKey, {
-                                      ...catTodo,
-                                      closed: false,
-                                    });
-                                  } finally {
-                                    setTodoSaving(false);
-                                  }
-                                }}
-                                disabled={todoSaving}
-                                className="text-xs font-bold text-slate-600 hover:text-slate-900"
-                              >
-                                Re-open category
-                              </button>
-                            ) : (
-                              <>
-                                {items.length === 0 ? (
-                                  <p className="text-xs italic text-slate-400 mb-2">
-                                    No to-do items yet.
-                                  </p>
-                                ) : (
-                                  <ul className="space-y-2 mb-3">
-                                    {displayItems.map((item) => {
-                                      const urgency = getTodoUrgencyStyles(item);
-                                      const assignees = normalizeTodoAssignees(item);
-                                      return (
-                                      <li
-                                        key={item.id}
-                                        className={`client-task-row flex flex-col gap-1 rounded-lg p-2 ${urgency.rowClass}`}
-                                        onDragOver={(e) => {
-                                          if (todoSaving || isCycleLocked(c, cycleStart) || !clientTodoFiltersAllowReorder)
-                                            return;
-                                          e.preventDefault();
-                                          e.dataTransfer.dropEffect = 'move';
-                                        }}
-                                        onDrop={(e) => {
-                                          e.preventDefault();
-                                          if (todoSaving || isCycleLocked(c, cycleStart) || !clientTodoFiltersAllowReorder)
-                                            return;
-                                          const drag = readTodoDragPayload(e.dataTransfer);
-                                          if (!drag) return;
-                                          const result = applyTodoListDragDrop(items, drag, {
-                                            type: 'before-primary',
-                                            primaryId: item.id,
-                                          });
-                                          if (result.error) {
-                                            window.alert(result.error);
-                                            return;
-                                          }
-                                          if (!result.ok) return;
-                                          setTodoSaving(true);
-                                          updateClientTodo(
-                                            c,
-                                            cycleStart,
-                                            catKey,
-                                            { ...catTodo, items: result.items },
-                                          ).finally(() => setTodoSaving(false));
-                                        }}
-                                      >
-                                        <div className="flex items-center gap-2 w-full min-w-0">
-                                        <span
-                                          draggable={
-                                            !(todoSaving || isCycleLocked(c, cycleStart)) &&
-                                            clientTodoFiltersAllowReorder
-                                          }
-                                          onDragStart={(e) => {
-                                            writeTodoDragPayload(e.dataTransfer, {
-                                              kind: 'primary',
-                                              id: item.id,
-                                            });
-                                          }}
-                                          className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0 select-none touch-none"
-                                          title="Drag to reorder"
-                                        >
-                                          <GripVertical className="w-4 h-4" aria-hidden />
-                                        </span>
-                                        <button
-                                          type="button"
-                                          disabled={
-                                            todoSaving || isCycleLocked(c, cycleStart)
-                                          }
-                                          title={
-                                            item.pinned ? 'Unpin from top' : 'Pin to top'
-                                          }
-                                          onClick={async () => {
-                                            if (isCycleLocked(c, cycleStart)) return;
-                                            setTodoSaving(true);
-                                            try {
-                                              const next = toggleTodoPinnedById(
-                                                items,
-                                                item.id,
-                                              );
-                                              await updateClientTodo(
-                                                c,
-                                                cycleStart,
-                                                catKey,
-                                                { ...catTodo, items: next },
-                                              );
-                                            } finally {
-                                              setTodoSaving(false);
-                                            }
-                                          }}
-                                          className={`shrink-0 p-1.5 rounded-lg border transition-colors ${
-                                            item.pinned
-                                              ? 'border-amber-200 bg-amber-50 text-amber-700'
-                                              : 'border-transparent text-slate-300 hover:text-amber-600 hover:bg-amber-50/80'
-                                          }`}
-                                        >
-                                          <Pin className="w-4 h-4" />
-                                        </button>
-                                        <input
-                                          type="checkbox"
-                                          checked={!!item.done}
-                                          onChange={async () => {
-                                            if (isCycleLocked(c, cycleStart))
-                                              return;
-                                            if (!item.done && !canMarkParentTodoDone(item)) {
-                                              window.alert(
-                                                'Complete every sub-task before marking this primary task complete.',
-                                              );
-                                              return;
-                                            }
-                                            setTodoSaving(true);
-                                            try {
-                                              const next = items.map((i) =>
-                                                i.id === item.id
-                                                  ? {
-                                                      ...i,
-                                                      done: !i.done,
-                                                      doneAt: !i.done
-                                                        ? Date.now()
-                                                        : null,
-                                                    }
-                                                  : i,
-                                              );
-                                              await updateClientTodo(
-                                                c,
-                                                cycleStart,
-                                                catKey,
-                                                { ...catTodo, items: next },
-                                              );
-                                            } finally {
-                                              setTodoSaving(false);
-                                            }
-                                          }}
-                                          disabled={todoSaving}
-                                          className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4"
-                                        />
-                                        <span className="flex items-center gap-2 flex-1 min-w-0">
-                                          <span className={`${urgency.textClass} truncate`}>
-                                            {item.text || '(no text)'}
-                                          </span>
-                                          {item.requestStatus === 'pending' ? (
-                                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest bg-sky-50 text-sky-700 shrink-0">
-                                              Client request
-                                            </span>
-                                          ) : null}
-                                          {Number(item.estimatedHours) > 0 ? (
-                                            <span className={`text-[10px] font-black uppercase tracking-widest shrink-0 ${urgency.metaClass}`}>
-                                              Est {Number(item.estimatedHours).toFixed(2)}h
-                                            </span>
-                                          ) : null}
-                                          {item.recurring && (
-                                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${urgency.metaClass}`}>
-                                              Recurring
-                                            </span>
-                                          )}
-                                          {item.dueDate && (
-                                            <span className={`text-[10px] font-black uppercase tracking-widest ${urgency.metaClass}`}>
-                                              Due {new Date(item.dueDate).toLocaleDateString()}
-                                            </span>
-                                          )}
-                                        </span>
-                                        {item.requestStatus === 'pending' ? (
-                                          <div className="flex gap-1 shrink-0">
-                                            <button
-                                              type="button"
-                                              disabled={todoSaving || isCycleLocked(c, cycleStart)}
-                                              onClick={async () => {
-                                                if (isCycleLocked(c, cycleStart)) return;
-                                                setTodoSaving(true);
-                                                try {
-                                                  const approved = {
-                                                    ...item,
-                                                    requestStatus: 'approved',
-                                                    decisionAt: Date.now(),
-                                                    decisionByEmail: user?.email || '',
-                                                  };
-                                                  const next = items.map((i) =>
-                                                    i.id === item.id ? approved : i,
-                                                  );
-                                                  await updateClientTodo(c, cycleStart, catKey, {
-                                                    ...catTodo,
-                                                    items: next,
-                                                  });
-                                                  openTodoEditOptionsModal(
-                                                    c,
-                                                    cycleStart,
-                                                    catKey,
-                                                    approved,
-                                                  );
-                                                } finally {
-                                                  setTodoSaving(false);
-                                                }
-                                              }}
-                                              className="px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-emerald-600 text-white"
-                                            >
-                                              Approve
-                                            </button>
-                                            <button
-                                              type="button"
-                                              disabled={todoSaving || isCycleLocked(c, cycleStart)}
-                                              onClick={async () => {
-                                                if (isCycleLocked(c, cycleStart)) return;
-                                                setTodoSaving(true);
-                                                try {
-                                                  const next = items.map((i) =>
-                                                    i.id === item.id
-                                                      ? {
-                                                          ...i,
-                                                          requestStatus: 'rejected',
-                                                          decisionAt: Date.now(),
-                                                          decisionByEmail: user?.email || '',
-                                                        }
-                                                      : i,
-                                                  );
-                                                  await updateClientTodo(c, cycleStart, catKey, {
-                                                    ...catTodo,
-                                                    items: next,
-                                                  });
-                                                } finally {
-                                                  setTodoSaving(false);
-                                                }
-                                              }}
-                                              className="px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest bg-amber-600 text-white"
-                                            >
-                                              Decline
-                                            </button>
-                                          </div>
-                                        ) : null}
-                                        {renderAssigneeMultiSelect({
-                                          openKey: `todo_item__${c.id}__${cycleStart}__${catKey}__${item.id}`,
-                                          value: assignees,
-                                          disabled: todoSaving || isCycleLocked(c, cycleStart),
-                                          onChange: async (nextAssignees) => {
-                                            if (isCycleLocked(c, cycleStart)) return;
-                                            setTodoSaving(true);
-                                            try {
-                                              const next = items.map((i) =>
-                                                i.id === item.id
-                                                  ? { ...i, assigneeEmails: nextAssignees }
-                                                  : i,
-                                              );
-                                              await updateClientTodo(c, cycleStart, catKey, {
-                                                ...catTodo,
-                                                items: next,
-                                              });
-                                            } finally {
-                                              setTodoSaving(false);
-                                            }
-                                          },
-                                        })}
-                                        <button
-                                          type="button"
-                                          disabled={todoSaving}
-                                          onClick={() => {
-                                            setTodoAddOptionsModalCatKey(null);
-                                            openTodoEditOptionsModal(c, cycleStart, catKey, item);
-                                          }}
-                                          className="px-3 py-2 rounded-xl bg-white/90 border border-slate-200 text-xs font-black text-slate-600 uppercase tracking-widest hover:bg-white transition-all shrink-0"
-                                          title="Due date and recurrence"
-                                        >
-                                          Options
-                                        </button>
-                                        {!item.done && (
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              const row = {
-                                                categoryKey: catKey,
-                                                categoryLabel: generalLabel,
-                                                item,
-                                              };
-                                              const target = buildKioskBillingTargetFromTodoRow(
-                                                row,
-                                                c,
-                                                projects,
-                                                todoCategoryKey,
-                                                generalLabel,
-                                              );
-                                              navigateToKioskWithTask(c.name, target);
-                                            }}
-                                            className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl bg-[#fd7414] text-white text-[10px] font-black uppercase tracking-widest hover:bg-[#e66a12] shrink-0"
-                                            title="Start timer on kiosk"
-                                          >
-                                            <Play className="w-3.5 h-3.5" aria-hidden />
-                                            Start
-                                          </button>
-                                        )}
-                                        </div>
-                                        {!isCycleLocked(c, cycleStart) ? (
-                                          <div className="pl-8 pr-1 pt-1 pb-0.5">
-                                            <TodoEstimateHoursSlider
-                                              compact
-                                              value={Number(item.estimatedHours) || 0}
-                                              categoryHours={
-                                                Number(c?.retainers?.[generalLabel] || 0) ||
-                                                null
-                                              }
-                                              disabled={todoSaving}
-                                              onCommit={async (hrs) => {
-                                                const estimatedHours =
-                                                  normalizeTodoEstimatedHours(hrs);
-                                                if (
-                                                  estimatedHours ===
-                                                    (item.estimatedHours ?? null) ||
-                                                  (estimatedHours === null &&
-                                                    !item.estimatedHours)
-                                                ) {
-                                                  return;
-                                                }
-                                                setTodoSaving(true);
-                                                try {
-                                                  const next = items.map((i) =>
-                                                    i.id === item.id
-                                                      ? { ...i, estimatedHours }
-                                                      : i,
-                                                  );
-                                                  await updateClientTodo(
-                                                    c,
-                                                    cycleStart,
-                                                    catKey,
-                                                    { ...catTodo, items: next },
-                                                  );
-                                                } finally {
-                                                  setTodoSaving(false);
-                                                }
-                                              }}
-                                            />
-                                          </div>
-                                        ) : null}
-                                        {attachClientDriveFile && (
-                                          <TodoItemAttachments
-                                            item={item}
-                                            client={c}
-                                            cycleStart={cycleStart}
-                                            categoryKey={catKey}
-                                            disabled={
-                                              todoSaving || isCycleLocked(c, cycleStart)
-                                            }
-                                            onAttachDriveFile={attachClientDriveFile}
-                                            onRemove={removeClientDocument}
-                                          />
-                                        )}
-                                        <TaskNotesSection
-                                          item={item}
-                                          allItems={catTodo?.items || [item]}
-                                          onPersistItems={(nextItems) =>
-                                            updateClientTodo(c, cycleStart, catKey, {
-                                              ...catTodo,
-                                              items: nextItems,
-                                            })
-                                          }
-                                          user={user}
-                                          staffEmails={assignableEmails}
-                                          adminUsers={adminUsers}
-                                          disabled={
-                                            todoSaving || isCycleLocked(c, cycleStart)
-                                          }
-                                          compact
-                                        />
-                                      </li>
-                                    )})}
-                                  </ul>
-                                )}
-
-                                <div className="flex flex-wrap gap-2 items-center">
-                                  <input
-                                    type="text"
-                                    value={todoAddTextDraft[catKey] || ''}
-                                    onChange={(e) =>
-                                      setTodoAddTextDraft((prev) => ({
-                                        ...prev,
-                                        [catKey]: e.target.value,
-                                      }))
-                                    }
-                                    placeholder="New to-do..."
-                                    className="flex-1 min-w-[160px] bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
-                                    onKeyDown={(e) => {
-                                      if (e.key !== 'Enter') return;
-                                      e.preventDefault();
-                                      if (isCycleLocked(c, cycleStart))
-                                        return;
-                                      const text = (
-                                        todoAddTextDraft[catKey] || ''
-                                      ).trim();
-                                      if (!text) return;
-                                      setTodoSaving(true);
-                                      (async () => {
-                                        try {
-                                          const dueDate = parseDateInputToMs(todoAddDueDraft[catKey] || '');
-                                          const recurrence = getDraftRecurrence(catKey, dueDate);
-                                          const nid = `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-                                          const newItem = {
-                                            id: nid,
-                                            text,
-                                            done: false,
-                                            doneAt: null,
-                                            pinned: false,
-                                            recurring: !!recurrence,
-                                            recurringId: recurrence ? nid : null,
-                                            dueDate,
-                                            assigneeEmails: getDraftAssigneeEmails(catKey),
-                                            recurrence,
-                                          };
-                                          await updateClientTodo(c, cycleStart, catKey, {
-                                            ...catTodo,
-                                            closed: false,
-                                            items: [...items, newItem],
-                                          });
-                                          setTodoAddTextDraft((prev) => ({
-                                            ...prev,
-                                            [catKey]: '',
-                                          }));
-                                          resetTodoAddDraftOptionsForCategory(catKey);
-                                        } finally {
-                                          setTodoSaving(false);
-                                        }
-                                      })();
-                                    }}
-                                  />
-                                  {renderAssigneeMultiSelect({
-                                    openKey: `todo_add__${c.id}__${cycleStart}__${catKey}`,
-                                    value: getDraftAssigneeEmails(catKey),
-                                    disabled: todoSaving || isCycleLocked(c, cycleStart),
-                                    onChange: (nextAssignees) =>
-                                      setTodoAddAssigneesDraft((prev) => ({
-                                        ...prev,
-                                        [catKey]: nextAssignees,
-                                      })),
-                                  })}
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setTodoEditOptionsTarget(null);
-                                      setTodoAddOptionsModalCatKey(catKey);
-                                    }}
-                                    className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-black text-slate-600 uppercase tracking-widest hover:bg-slate-50 transition-all shrink-0"
-                                    title="Due date and recurrence"
-                                  >
-                                    Options
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={
-                                      todoSaving ||
-                                      !String(todoAddTextDraft[catKey] || '').trim()
-                                    }
-                                    onClick={async () => {
-                                      if (isCycleLocked(c, cycleStart))
-                                        return;
-                                      const text = (
-                                        todoAddTextDraft[catKey] || ''
-                                      ).trim();
-                                      if (!text) return;
-                                      setTodoSaving(true);
-                                      try {
-                                          const dueDate = parseDateInputToMs(todoAddDueDraft[catKey] || '');
-                                          const recurrence = getDraftRecurrence(catKey, dueDate);
-                                          const nid = `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-                                          const newItem = {
-                                            id: nid,
-                                            text,
-                                            done: false,
-                                            doneAt: null,
-                                            pinned: false,
-                                            recurring: !!recurrence,
-                                            recurringId: recurrence ? nid : null,
-                                            dueDate,
-                                            assigneeEmails: getDraftAssigneeEmails(catKey),
-                                            recurrence,
-                                          };
-                                        await updateClientTodo(c, cycleStart, catKey, {
-                                          ...catTodo,
-                                          closed: false,
-                                          items: [...items, newItem],
-                                        });
-                                        setTodoAddTextDraft((prev) => ({
-                                          ...prev,
-                                          [catKey]: '',
-                                        }));
-                                        resetTodoAddDraftOptionsForCategory(catKey);
-                                      } finally {
-                                        setTodoSaving(false);
-                                      }
-                                    }}
-                                    className="px-4 py-2 rounded-xl bg-[#fd7414] text-white font-bold text-sm disabled:opacity-40 shrink-0"
-                                  >
-                                    Add
-                                  </button>
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        );
-                      })()
+                      <div className="pt-2 border-t border-slate-100 space-y-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!clientHasEnabledRetainers(c)) {
+                              window.alert(
+                                'Enable at least one retainer category before extracting to-dos. Unclassified tasks have no retainer balance.',
+                              );
+                              return;
+                            }
+                            setAiTodoSource('transcript');
+                            setAiTodoTranscript('');
+                            setAiTodoCandidates([]);
+                            setAiTodoSelected({});
+                            setAiTodoModalOpen(true);
+                          }}
+                          className="w-full px-4 py-2 rounded-2xl bg-slate-900 text-white font-black text-[10px] uppercase tracking-widest hover:bg-black transition-colors"
+                          title="Extract action items from a meeting transcript into a retainer category"
+                        >
+                          AI Extract to-dos from transcript
+                        </button>
+                        {(() => {
+                          const legacyKey = todoCategoryKey('General / Unclassified');
+                          const legacyItems =
+                            getTodoStateForCycle(c, mStart)?.[legacyKey]?.items || [];
+                          if (!legacyItems.length) return null;
+                          const openCount = legacyItems.filter((i) => !i.done).length;
+                          return (
+                            <p className="text-xs text-amber-900 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+                              {legacyItems.length} legacy unclassified task
+                              {legacyItems.length === 1 ? '' : 's'}
+                              {openCount ? ` (${openCount} open)` : ''} still on this cycle.
+                              Move them into a retainer category from Tasks — unclassified has no retainer balance.
+                            </p>
+                          );
+                        })()}
+                      </div>
                     )}
 
                     {isClientPage && aiTodoModalOpen && (
@@ -5590,6 +5069,12 @@ const AdminDashboard = ({
                                   try {
                                     const retainerCategories =
                                       getEnabledRetainerCategoryNames(c);
+                                    if (!retainerCategories.length) {
+                                      throw new Error(
+                                        'Enable at least one retainer category before extracting to-dos.',
+                                      );
+                                    }
+                                    const defaultCategory = retainerCategories[0];
                                     const res = await authedFetch(
                                       '/.netlify/functions/gemini-extract-todos',
                                       {
@@ -5597,8 +5082,6 @@ const AdminDashboard = ({
                                         sourceType: aiTodoSource,
                                         clientName: c.name,
                                         retainerCategories,
-                                        generalCategoryLabel:
-                                          'General / Unclassified',
                                       },
                                     );
                                     const data = await res.json().catch(() => null);
@@ -5608,17 +5091,24 @@ const AdminDashboard = ({
                                     const todos = Array.isArray(data?.todos)
                                       ? data.todos
                                       : [];
-                                    const normalized = todos.map((t, idx) => ({
-                                      id: String(t.id || `ai_${Date.now()}_${idx}`),
-                                      text: String(t.text || '').trim(),
-                                      category: String(
-                                        t.category || 'General / Unclassified',
-                                      ),
-                                      assigneeEmails: [
-                                        String(user?.email || '').trim().toLowerCase(),
-                                      ].filter(Boolean),
-                                      dueDateInput: '',
-                                    })).filter((t) => t.text);
+                                    const normalized = todos.map((t, idx) => {
+                                      const est = normalizeTodoEstimatedHours(
+                                        t.estimatedHours ?? t.estimated_hours,
+                                      );
+                                      return {
+                                        id: String(t.id || `ai_${Date.now()}_${idx}`),
+                                        text: String(t.text || '').trim(),
+                                        category: String(
+                                          t.category || defaultCategory,
+                                        ),
+                                        assigneeEmails: [
+                                          String(user?.email || '').trim().toLowerCase(),
+                                        ].filter(Boolean),
+                                        dueDateInput: '',
+                                        estimatedHoursInput:
+                                          est == null ? '' : String(est),
+                                      };
+                                    }).filter((t) => t.text);
 
                                     setAiTodoCandidates(normalized);
                                     const selected = {};
@@ -5680,7 +5170,6 @@ const AdminDashboard = ({
                                     const categoryOptions = Array.from(
                                       new Set([
                                         ...getEnabledRetainerCategoryNames(c),
-                                        'General / Unclassified',
                                         t.category,
                                       ].filter(Boolean)),
                                     );
@@ -5773,6 +5262,34 @@ const AdminDashboard = ({
                                             })}
                                           </div>
                                         </div>
+                                        <div className="pt-1">
+                                          <TodoEstimateHoursSlider
+                                            compact
+                                            value={
+                                              t.estimatedHoursInput === '' ||
+                                              t.estimatedHoursInput == null
+                                                ? 0
+                                                : Number(t.estimatedHoursInput) || 0
+                                            }
+                                            categoryHours={
+                                              Number(c?.retainers?.[t.category] || 0) ||
+                                              null
+                                            }
+                                            onChange={(hrs) =>
+                                              setAiTodoCandidates((prev) =>
+                                                prev.map((row) =>
+                                                  row.id === t.id
+                                                    ? {
+                                                        ...row,
+                                                        estimatedHoursInput:
+                                                          hrs <= 0 ? '' : String(hrs),
+                                                      }
+                                                    : row,
+                                                ),
+                                              )
+                                            }
+                                          />
+                                        </div>
                                       </div>
                                     </div>
                                     );
@@ -5856,6 +5373,9 @@ const AdminDashboard = ({
                                                   .filter(Boolean)
                                               : [],
                                             recurrence: null,
+                                            estimatedHours: normalizeTodoEstimatedHours(
+                                              p.estimatedHoursInput,
+                                            ),
                                           };
                                         })
                                         .filter(Boolean);
@@ -6785,6 +6305,7 @@ const AdminDashboard = ({
                                                                     dueDate,
                                                                     assigneeEmails: getDraftAssigneeEmails(catKey),
                                                                     recurrence,
+                                                                    estimatedHours: getDraftEstimatedHours(catKey),
                                                                   };
                                                                   await updateClientTodo(c, cycleStart, catKey, {
                                                                     ...catTodo,
@@ -6819,7 +6340,7 @@ const AdminDashboard = ({
                                                               setTodoAddOptionsModalCatKey(catKey);
                                                             }}
                                                             className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-black text-slate-600 uppercase tracking-widest hover:bg-slate-50 transition-all shrink-0"
-                                                            title="Due date and recurrence"
+                                                            title="Due date, estimate, and recurrence"
                                                           >
                                                             Options
                                                           </button>
@@ -6849,6 +6370,7 @@ const AdminDashboard = ({
                                                                   dueDate,
                                                                   assigneeEmails: getDraftAssigneeEmails(catKey),
                                                                   recurrence,
+                                                                  estimatedHours: getDraftEstimatedHours(catKey),
                                                                 };
                                                                 await updateClientTodo(c, cycleStart, catKey, {
                                                                   ...catTodo,
@@ -8264,15 +7786,10 @@ const AdminDashboard = ({
                   const catName =
                     getEnabledRetainerCategoryNames(cl || {}).find(
                       (n) => todoCategoryKey(n) === todoEditOptionsTarget.categoryKey,
-                    ) ||
-                    (todoEditOptionsTarget.categoryKey ===
-                    todoCategoryKey('General / Unclassified')
-                      ? 'General / Unclassified'
-                      : null);
-                  const catHours =
-                    catName && catName !== 'General / Unclassified'
-                      ? Number(cl?.retainers?.[catName] || 0)
-                      : Number(cl?.retainers?.[catName] || 0) || null;
+                    ) || null;
+                  const catHours = catName
+                    ? Number(cl?.retainers?.[catName] || 0)
+                    : 0;
                   return (
                     <TodoEstimateHoursSlider
                       value={todoEditOptionsEstimate === '' ? 0 : Number(todoEditOptionsEstimate) || 0}
@@ -8381,6 +7898,40 @@ const AdminDashboard = ({
                 <option value="monthly">Monthly (same day of month)</option>
                 <option value="annual">Annually (same calendar date)</option>
               </select>
+            </div>
+            <div>
+              {(() => {
+                const catKey = todoAddOptionsModalCatKey;
+                const cl =
+                  (clientId &&
+                    (clients || []).find((x) => String(x.id) === String(clientId))) ||
+                  null;
+                const catName =
+                  getEnabledRetainerCategoryNames(cl || {}).find(
+                    (n) => todoCategoryKey(n) === catKey,
+                  ) || null;
+                const catHours =
+                  catName && cl?.retainers
+                    ? Number(cl.retainers[catName] || 0)
+                    : 0;
+                const draftRaw = todoAddEstimateDraft[catKey];
+                return (
+                  <TodoEstimateHoursSlider
+                    value={
+                      draftRaw === '' || draftRaw == null
+                        ? 0
+                        : Number(draftRaw) || 0
+                    }
+                    onChange={(hrs) =>
+                      setTodoAddEstimateDraft((prev) => ({
+                        ...prev,
+                        [catKey]: hrs <= 0 ? '' : String(hrs),
+                      }))
+                    }
+                    categoryHours={catHours > 0 ? catHours : null}
+                  />
+                );
+              })()}
             </div>
             <div className="flex justify-end gap-2 pt-1">
               <button

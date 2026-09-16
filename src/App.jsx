@@ -2446,7 +2446,6 @@ export default function App() {
   const buildVirtualCycleTodoData = (client, cycleStart, prevData) => {
     const categoryKeys = new Set([
       ...getEnabledRetainerCategoryNames(client).map((cat) => todoCategoryKey(cat)),
-      todoCategoryKey(GENERAL_LABEL),
       ...Object.keys(prevData),
     ]);
     const { cycleData } = materializeCycleTodoFromPrev(
@@ -2491,7 +2490,6 @@ export default function App() {
     const prevData = cycles[String(prevStart)] || {};
     const categoryKeys = [
       ...getEnabledRetainerCategoryNames(client).map((cat) => todoCategoryKey(cat)),
-      todoCategoryKey(GENERAL_LABEL),
       ...Object.keys(prevData),
     ];
     const existing = cycles[String(cycleStart)] || {};
@@ -3066,7 +3064,6 @@ export default function App() {
           const prevData = (client.todoCycles || {})[String(prevStart)] || {};
           const categoryKeys = [
             ...getEnabledRetainerCategoryNames(client).map((cat) => todoCategoryKey(cat)),
-            todoCategoryKey(GENERAL_LABEL),
             ...Object.keys(prevData),
             ...Object.keys((client.todoCycles || {})[key] || {}),
           ];

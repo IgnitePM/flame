@@ -11,21 +11,24 @@ export default function PortalTaskRequestForm({
   categories = [],
   todoCategoryKey,
 }) {
-  const categoryOptions = [
-    ...categories,
-    ...(categories.includes('General / Unclassified')
-      ? []
-      : ['General / Unclassified']),
-  ];
-  const [categoryLabel, setCategoryLabel] = useState(
-    categoryOptions[0] || 'General / Unclassified',
-  );
+  const categoryOptions = [...categories];
+  const [categoryLabel, setCategoryLabel] = useState(categoryOptions[0] || '');
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState('');
 
+  if (!categoryOptions.length) {
+    return (
+      <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-4">
+        <p className="text-xs text-slate-500">
+          No retainer categories are available for task requests yet.
+        </p>
+      </div>
+    );
+  }
+
   const submit = async () => {
-    if (!client?.id || !text.trim() || busy) return;
+    if (!client?.id || !text.trim() || !categoryLabel || busy) return;
     setBusy(true);
     setBanner('');
     try {
@@ -71,14 +74,16 @@ export default function PortalTaskRequestForm({
       />
       <button
         type="button"
-        disabled={busy || !text.trim()}
+        disabled={busy || !text.trim() || !categoryLabel}
         onClick={submit}
         className="inline-flex items-center gap-2 rounded-xl bg-[#fd7414] px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white disabled:opacity-40"
       >
         <Plus className="w-3.5 h-3.5" />
         {busy ? 'Sending…' : 'Submit for approval'}
       </button>
-      {banner ? <p className="text-xs font-bold text-slate-600">{banner}</p> : null}
+      {banner ? (
+        <p className="text-xs font-medium text-slate-600">{banner}</p>
+      ) : null}
     </div>
   );
 }

@@ -8,7 +8,7 @@ import {
 
 /**
  * Staff: extract grouped to-dos from a meeting transcript or email via Gemini.
- * POST { transcript|text, sourceType?: 'transcript'|'email', clientName?, retainerCategories?, generalCategoryLabel? }
+ * POST { transcript|text, sourceType?: 'transcript'|'email', clientName?, retainerCategories? }
  */
 
 function extractFirstJsonObject(text) {
@@ -175,16 +175,24 @@ export default async (req) => {
         .map((c) => String(c).slice(0, 120))
         .filter(Boolean)
     : [];
-  const generalCategoryLabel = String(
-    payload.generalCategoryLabel || 'General / Unclassified',
-  )
-    .trim()
-    .slice(0, 120);
 
   if (!transcript) {
     return new Response(
       JSON.stringify({
         error: sourceType === 'email' ? 'Missing email content' : 'Missing transcript',
+      }),
+      {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  }
+
+  if (!retainerCategories.length) {
+    return new Response(
+      JSON.stringify({
+        error:
+          'This client has no enabled retainer categories. Enable a retainer before extracting to-dos.',
       }),
       {
         status: 400,
@@ -200,9 +208,8 @@ export default async (req) => {
       ? transcript.slice(0, maxTranscriptChars)
       : transcript;
 
-  const allowedCategories = Array.from(
-    new Set([...retainerCategories, generalCategoryLabel]),
-  );
+  const allowedCategories = Array.from(new Set(retainerCategories));
+  const fallbackCategory = allowedCategories[0];
 
   const prompt =
     sourceType === 'email'
@@ -217,17 +224,22 @@ Task:
    - Each group should be a single actionable to-do text that combines the shared intent.
 5) Assign each grouped to-do to exactly ONE category from the allowed categories.
    - Pick the closest match by semantics.
-   - If unsure, assign to: "${generalCategoryLabel}".
+   - If unsure, assign to: "${fallbackCategory}".
 
 Output requirements:
 - Respond with JSON only, no markdown.
 - JSON shape:
 {
   "todos": [
-    { "text": "string", "category": "one of allowed categories" }
+    {
+      "text": "string",
+      "category": "one of allowed categories",
+      "estimatedHours": number or null
+    }
   ]
 }
 - "text" should be a concise imperative to-do sentence.
+- "estimatedHours" is a best-guess effort in hours (use 0.25 steps when possible). Prefer explicit durations from the email (e.g. "2 hours", "30 min"). If no duration is implied, estimate a reasonable agency effort or use null.
 - Return at most 15 to-do groups.
 - If there are no action items, return {"todos":[]}.
 
@@ -252,17 +264,22 @@ Task:
    - Each group should be a single actionable to-do text that combines the shared intent.
 4) Assign each grouped to-do to exactly ONE category from the allowed categories.
    - Pick the closest match by semantics.
-   - If unsure, assign to: "${generalCategoryLabel}".
+   - If unsure, assign to: "${fallbackCategory}".
 
 Output requirements:
 - Respond with JSON only, no markdown.
 - JSON shape:
 {
   "todos": [
-    { "text": "string", "category": "one of allowed categories" }
+    {
+      "text": "string",
+      "category": "one of allowed categories",
+      "estimatedHours": number or null
+    }
   ]
 }
 - "text" should be a concise imperative to-do sentence.
+- "estimatedHours" is a best-guess effort in hours (use 0.25 steps when possible). Prefer explicit durations from the transcript. If no duration is implied, estimate a reasonable agency effort or use null.
 - Return at most 15 to-do groups.
 - If there are no action items, return {"todos":[]}.
 
@@ -336,7 +353,7 @@ ${trimmedTranscript}
 
   const normalizeCategory = (raw) => {
     const cat = String(raw || '').trim();
-    if (!cat) return generalCategoryLabel;
+    if (!cat) return fallbackCategory;
     if (allowedCategories.includes(cat)) return cat;
     const lower = cat.toLowerCase();
     const hit = allowedCategories.find((c) => c.toLowerCase() === lower);
@@ -345,13 +362,22 @@ ${trimmedTranscript}
     const soft = allowedCategories.find(
       (c) => lower.includes(c.toLowerCase()) || c.toLowerCase().includes(lower),
     );
-    return soft || generalCategoryLabel;
+    return soft || fallbackCategory;
+  };
+
+  const normalizeEstimatedHours = (raw) => {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return Math.round(n * 4) / 4;
   };
 
   const todos = parsed.todos
     .map((t) => ({
       text: String(t?.text || t?.todo || t?.task || '').trim(),
       category: normalizeCategory(t?.category || t?.retainerCategory),
+      estimatedHours: normalizeEstimatedHours(
+        t?.estimatedHours ?? t?.estimated_hours,
+      ),
     }))
     .filter((t) => t.text)
     .slice(0, 15);

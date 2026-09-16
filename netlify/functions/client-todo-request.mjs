@@ -11,13 +11,11 @@ import { writeClientActivity } from './lib/clientActivity.mjs';
 import { sendDigestEmail } from './lib/mailer.mjs';
 import { appBaseUrl } from './lib/clientMessaging.mjs';
 import { getBillingPeriod } from '../../src/utils/billingEngine.js';
+import { getEnabledRetainerCategoryNames } from '../../src/utils/retainerCategories.js';
 
+/** Match App.jsx / admin todo category keys. */
 function todoCategoryKey(name) {
-  return String(name || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_|_$/g, '');
+  return String(name ?? '').replace(/[~*[\]/]/g, '_').replace(/\./g, '_');
 }
 
 /**
@@ -72,10 +70,33 @@ export default async (req) => {
 
     const cycleStart = getBillingPeriod(client.billingDay || 1, 0).start;
 
+    const enabled = getEnabledRetainerCategoryNames(client);
+    if (!enabled.length) {
+      return new Response(
+        JSON.stringify({
+          error: 'No retainer categories are available for task requests.',
+        }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+
     const label = String(body.categoryLabel || body.category || '').trim();
-    const categoryKey =
-      String(body.categoryKey || '').trim() ||
-      (label ? todoCategoryKey(label) : todoCategoryKey('General / Unclassified'));
+    const requestedKey = String(body.categoryKey || '').trim();
+    const matchedLabel =
+      enabled.find((cat) => cat === label) ||
+      enabled.find((cat) => todoCategoryKey(cat) === requestedKey) ||
+      enabled.find((cat) => todoCategoryKey(cat) === todoCategoryKey(label));
+
+    if (!matchedLabel) {
+      return new Response(
+        JSON.stringify({
+          error: 'Pick an enabled retainer category for this request.',
+        }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+
+    const categoryKey = todoCategoryKey(matchedLabel);
 
     const itemId = `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const newItem = {

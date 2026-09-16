@@ -23,9 +23,13 @@ import {
 import { recurringAnchorKey } from '../utils/recurringTodoMaterialize.js';
 import KioskClientTodoItem from './KioskClientTodoItem.jsx';
 import KioskNotificationsPanel from './KioskNotificationsPanel.jsx';
+import KioskCalendarPanel from './KioskCalendarPanel.jsx';
 import TaskNotesSection from './TaskNotesSection.jsx';
 import MentionTextarea from './MentionTextarea.jsx';
 import ClientProfileSummary from './ClientProfileSummary.jsx';
+import TodoEstimateHoursSlider, {
+  normalizeTodoEstimatedHours,
+} from './TodoEstimateHoursSlider.jsx';
 import { buildGlobalTodoRows } from '../utils/todoGlobalRows.js';
 import { isClientActiveForWork } from '../utils/clientActiveForWork.js';
 import { computePerplexityExpenseAmounts } from '../utils/perplexityCredits.js';
@@ -163,6 +167,7 @@ const EmployeeKiosk = ({
   const [todoNewText, setTodoNewText] = React.useState('');
   const [todoSaving, setTodoSaving] = React.useState(false);
   const [todoDueDate, setTodoDueDate] = React.useState('');
+  const [todoEstimateHours, setTodoEstimateHours] = React.useState('');
   const [kioskTaskAssigneeFilter, setKioskTaskAssigneeFilter] = React.useState('me');
   const [categoryTodoMineOnly, setCategoryTodoMineOnly] = React.useState(
     () => currentUserRole !== 'kiosk',
@@ -211,6 +216,18 @@ const EmployeeKiosk = ({
     React.useState('available');
   const [kioskRetainerSort, setKioskRetainerSort] = React.useState('default');
   const [kioskSideTab, setKioskSideTab] = React.useState('client');
+
+  React.useEffect(() => {
+    const onOpenCal = () => setKioskSideTab('calendar');
+    window.addEventListener('kiosk-open-calendar', onOpenCal);
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      if (params.get('calendar')) setKioskSideTab('calendar');
+    } catch {
+      /* ignore */
+    }
+    return () => window.removeEventListener('kiosk-open-calendar', onOpenCal);
+  }, []);
 
   const safeCategoryKey = (category) =>
     String(category)
@@ -322,12 +339,14 @@ const EmployeeKiosk = ({
       dueDate,
       assigneeEmails: assignees,
       recurrence,
+      estimatedHours: normalizeTodoEstimatedHours(todoEstimateHours),
     };
   };
 
   const resetTodoDraftOptions = () => {
     setTodoDueDate('');
     setTodoRecurrenceMode('none');
+    setTodoEstimateHours('');
     setTodoOptionsOpen(false);
     setTodoAddAssignees([]);
   };
@@ -2613,12 +2632,25 @@ const EmployeeKiosk = ({
                   <option value="annual">Annually (same calendar date)</option>
                 </select>
               </div>
+              <div>
+                <TodoEstimateHoursSlider
+                  value={
+                    todoEstimateHours === '' || todoEstimateHours == null
+                      ? 0
+                      : Number(todoEstimateHours) || 0
+                  }
+                  onChange={(hrs) =>
+                    setTodoEstimateHours(hrs <= 0 ? '' : String(hrs))
+                  }
+                />
+              </div>
               <div className="flex justify-end gap-2 pt-1">
                 <button
                   type="button"
                   onClick={() => {
                     setTodoDueDate('');
                     setTodoRecurrenceMode('none');
+                    setTodoEstimateHours('');
                   }}
                   className="px-3 py-2 rounded-xl text-xs font-black text-slate-500 bg-slate-100 hover:bg-slate-200 uppercase tracking-widest"
                 >
@@ -2803,11 +2835,11 @@ const EmployeeKiosk = ({
             selectedClientName={selectedClientObj?.name || ''}
             canGenerateAi={typeof generateAiSummary === 'function'}
           />
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <button
               type="button"
               onClick={() => setKioskSideTab('client')}
-              className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+              className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
                 kioskSideTab === 'client'
                   ? 'bg-[#fd7414] text-white shadow-sm'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -2818,13 +2850,24 @@ const EmployeeKiosk = ({
             <button
               type="button"
               onClick={() => setKioskSideTab('personal')}
-              className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+              className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
                 kioskSideTab === 'personal'
                   ? 'bg-[#fd7414] text-white shadow-sm'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              Your to-do list
+              Your list
+            </button>
+            <button
+              type="button"
+              onClick={() => setKioskSideTab('calendar')}
+              className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                kioskSideTab === 'calendar'
+                  ? 'bg-[#fd7414] text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              Calendar
             </button>
           </div>
           {kioskSideTab === 'client' && (
@@ -3017,12 +3060,42 @@ const EmployeeKiosk = ({
 
           {kioskSideTab === 'personal' && (
           <div className="space-y-3 min-h-0">
-            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              Your To-Do List
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                  Your To-Do List
+                </div>
+                <p className="text-[10px] font-bold text-slate-400 leading-snug mt-1">
+                  Personal items stay here until you link one to a client and category or project — then it moves to Client to-dos.
+                </p>
+              </div>
+              {(userTodos || []).length > 0 && (
+                <button
+                  type="button"
+                  disabled={personalListSaving || !updateUserTodos}
+                  onClick={async () => {
+                    if (!updateUserTodos) return;
+                    const n = (userTodos || []).length;
+                    const ok = window.confirm(
+                      `Clear all ${n} personal to-do${n === 1 ? '' : 's'}? This cannot be undone.`,
+                    );
+                    if (!ok) return;
+                    setPersonalListSaving(true);
+                    try {
+                      await updateUserTodos([]);
+                      setPersonalOptionsItemId(null);
+                      setPersonalAssigneeOpenId(null);
+                      setPersonalLinkItem(null);
+                    } finally {
+                      setPersonalListSaving(false);
+                    }
+                  }}
+                  className="shrink-0 px-3 py-2 rounded-xl border border-red-200 bg-red-50 text-red-700 text-[10px] font-black uppercase tracking-widest hover:bg-red-100 disabled:opacity-40"
+                >
+                  Clear list
+                </button>
+              )}
             </div>
-            <p className="text-[10px] font-bold text-slate-400 leading-snug">
-              Personal items stay here until you link one to a client and category or project — then it moves to Client to-dos.
-            </p>
             <div className="flex gap-2">
               <input
                 type="text"
@@ -3265,6 +3338,8 @@ const EmployeeKiosk = ({
             </div>
           </div>
           )}
+
+          {kioskSideTab === 'calendar' && <KioskCalendarPanel />}
 
         </aside>
       </div>

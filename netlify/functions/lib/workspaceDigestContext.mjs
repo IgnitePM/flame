@@ -11,7 +11,6 @@
  */
 
 import {
-  GENERAL_LABEL,
   computeGlobalRetainerStats,
   getBillingPeriod,
   getTaskDuration,
@@ -32,7 +31,6 @@ export function todoCategoryKey(cat) {
 function buildVirtualCycleTodoData(client, cycleStart, prevData) {
   const categoryKeys = new Set([
     ...getEnabledRetainerCategoryNames(client).map((cat) => todoCategoryKey(cat)),
-    todoCategoryKey(GENERAL_LABEL),
     ...Object.keys(prevData),
   ]);
   const { cycleData } = materializeCycleTodoFromPrev(
