@@ -277,6 +277,10 @@ export default async (req) => {
           title: String(c.settings?.title || c.settings?.subject_line || c.id || ''),
           sendDate: sendTime,
           emailsSent: Number(c.emails_sent || summary.emails_sent || 0),
+          opens: Number(summary.opens || 0),
+          uniqueOpens: Number(summary.unique_opens || 0),
+          clicks: Number(summary.clicks || 0),
+          uniqueClicks: Number(summary.subscriber_clicks || 0),
           openRate: summary.open_rate != null ? Number(summary.open_rate) : null,
           clickRate: summary.click_rate != null ? Number(summary.click_rate) : null,
           unsubscribes: Number(summary.unsubscribed || 0),
@@ -293,11 +297,39 @@ export default async (req) => {
       .map(({ listMatch, ...rest }) => rest);
 
     const emailsSent = campaigns.reduce((s, c) => s + (c.emailsSent || 0), 0);
+    const uniqueOpens = campaigns.reduce((s, c) => s + (c.uniqueOpens || 0), 0);
+    const uniqueClicks = campaigns.reduce((s, c) => s + (c.uniqueClicks || 0), 0);
     const openRates = campaigns.map((c) => c.openRate).filter((n) => n != null && Number.isFinite(n));
     const clickRates = campaigns
       .map((c) => c.clickRate)
       .filter((n) => n != null && Number.isFinite(n));
     const unsubscribes = campaigns.reduce((s, c) => s + (c.unsubscribes || 0), 0);
+
+    let growth = [];
+    const growthResult = await mcGetSoft(
+      creds.apiKey,
+      creds.dc,
+      `/lists/${encodeURIComponent(audienceId)}/growth-history`,
+      { count: 12, sort_field: 'month', sort_dir: 'DESC' },
+    );
+    if (growthResult.ok) {
+      const hist = Array.isArray(growthResult.data?.history)
+        ? growthResult.data.history
+        : Array.isArray(growthResult.data)
+          ? growthResult.data
+          : [];
+      growth = hist
+        .map((h) => ({
+          month: String(h.month || ''),
+          subscribed: Number(h.subscribed || 0),
+          unsubscribed: Number(h.unsubscribed || 0),
+          cleaned: Number(h.cleaned || 0),
+          deleted: Number(h.deleted || 0),
+          existing: Number(h.existing || 0),
+        }))
+        .filter((h) => h.month)
+        .slice(0, 12);
+    }
 
     return {
       ok: true,
@@ -310,9 +342,12 @@ export default async (req) => {
         memberCount: Number(list.stats?.member_count || 0),
       },
       campaigns,
+      growth,
       totals: {
         campaigns: campaigns.length,
         emailsSent,
+        uniqueOpens,
+        uniqueClicks,
         avgOpenRate: openRates.length
           ? openRates.reduce((a, b) => a + b, 0) / openRates.length
           : null,

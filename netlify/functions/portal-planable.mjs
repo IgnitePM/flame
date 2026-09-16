@@ -95,6 +95,7 @@ function sumSnapshotMetrics(snapshots) {
   let shares = 0;
   let clicks = 0;
   let followers = 0;
+  let gainedFollowers = 0;
   for (const snap of snapshots) {
     const platformBlocks = Object.entries(snap || {}).filter(
       ([k, v]) =>
@@ -121,13 +122,29 @@ function sumSnapshotMetrics(snapshots) {
       comments += pickMetric(block, ['comments', 'commentCount', 'replies']);
       shares += pickMetric(block, ['shares', 'reposts', 'retweets', 'shareCount']);
       clicks += pickMetric(block, ['clicks', 'linkClicks', 'pageClicks']);
-      followers += pickMetric(block, ['followers', 'pageFans', 'subscribers']);
+      const f = pickMetric(block, ['followers', 'pageFans', 'subscribers']);
+      if (f > followers) followers = f;
+      gainedFollowers += pickMetric(block, [
+        'gainedFollowers',
+        'followerGrowth',
+        'netFollowers',
+      ]);
     }
   }
   if (engagement <= 0 && (likes || comments || shares)) {
     engagement = likes + comments + shares;
   }
-  return { impressions, reach, engagement, likes, comments, shares, clicks, followers };
+  return {
+    impressions,
+    reach,
+    engagement,
+    likes,
+    comments,
+    shares,
+    clicks,
+    followers,
+    gainedFollowers,
+  };
 }
 
 function extractPostMetrics(payload) {
@@ -299,6 +316,8 @@ export default async (req) => {
     let totalLikes = 0;
     let totalComments = 0;
     let totalShares = 0;
+    let totalFollowers = 0;
+    let totalGainedFollowers = 0;
 
     for (const page of rawPages.slice(0, 25)) {
       const id = String(page.id || page._id || '');
@@ -316,6 +335,7 @@ export default async (req) => {
         shares: 0,
         clicks: 0,
         followers: 0,
+        gainedFollowers: 0,
       };
       try {
         const metricsPayload = await planableGet(token, `/pages/${encodeURIComponent(id)}/metrics`, {
@@ -339,6 +359,8 @@ export default async (req) => {
       totalLikes += metrics.likes;
       totalComments += metrics.comments;
       totalShares += metrics.shares;
+      totalFollowers += metrics.followers;
+      totalGainedFollowers += metrics.gainedFollowers;
 
       pages.push({
         id,
@@ -353,6 +375,7 @@ export default async (req) => {
         shares: metrics.shares,
         clicks: metrics.clicks,
         followers: metrics.followers,
+        gainedFollowers: metrics.gainedFollowers,
       });
     }
 
@@ -449,6 +472,8 @@ export default async (req) => {
         likes: totalLikes,
         comments: totalComments,
         shares: totalShares,
+        followers: totalFollowers,
+        gainedFollowers: totalGainedFollowers,
       },
       ...(postsWarning ? { warning: postsWarning } : {}),
     };

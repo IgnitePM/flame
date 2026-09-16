@@ -238,6 +238,7 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
   const wow = report?.weekOverWeek || {};
   const traffic = report?.traffic || {};
   const analytics = report?.analytics || {};
+  const backlinks = report?.backlinks || {};
 
   const formatDuration = (seconds) => {
     const s = Math.round(Number(seconds) || 0);
@@ -364,6 +365,27 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
                 </p>
               ) : null}
             </div>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-[28px] p-6 shadow-sm space-y-4">
+            <div>
+              <h3 className="font-black text-slate-900">Backlinks</h3>
+              <p className="text-xs text-slate-500 font-medium mt-1">
+                SE Ranking project backlink checker totals
+              </p>
+            </div>
+            {!backlinks.available ? (
+              <p className="text-sm font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3">
+                {backlinks.warning || 'Backlink stats are not available yet.'}
+              </p>
+            ) : (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <StatCard label="Referring domains" value={formatNum(backlinks.domains)} />
+                <StatCard label="Total backlinks" value={formatNum(backlinks.total)} />
+                <StatCard label="Dofollow" value={formatNum(backlinks.dofollow)} />
+                <StatCard label="Nofollow" value={formatNum(backlinks.nofollow)} />
+              </div>
+            )}
           </div>
         </div>
       ) : null}
@@ -554,7 +576,7 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
           <div className="px-6 py-5 border-b border-slate-100">
             <h3 className="font-black text-slate-900">Keyword rankings</h3>
             <p className="text-xs text-slate-500 font-medium mt-0.5">
-              Best position across tracked engines · WoW vs ~7 days prior · top{' '}
+              Best position across tracked engines · volume, landing page, content score · top{' '}
               {keywords.length}
             </p>
           </div>
@@ -570,9 +592,10 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
                     <th className="px-6 py-3">Keyword</th>
                     <th className="px-4 py-3">Pos</th>
                     <th className="px-4 py-3">WoW</th>
-                    <th className="px-4 py-3">Prev</th>
                     <th className="px-4 py-3">Volume</th>
-                    <th className="px-6 py-3">Checked</th>
+                    <th className="px-4 py-3">Score</th>
+                    <th className="px-4 py-3">Landing page</th>
+                    <th className="px-6 py-3">SERP</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -581,8 +604,13 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
                       key={row.id}
                       className="border-b border-slate-50 last:border-0 hover:bg-slate-50/80"
                     >
-                      <td className="px-6 py-3 font-bold text-slate-800 max-w-[280px] truncate">
-                        {row.name}
+                      <td className="px-6 py-3 font-bold text-slate-800 max-w-[220px]">
+                        <div className="truncate">{row.name}</div>
+                        {row.serpFeatures?.length ? (
+                          <div className="text-[10px] font-bold text-slate-400 mt-0.5 truncate">
+                            {row.serpFeatures.join(' · ')}
+                          </div>
+                        ) : null}
                       </td>
                       <td className="px-4 py-3 font-black tabular-nums text-slate-900">
                         {row.position > 0 ? row.position : '—'}
@@ -590,14 +618,29 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
                       <td className="px-4 py-3">
                         <PositionDelta delta={row.wowDelta} />
                       </td>
-                      <td className="px-4 py-3 tabular-nums text-slate-500 font-medium">
-                        {row.priorPosition > 0 ? row.priorPosition : '—'}
-                      </td>
                       <td className="px-4 py-3 tabular-nums text-slate-600 font-medium">
                         {row.volume ? row.volume.toLocaleString() : '—'}
                       </td>
-                      <td className="px-6 py-3 text-slate-500 font-medium">
-                        {formatDay(row.date)}
+                      <td className="px-4 py-3 tabular-nums font-medium text-slate-700">
+                        {row.contentScore != null ? row.contentScore : '—'}
+                      </td>
+                      <td className="px-4 py-3 max-w-[200px]">
+                        {row.landingUrl ? (
+                          <a
+                            href={row.landingUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block truncate font-bold text-[#fd7414] hover:underline"
+                            title={row.landingUrl}
+                          >
+                            {row.landingUrl.replace(/^https?:\/\//, '')}
+                          </a>
+                        ) : (
+                          <span className="text-slate-400 font-medium">—</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-3 tabular-nums text-slate-500 font-medium">
+                        {row.serpFeatureCount ? row.serpFeatureCount : '—'}
                       </td>
                     </tr>
                   ))}

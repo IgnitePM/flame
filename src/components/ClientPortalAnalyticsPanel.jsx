@@ -279,6 +279,7 @@ function EmailAnalyticsPanel({ client, dateFromMs, dateToMs }) {
   const audience = report?.audience || {};
   const campaigns = Array.isArray(report?.campaigns) ? report.campaigns : [];
   const totals = report?.totals || {};
+  const growth = Array.isArray(report?.growth) ? report.growth : [];
   const availableAudiences = Array.isArray(report?.availableAudiences)
     ? report.availableAudiences
     : [];
@@ -338,7 +339,7 @@ function EmailAnalyticsPanel({ client, dateFromMs, dateToMs }) {
             />
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <StatCard
               label="Avg click rate"
               value={
@@ -347,13 +348,53 @@ function EmailAnalyticsPanel({ client, dateFromMs, dateToMs }) {
                   : '—'
               }
             />
+            <StatCard label="Unique opens" value={formatNum(totals.uniqueOpens)} />
+            <StatCard label="Unique clicks" value={formatNum(totals.uniqueClicks)} />
             <StatCard label="Unsubscribes" value={formatNum(totals.unsubscribes)} />
-            <StatCard
-              label="Audience"
-              value={audience.name || '—'}
-              hint={audience.id ? `List ${audience.id}` : undefined}
-            />
           </div>
+
+          {growth.length > 0 ? (
+            <div className="bg-white border border-slate-200 rounded-[28px] shadow-sm overflow-hidden">
+              <div className="px-6 py-5 border-b border-slate-100">
+                <h4 className="font-black text-slate-900">Audience growth</h4>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">
+                  Monthly subscribed vs unsubscribed (last {growth.length} months)
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">
+                      <th className="px-6 py-3">Month</th>
+                      <th className="px-4 py-3">Subscribed</th>
+                      <th className="px-4 py-3">Unsubscribed</th>
+                      <th className="px-4 py-3">Cleaned</th>
+                      <th className="px-6 py-3">Existing</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {growth.map((g) => (
+                      <tr key={g.month} className="border-b border-slate-50 last:border-0">
+                        <td className="px-6 py-3 font-bold text-slate-800">{g.month}</td>
+                        <td className="px-4 py-3 tabular-nums font-medium text-emerald-700">
+                          {formatNum(g.subscribed)}
+                        </td>
+                        <td className="px-4 py-3 tabular-nums font-medium text-rose-600">
+                          {formatNum(g.unsubscribed)}
+                        </td>
+                        <td className="px-4 py-3 tabular-nums font-medium">
+                          {formatNum(g.cleaned)}
+                        </td>
+                        <td className="px-6 py-3 tabular-nums font-medium">
+                          {formatNum(g.existing)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
 
           <div className="bg-white border border-slate-200 rounded-[28px] shadow-sm overflow-hidden">
             <div className="px-6 py-5 border-b border-slate-100">
@@ -373,6 +414,7 @@ function EmailAnalyticsPanel({ client, dateFromMs, dateToMs }) {
                       <th className="px-4 py-3">Emails</th>
                       <th className="px-4 py-3">Open rate</th>
                       <th className="px-4 py-3">Click rate</th>
+                      <th className="px-4 py-3">Unique opens</th>
                       <th className="px-6 py-3">Unsubs</th>
                     </tr>
                   </thead>
@@ -397,6 +439,9 @@ function EmailAnalyticsPanel({ client, dateFromMs, dateToMs }) {
                           {c.clickRate != null
                             ? `${(Number(c.clickRate) * 100).toFixed(1)}%`
                             : '—'}
+                        </td>
+                        <td className="px-4 py-3 tabular-nums font-medium">
+                          {formatNum(c.uniqueOpens)}
                         </td>
                         <td className="px-6 py-3 tabular-nums font-medium">
                           {formatNum(c.unsubscribes)}
@@ -471,13 +516,19 @@ function SocialAnalyticsPanel({ client, dateFromMs, dateToMs }) {
         <StatCard label="Channels" value={formatNum(pages.length)} />
       </div>
 
-      {(totals.likes || totals.comments || totals.shares) ? (
-        <div className="grid grid-cols-3 gap-3">
-          <StatCard label="Likes / reactions" value={formatNum(totals.likes)} />
-          <StatCard label="Comments" value={formatNum(totals.comments)} />
-          <StatCard label="Shares" value={formatNum(totals.shares)} />
-        </div>
-      ) : null}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard label="Followers" value={formatNum(totals.followers)} />
+        <StatCard
+          label="Follower growth"
+          value={
+            totals.gainedFollowers != null && totals.gainedFollowers !== 0
+              ? `${Number(totals.gainedFollowers) > 0 ? '+' : ''}${formatNum(totals.gainedFollowers)}`
+              : formatNum(totals.gainedFollowers)
+          }
+        />
+        <StatCard label="Likes / reactions" value={formatNum(totals.likes)} />
+        <StatCard label="Comments" value={formatNum(totals.comments)} />
+      </div>
 
       <div className="bg-white border border-slate-200 rounded-[28px] p-6 shadow-sm space-y-4">
         <div>

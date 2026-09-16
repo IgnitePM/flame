@@ -184,6 +184,34 @@ function latestPosition(keyword) {
   return sorted[0] || null;
 }
 
+function latestLandingUrl(landingPages, preferDate) {
+  const rows = Array.isArray(landingPages) ? landingPages : [];
+  if (!rows.length) return '';
+  if (preferDate) {
+    const exact = rows.find((r) => String(r?.date || '') === preferDate && r?.url);
+    if (exact?.url) return String(exact.url);
+  }
+  const sorted = [...rows]
+    .filter((r) => r?.url)
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  return sorted[0]?.url ? String(sorted[0].url) : '';
+}
+
+function summarizeSerpFeatures(features) {
+  if (!features || typeof features !== 'object') {
+    return { count: 0, labels: [] };
+  }
+  const labels = Object.entries(features)
+    .filter(([, v]) => v === true || v === 1 || v === '1')
+    .map(([k]) =>
+      String(k || '')
+        .replace(/[_-]+/g, ' ')
+        .replace(/\b\w/g, (c) => c.toUpperCase()),
+    )
+    .filter(Boolean);
+  return { count: labels.length, labels: labels.slice(0, 8) };
+}
+
 export default async (req) => {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
@@ -292,6 +320,7 @@ export default async (req) => {
       positionsGroups,
       gscResult,
       potentialResult,
+      backlinksResult,
     ] = await Promise.all([
       seGet(apiKey, '/sites/summary', { site_id: siteId }),
       seGet(apiKey, '/sites/positions/history', {
@@ -311,9 +340,13 @@ export default async (req) => {
         site_id: siteId,
         date_from: positionsFrom,
         date_to: dateTo,
+        with_landing_pages: 1,
+        with_serp_features: 1,
+        with_content_score: 1,
       }),
       seGetSoft(apiKey, '/analytics/gsc/queries', { site_id: siteId }),
       seGetSoft(apiKey, '/analytics/seo-potential', { site_id: siteId }),
+      seGetSoft(apiKey, '/backlinks/stats', { site_id: siteId }),
     ]);
 
     const visibilityTrend = seriesAvgRow(visibilityHistory);
@@ -352,6 +385,7 @@ export default async (req) => {
           // Positive delta = improved (moved up / lower rank number).
           wowDelta = priorPos - currentPos;
         }
+        const serp = summarizeSerpFeatures(kw.features);
         keywordRows.push({
           id: String(kw.id),
           name: nameById.get(String(kw.id)) || `Keyword ${kw.id}`,
@@ -361,6 +395,19 @@ export default async (req) => {
           priorPosition: priorPos,
           priorDate: weekAgo ? String(weekAgo.date || '') : null,
           volume: Number(kw.volume) || 0,
+          competition: kw.competition != null ? Number(kw.competition) : null,
+          contentScore:
+            kw.content_score != null && Number.isFinite(Number(kw.content_score))
+              ? Number(kw.content_score)
+              : null,
+          contentScoreChange:
+            kw.content_score_change != null &&
+            Number.isFinite(Number(kw.content_score_change))
+              ? Number(kw.content_score_change)
+              : null,
+          landingUrl: latestLandingUrl(kw.landing_pages, String(latest.date || '')),
+          serpFeatureCount: serp.count,
+          serpFeatures: serp.labels,
           date: String(latest.date || ''),
           siteEngineId: engineId ?? null,
         });
@@ -532,6 +579,28 @@ export default async (req) => {
       },
       traffic,
       analytics,
+      backlinks: backlinksResult.ok
+        ? {
+            available: true,
+            total: Number(backlinksResult.data?.total || 0),
+            domains: Number(backlinksResult.data?.domains || 0),
+            anchors: Number(backlinksResult.data?.anchors || 0),
+            ips: Number(backlinksResult.data?.ip || 0),
+            dofollow: Number(backlinksResult.data?.dofollow || 0),
+            nofollow: Number(backlinksResult.data?.nofollow || 0),
+          }
+        : {
+            available: false,
+            warning:
+              backlinksResult.error ||
+              'Backlink stats are not available for this SE Ranking project.',
+            total: 0,
+            domains: 0,
+            anchors: 0,
+            ips: 0,
+            dofollow: 0,
+            nofollow: 0,
+          },
       keywords: keywordTable,
       keywordCount: keywordTable.length,
       fetchedAt: Date.now(),
