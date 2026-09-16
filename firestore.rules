@@ -345,6 +345,12 @@ service cloud.firestore {
         emailLower().matches('digest-bot@.*');
     }
 
+    // Company Google Business Profile OAuth tokens for portal Local SEO.
+    match /gbpConnections/{docId} {
+      allow read, write: if isSignedIn() &&
+        emailLower().matches('digest-bot@.*');
+    }
+
     // Company Google Ads OAuth tokens for portal Analytics → Ads.
     match /googleAdsConnections/{docId} {
       allow read, write: if isSignedIn() &&
