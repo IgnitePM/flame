@@ -4884,26 +4884,30 @@ export default function App() {
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-                      GBP location ID
+                      SE Ranking Local location ID
                     </label>
                     <input
                       type="text"
                       inputMode="numeric"
-                      value={editingClient.googleBusinessProfileLocationId ?? ''}
+                      value={
+                        editingClient.seRankingLocalLocationId ??
+                        editingClient.googleBusinessProfileLocationId ??
+                        ''
+                      }
                       onChange={(e) =>
                         setEditingClient({
                           ...editingClient,
-                          googleBusinessProfileLocationId: e.target.value.replace(
+                          seRankingLocalLocationId: e.target.value.replace(
                             /[^\d]/g,
                             '',
                           ),
                         })
                       }
                       className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
-                      placeholder="e.g. 1234567890123456789"
+                      placeholder="e.g. 15"
                     />
                     <p className="text-[10px] font-bold text-slate-400">
-                      Google Business Profile location ID (Admin → Config lists locations after GBP is connected). Used for Local SEO on portal Analytics → Website.
+                      SE Ranking Local Marketing location ID (Admin → Config lists locations). Used for Local SEO on portal Analytics → Website.
                     </p>
                   </div>
                   <div className="space-y-2">
@@ -5850,8 +5854,10 @@ export default function App() {
                     ga4PropertyId: String(editingClient.ga4PropertyId || '')
                       .replace(/[^\d]/g, '')
                       .trim() || null,
-                    googleBusinessProfileLocationId: String(
-                      editingClient.googleBusinessProfileLocationId || '',
+                    seRankingLocalLocationId: String(
+                      editingClient.seRankingLocalLocationId ||
+                        editingClient.googleBusinessProfileLocationId ||
+                        '',
                     )
                       .replace(/[^\d]/g, '')
                       .trim() || null,

@@ -252,7 +252,7 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
           <div>
             <h2 className="text-3xl font-black text-slate-900">SEO</h2>
             <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px] mt-1">
-              Google Business Profile · {formatDay(range.from)} – {formatDay(range.to)}
+              SE Ranking Local Marketing · {formatDay(range.from)} – {formatDay(range.to)}
               {gbpReport?.cached
                 ? ` · Cached${
                     gbpReport.cacheAgeSec
@@ -297,10 +297,29 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
                 label="Direction requests"
                 value={formatNum(totals.directionRequests)}
               />
-              <StatCard label="Photo views" value={formatNum(totals.photoViews)} />
+              <StatCard
+                label="Conversations"
+                value={formatNum(totals.conversations)}
+              />
             </div>
+            {gbpReport?.searchBreakdown ? (
+              <div className="grid grid-cols-3 gap-3">
+                <StatCard
+                  label="Direct searches"
+                  value={formatNum(gbpReport.searchBreakdown.direct)}
+                />
+                <StatCard
+                  label="Discovery searches"
+                  value={formatNum(gbpReport.searchBreakdown.discovery)}
+                />
+                <StatCard
+                  label="Branded searches"
+                  value={formatNum(gbpReport.searchBreakdown.branded)}
+                />
+              </div>
+            ) : null}
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-              Totals for the selected date range · Google Business Profile Performance API
+              Totals for the selected date range · SE Ranking Local Marketing (GBP)
             </p>
           </div>
         )}

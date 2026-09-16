@@ -104,7 +104,7 @@ import GmailConnectCard from './GmailConnectCard.jsx';
 import DriveConnectCard from './DriveConnectCard.jsx';
 import Ga4ConnectCard from './Ga4ConnectCard.jsx';
 import GoogleAdsConnectCard from './GoogleAdsConnectCard.jsx';
-import GbpConnectCard from './GbpConnectCard.jsx';
+import SeRankingLocalConnectCard from './SeRankingLocalConnectCard.jsx';
 import ClientEmailComposeModal, {
   replySubject,
 } from './ClientEmailComposeModal.jsx';
@@ -7178,10 +7178,7 @@ const AdminDashboard = ({
             onTabFocus={() => setAdminTab?.('tasks')}
           />
 
-          <GbpConnectCard
-            canManage={canBilling}
-            onTabFocus={() => setAdminTab?.('tasks')}
-          />
+          <SeRankingLocalConnectCard canManage={canBilling} />
 
           <GoogleAdsConnectCard
             canManage={canBilling}
