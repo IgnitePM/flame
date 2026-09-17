@@ -7,6 +7,7 @@ export const NOTIFICATION_TYPES = {
   FORGOT_CLOCK_OUT: 'forgot_clock_out',
   AI_INSIGHT: 'ai_insight',
   TODO_APPROVAL: 'todo_approval',
+  PORTAL_FEEDBACK: 'portal_feedback',
 };
 
 export function notificationTypeLabel(type) {
@@ -15,6 +16,7 @@ export function notificationTypeLabel(type) {
   if (type === NOTIFICATION_TYPES.FORGOT_CLOCK_OUT) return 'Clock-out';
   if (type === NOTIFICATION_TYPES.AI_INSIGHT) return 'AI brief';
   if (type === NOTIFICATION_TYPES.TODO_APPROVAL) return 'Task approval';
+  if (type === NOTIFICATION_TYPES.PORTAL_FEEDBACK) return 'Portal feedback';
   return 'Update';
 }
 

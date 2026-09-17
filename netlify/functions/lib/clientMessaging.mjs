@@ -422,6 +422,56 @@ export async function createReviewDoc(fields) {
   return doc;
 }
 
+export async function createFeedbackDoc(fields) {
+  const db = await getDigestDb();
+  const id = `feedback_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  const doc = {
+    ...fields,
+    id,
+    createdAt: Number(fields.createdAt) || Date.now(),
+    updatedAt: Date.now(),
+  };
+  await mergeDoc(db, `clientPortalFeedback/${id}`, doc);
+  return doc;
+}
+
+export async function notifyStaffPortalFeedback({
+  client,
+  type,
+  subject,
+  body,
+  byEmail,
+  notifyEmails = [],
+}) {
+  const fallback = staffNotifyEmails(client);
+  const to = [
+    ...new Set(
+      [...(notifyEmails || []), ...fallback]
+        .map((e) => String(e || '').trim().toLowerCase())
+        .filter((e) => e.includes('@')),
+    ),
+  ];
+  if (!to.length) return { sent: 0, skipped: 'no_staff_emails' };
+  const kind = type === 'bug' ? 'Bug report' : 'Feedback';
+  const href = `${appBaseUrl()}/clients/${client.id}`;
+  const { text, html } = emailShell({
+    eyebrow: 'Ignite PM · Portal feedback',
+    title: `${kind}: ${subject || 'Portal note'}`,
+    bodyText: `${byEmail || 'A client contact'} submitted ${kind.toLowerCase()} for ${
+      client.name || 'a client'
+    }.\n\n${body || '(no details)'}`,
+    ctaLabel: 'Open client',
+    ctaHref: href,
+  });
+  await sendDigestEmail({
+    to,
+    subject: `${kind}: ${subject || 'Portal'} — ${client.name || 'Client'}`,
+    text,
+    html,
+  });
+  return { sent: to.length };
+}
+
 export async function updateReviewDoc(reviewId, patch) {
   const db = await getDigestDb();
   await mergeDoc(db, `clientReviews/${reviewId}`, {

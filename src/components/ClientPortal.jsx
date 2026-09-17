@@ -30,6 +30,7 @@ import PortalTaskRequestForm from './PortalTaskRequestForm.jsx';
 import PortalCompanyProfilePanel from './PortalCompanyProfilePanel.jsx';
 import ClientPortalToolsPanel from './ClientPortalToolsPanel.jsx';
 import ClientPortalAnalyticsPanel from './ClientPortalAnalyticsPanel.jsx';
+import ClientPortalFeedbackModal from './ClientPortalFeedbackModal.jsx';
 import {
   ChevronLeft,
   ChevronRight,
@@ -47,6 +48,7 @@ import {
   ExternalLink,
   Wrench,
   BarChart3,
+  MessageSquareWarning,
 } from 'lucide-react';
 
 const STRATEGY_BOOKING_URL = 'https://calendar.app.google/nsL6wM7189fAM1Vd7';
@@ -114,6 +116,7 @@ const ClientPortal = ({
   user,
 }) => {
   const [portalSection, setPortalSection] = useState('dashboard');
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [latestStaffMessageAt, setLatestStaffMessageAt] = useState(0);
   const [messagesQueryReady, setMessagesQueryReady] = useState(false);
   const [messagesLastReadAt, setMessagesLastReadAt] = useState(0);
@@ -360,6 +363,15 @@ const ClientPortal = ({
           <span className="font-bold text-sm text-slate-500 hidden sm:inline truncate max-w-[200px]">
             {clientProfile.name}
           </span>
+          <button
+            type="button"
+            onClick={() => setFeedbackOpen(true)}
+            title="Feedback or report a bug"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-500 bg-slate-100 hover:bg-slate-200 hover:text-slate-700 transition-colors"
+          >
+            <MessageSquareWarning className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Feedback</span>
+          </button>
           <button
             onClick={() => {
               setUser(null);
@@ -1099,6 +1111,21 @@ const ClientPortal = ({
         </>
         ) : null}
       </main>
+
+      {feedbackOpen ? (
+        <ClientPortalFeedbackModal
+          client={clientProfile}
+          userEmail={portalEmail}
+          userName={
+            user?.displayName ||
+            user?.email ||
+            auth?.currentUser?.email ||
+            ''
+          }
+          portalSection={portalSection}
+          onClose={() => setFeedbackOpen(false)}
+        />
+      ) : null}
     </div>
   );
 };

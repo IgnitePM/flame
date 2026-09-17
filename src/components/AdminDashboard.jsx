@@ -92,6 +92,7 @@ import ClientProfileSummary from './ClientProfileSummary.jsx';
 import ClientFilesPanel from './ClientFilesPanel.jsx';
 import ClientMessagesPanel from './ClientMessagesPanel.jsx';
 import ClientReviewsPanel from './ClientReviewsPanel.jsx';
+import PortalFeedbackPanel from './PortalFeedbackPanel.jsx';
 import ClientCycleActivityPanel from './ClientCycleActivityPanel.jsx';
 import RetainerCategoryStats from './RetainerCategoryStats.jsx';
 import TaskLogSessionDetail from './TaskLogSessionDetail.jsx';
@@ -4754,14 +4755,19 @@ const AdminDashboard = ({
                     )}
 
                     {showClientMessages && (
-                      <ClientMessagesPanel
-                        client={c}
-                        mode="staff"
-                        userEmail={user?.email || ''}
-                        userName={user?.displayName || user?.email || ''}
-                        staffEmails={staffEmails}
-                        adminUsers={adminUsers}
-                      />
+                      <>
+                        <ClientMessagesPanel
+                          client={c}
+                          mode="staff"
+                          userEmail={user?.email || ''}
+                          userName={user?.displayName || user?.email || ''}
+                          staffEmails={staffEmails}
+                          adminUsers={adminUsers}
+                        />
+                        <div className="mt-8">
+                          <PortalFeedbackPanel client={c} />
+                        </div>
+                      </>
                     )}
 
                     {showClientApprovals && (

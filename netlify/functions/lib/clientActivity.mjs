@@ -27,6 +27,7 @@ function activityTypeLabel(type) {
     todo_approval_sent: 'Task sent for approval',
     todo_approval_decision: 'Task approval decision',
     todo_note_mention: 'Client tagged on task note',
+    portal_feedback: 'Portal feedback',
     addon_request: 'Add-on hours',
   };
   return labels[type] || String(type || 'Activity');

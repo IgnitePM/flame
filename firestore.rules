@@ -418,5 +418,17 @@ service cloud.firestore {
            .hasOnly(['status', 'decisionAt', 'decisionByEmail', 'decisionNote', 'linkedMessageId', 'updatedAt']));
       allow delete: if isAdmin();
     }
+
+    // Portal feedback / bug reports (Netlify creates; staff triage).
+    match /clientPortalFeedback/{feedbackId} {
+      allow read: if isAnyStaff() ||
+        (isSignedIn() &&
+         resource.data.clientId is string &&
+         clientAllowsEmail(resource.data.clientId) &&
+         resource.data.createdByEmail == emailLower());
+      allow create: if isAnyStaff() || isBilling();
+      allow update: if isAnyStaff() || isBilling();
+      allow delete: if isAdmin();
+    }
   }
 }
