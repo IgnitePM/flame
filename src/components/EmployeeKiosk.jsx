@@ -292,9 +292,13 @@ const EmployeeKiosk = ({
     if (!due) return 'bg-white border border-slate-100 text-slate-800';
     const now = Date.now();
     const fiveDays = 5 * 24 * 60 * 60 * 1000;
-    if (due < now) return 'bg-red-700 border border-red-900 text-white';
-    if (due - now <= fiveDays)
-      return 'bg-emerald-700 border border-emerald-900 text-white';
+    // Soft tinted cards on phones/tablets so notes/controls stay readable; solid fills on large screens.
+    if (due < now) {
+      return 'bg-red-50 border border-red-200 text-slate-900 md:bg-red-700 md:border-red-900 md:text-white';
+    }
+    if (due - now <= fiveDays) {
+      return 'bg-emerald-50 border border-emerald-200 text-slate-900 md:bg-emerald-700 md:border-emerald-900 md:text-white';
+    }
     return 'bg-white border border-slate-100 text-slate-800';
   };
 
@@ -1575,7 +1579,7 @@ const EmployeeKiosk = ({
   return (
     <div className="w-full ignite-kiosk-shell">
       <div className="grid grid-cols-1 gap-4 sm:gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(400px,min(38vw,520px))] lg:items-start lg:gap-10">
-        <div className="space-y-6 min-w-0 order-1">
+        <div className="space-y-6 min-w-0 order-1 lg:col-start-1 lg:row-start-1">
       <div className="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-x-hidden overflow-y-visible lg:min-h-0">
         <div className="p-4 sm:p-8 text-center border-b border-slate-50 bg-slate-50/30">
           <div className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mb-3">
@@ -2844,8 +2848,9 @@ const EmployeeKiosk = ({
           </div>
         )}
       </div>
+        </div>
 
-          <section className="rounded-2xl border border-zinc-700 bg-zinc-900 p-5 shadow-md space-y-3">
+          <section className="order-3 lg:col-start-1 lg:row-start-2 rounded-2xl border border-zinc-700 bg-zinc-900 p-5 shadow-md space-y-3 min-w-0">
             <div className="text-[10px] font-black text-zinc-300 uppercase tracking-widest">
               Retainers ending soon
             </div>
@@ -2992,8 +2997,8 @@ const EmployeeKiosk = ({
               )}
             </div>
           </section>
-        </div>
-        <aside className="order-2 rounded-2xl border border-slate-100 bg-white p-5 shadow-lg min-w-0 w-full flex flex-col gap-3">
+
+        <aside className="order-2 lg:col-start-2 lg:row-start-1 lg:row-span-2 rounded-2xl border border-slate-100 bg-white p-5 shadow-lg min-w-0 w-full flex flex-col gap-3">
           <KioskNotificationsPanel
             notifications={notifications}
             onDismiss={dismissNotification}
@@ -3119,11 +3124,17 @@ const EmployeeKiosk = ({
                 const client = (clientsFull || []).find((cl) => cl.id === row.clientId);
                 const tone = getUrgencyTone(row.item);
                 const titleClass =
-                  tone === 'normal' ? 'text-slate-700' : 'text-white';
+                  tone === 'normal'
+                    ? 'text-slate-700'
+                    : 'text-slate-900 sm:text-white';
                 const metaClass =
-                  tone === 'normal' ? 'text-slate-500' : 'text-white/90';
+                  tone === 'normal'
+                    ? 'text-slate-500'
+                    : 'text-slate-600 sm:text-white/90';
                 const dueClass =
-                  tone === 'normal' ? 'text-slate-500' : 'text-white';
+                  tone === 'normal'
+                    ? 'text-slate-500'
+                    : 'text-slate-600 sm:text-white';
                 return (
                   <div
                     key={`${row.clientId}__${row.categoryKey}__${row.item.id}`}

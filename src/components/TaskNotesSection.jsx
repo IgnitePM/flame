@@ -174,8 +174,8 @@ export default function TaskNotesSection({
                 : 'Write a note. Use @name to tag a teammate…'
             }
           />
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-[9px] font-bold text-slate-400">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-[9px] font-bold text-slate-400 order-2 sm:order-1">
               {clientEmails.length
                 ? 'Type @ to tag a teammate or client · Ctrl/Cmd+Enter to post'
                 : 'Type @ to tag a teammate · Ctrl/Cmd+Enter to post'}
@@ -184,7 +184,7 @@ export default function TaskNotesSection({
               type="button"
               disabled={disabled || saving || !draft.trim()}
               onClick={save}
-              className="shrink-0 rounded-lg bg-[#fd7414] px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white disabled:opacity-40"
+              className="order-1 sm:order-2 shrink-0 touch-target rounded-lg bg-[#fd7414] px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white disabled:opacity-40 w-full sm:w-auto"
             >
               {saving ? 'Saving…' : 'Post note'}
             </button>

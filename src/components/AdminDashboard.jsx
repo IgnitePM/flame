@@ -2147,20 +2147,22 @@ const AdminDashboard = ({
     const fiveDaysMs = 5 * 24 * 60 * 60 * 1000;
     if (due < now) {
       return {
-        rowClass: 'bg-red-600 border border-red-700',
+        rowClass:
+          'bg-red-50 border border-red-200 md:bg-red-600 md:border-red-700',
         textClass: item?.done
-          ? 'line-through text-white/80'
-          : 'text-white',
-        metaClass: 'text-white/90',
+          ? 'line-through text-slate-400 opacity-70 md:text-white/80'
+          : 'text-slate-900 md:text-white',
+        metaClass: 'text-slate-600 md:text-white/90',
       };
     }
     if (due - now <= fiveDaysMs) {
       return {
-        rowClass: 'bg-emerald-600 border border-emerald-700',
+        rowClass:
+          'bg-emerald-50 border border-emerald-200 md:bg-emerald-600 md:border-emerald-700',
         textClass: item?.done
-          ? 'line-through text-white/80'
-          : 'text-white',
-        metaClass: 'text-white/90',
+          ? 'line-through text-slate-400 opacity-70 md:text-white/80'
+          : 'text-slate-900 md:text-white',
+        metaClass: 'text-slate-600 md:text-white/90',
       };
     }
     return {
@@ -3004,9 +3006,10 @@ const AdminDashboard = ({
                 return (
                   <div
                     key={`${row.clientId}__${row.categoryKey}__${row.item.id}`}
-                    className={`flex flex-col gap-2 rounded-2xl p-3 ${styles.rowClass}`}
+                    className={`client-task-row flex flex-col gap-3 rounded-2xl p-3 sm:p-4 min-w-0 max-w-full overflow-hidden ${styles.rowClass}`}
                   >
-                    <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start">
+                      <div className="flex items-start gap-3 min-w-0 flex-1">
                       <input
                         type="checkbox"
                         checked={!!row.item.done}
@@ -3025,10 +3028,10 @@ const AdminDashboard = ({
                           );
                         }}
                         disabled={todoSaving}
-                        className="w-4 h-4"
+                        className="w-4 h-4 mt-1 shrink-0"
                       />
                       <div className="flex-1 min-w-0">
-                        <div className={`font-black text-sm ${styles.textClass}`}>
+                        <div className={`font-black text-sm break-words leading-snug ${styles.textClass}`}>
                           {safeDisplayForReact(row.item.text) || '(no text)'}
                           {subs.length > 0 && (
                             <span className={`ml-2 text-[9px] font-bold ${styles.metaClass}`}>
@@ -3039,7 +3042,7 @@ const AdminDashboard = ({
                             <TodoApprovalBadge item={row.item} />
                           </span>
                         </div>
-                        <div className={`text-[10px] font-bold uppercase tracking-widest ${styles.metaClass}`}>
+                        <div className={`text-[10px] font-bold uppercase tracking-widest mt-1 ${styles.metaClass}`}>
                           <button
                             type="button"
                             onClick={() => navigateToClient?.(row.clientId)}
@@ -3057,46 +3060,11 @@ const AdminDashboard = ({
                         <div className={`text-[10px] font-bold ${styles.metaClass}`}>
                           Assigned: {assignees.join(', ') || 'Unassigned'}
                         </div>
-                        {rowClient && attachClientDriveFile && (
-                          <TodoItemAttachments
-                            item={row.item}
-                            client={rowClient}
-                            cycleStart={row.cycleStart}
-                            categoryKey={row.categoryKey}
-                            disabled={
-                              todoSaving ||
-                              isCycleLocked(rowClient, row.cycleStart)
-                            }
-                            onAttachDriveFile={attachClientDriveFile}
-                            onRemove={removeClientDocument}
-                            compact
-                          />
-                        )}
-                        {rowClient && (
-                          <TaskNotesSection
-                            item={row.item}
-                            allItems={row.catTodo?.items || [row.item]}
-                            onPersistItems={(nextItems) =>
-                              updateClientTodo(rowClient, row.cycleStart, row.categoryKey, {
-                                ...row.catTodo,
-                                items: nextItems,
-                              })
-                            }
-                            user={user}
-                            staffEmails={assignableEmails}
-                            adminUsers={adminUsers}
-                            client={rowClient}
-                            cycleStart={row.cycleStart}
-                            categoryKey={row.categoryKey}
-                            disabled={
-                              todoSaving || isCycleLocked(rowClient, row.cycleStart)
-                            }
-                            compact
-                          />
-                        )}
                       </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto sm:ml-auto">
                       {isAdmin && rowClient && (
-                        <div className="shrink-0 flex flex-col sm:flex-row sm:items-center gap-2">
+                        <>
                           {renderAssigneeMultiSelect({
                             openKey: `global_task__${row.clientId}__${row.categoryKey}__${row.item.id}`,
                             value: assigneeValue,
@@ -3160,7 +3128,7 @@ const AdminDashboard = ({
                               Review
                             </button>
                           ) : null}
-                        </div>
+                        </>
                       )}
                       {!row.item.done && (
                         <button
@@ -3177,14 +3145,54 @@ const AdminDashboard = ({
                             );
                             navigateToKioskWithTask(row.clientName, target);
                           }}
-                          className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#fd7414] text-white text-xs font-black uppercase tracking-widest hover:bg-[#e66a12] transition-colors"
+                          className="shrink-0 inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-[#fd7414] text-white text-xs font-black uppercase tracking-widest hover:bg-[#e66a12] transition-colors w-full sm:w-auto"
                           title="Start timer on kiosk with this client and billing target"
                         >
                           <Play className="w-4 h-4" aria-hidden />
                           Start
                         </button>
                       )}
+                      </div>
                     </div>
+                    {rowClient && (
+                      <div className="min-w-0 w-full space-y-2">
+                        {attachClientDriveFile ? (
+                          <TodoItemAttachments
+                            item={row.item}
+                            client={rowClient}
+                            cycleStart={row.cycleStart}
+                            categoryKey={row.categoryKey}
+                            disabled={
+                              todoSaving ||
+                              isCycleLocked(rowClient, row.cycleStart)
+                            }
+                            onAttachDriveFile={attachClientDriveFile}
+                            onRemove={removeClientDocument}
+                            compact
+                          />
+                        ) : null}
+                        <TaskNotesSection
+                          item={row.item}
+                          allItems={row.catTodo?.items || [row.item]}
+                          onPersistItems={(nextItems) =>
+                            updateClientTodo(rowClient, row.cycleStart, row.categoryKey, {
+                              ...row.catTodo,
+                              items: nextItems,
+                            })
+                          }
+                          user={user}
+                          staffEmails={assignableEmails}
+                          adminUsers={adminUsers}
+                          client={rowClient}
+                          cycleStart={row.cycleStart}
+                          categoryKey={row.categoryKey}
+                          disabled={
+                            todoSaving || isCycleLocked(rowClient, row.cycleStart)
+                          }
+                          compact
+                        />
+                      </div>
+                    )}
                     {subs.length > 0 && (
                       <ul className="ml-2 border-l border-slate-300/60 pl-3 space-y-2 w-full min-w-0 max-w-full overflow-x-hidden">
                         {subs.map((sub) => {
@@ -3929,41 +3937,50 @@ const AdminDashboard = ({
                           }
                     }
                   >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-3 min-w-0">
+                    <div className="min-w-0 w-full max-w-full overflow-hidden">
+                      <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 sm:gap-3 w-full max-w-full">
                         {c.logoUrl ? (
                           <img
                             src={c.logoUrl}
                             alt=""
                             className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl object-cover border border-slate-200 shrink-0 bg-white"
                           />
-                        ) : null}
-                        <h4
-                          className={`font-black text-xl truncate min-w-0 ${
-                            c.status === 'paused'
-                              ? 'text-slate-400'
-                              : 'text-slate-800'
-                          }`}
-                        >
-                          {c.name}
-                        </h4>
-                        {!isClientPage && (
+                        ) : (
+                          <span className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-slate-100 border border-slate-200 shrink-0" aria-hidden />
+                        )}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <h4
+                              className={`font-black text-lg sm:text-xl truncate min-w-0 ${
+                                c.status === 'paused'
+                                  ? 'text-slate-400'
+                                  : 'text-slate-800'
+                              }`}
+                            >
+                              {c.name}
+                            </h4>
+                            {c.status === 'paused' && (
+                              <span className="shrink-0 bg-slate-200 text-slate-500 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
+                                Paused
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {!isClientPage ? (
                           <button
+                            type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               navigateToClient?.(c.id);
                             }}
-                            className="px-3 py-2 text-white bg-[#fd7414] rounded-2xl hover:bg-[#e66a12] transition-colors font-black flex items-center gap-2 shadow-sm"
+                            className="shrink-0 px-3 py-2 text-white bg-[#fd7414] rounded-2xl hover:bg-[#e66a12] transition-colors font-black inline-flex items-center gap-1.5 shadow-sm max-w-full"
                             title="Open client page"
                           >
                             Open
-                            <ArrowRight className="w-4 h-4" />
+                            <ArrowRight className="w-4 h-4 shrink-0" />
                           </button>
-                        )}
-                        {c.status === 'paused' && (
-                          <span className="bg-slate-200 text-slate-500 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
-                            Paused
-                          </span>
+                        ) : (
+                          <span className="w-0" aria-hidden />
                         )}
                       </div>
                       <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">

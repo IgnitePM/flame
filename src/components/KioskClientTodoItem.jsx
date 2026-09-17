@@ -440,13 +440,13 @@ export default function KioskClientTodoItem({
           : null;
 
   const renderPrimaryControls = () => (
-    <div className="flex shrink-0 items-center justify-end gap-1">
+    <div className="flex flex-wrap shrink-0 items-center justify-start sm:justify-end gap-1.5 w-full sm:w-auto">
       {canCurrentUserDecideStaffApproval(item, meLower) && onOpenApproval ? (
         <button
           type="button"
           disabled={pickerDisabled}
           onClick={() => onOpenApproval(item, 'decide')}
-          className="kiosk-light-control shrink-0 px-2 py-1 rounded-lg bg-violet-50 border border-violet-200 text-[9px] font-black uppercase tracking-widest text-violet-800"
+          className="kiosk-light-control touch-target shrink-0 px-2.5 py-1.5 rounded-lg bg-violet-50 border border-violet-200 text-[9px] font-black uppercase tracking-widest text-violet-800"
         >
           Review
         </button>
@@ -464,7 +464,7 @@ export default function KioskClientTodoItem({
         type="button"
         disabled={pickerDisabled}
         onClick={() => onOpenOptions?.(item)}
-        className="kiosk-light-control shrink-0 px-2 py-1 rounded-lg bg-white border border-slate-200 text-[9px] font-black uppercase tracking-widest text-black"
+        className="kiosk-light-control touch-target shrink-0 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-[9px] font-black uppercase tracking-widest text-black"
       >
         Options
       </button>
@@ -474,7 +474,7 @@ export default function KioskClientTodoItem({
   return (
     <li
       ref={rowRef}
-      className={`relative flex flex-col gap-1 rounded-lg min-w-0 max-w-full transition-all duration-150 ${
+      className={`relative flex flex-col gap-2 rounded-xl min-w-0 max-w-full overflow-hidden transition-all duration-150 p-1 ${
         assigneeMenuOpen ? 'z-[120]' : 'z-0'
       } ${isDragging ? 'kiosk-todo-row-dragging' : ''} ${
         dropHint === 'reorder' ? 'kiosk-todo-drop-reorder' : ''
@@ -492,11 +492,11 @@ export default function KioskClientTodoItem({
         </div>
       )}
       {showPriorCycleBadge && (
-        <div className="px-2 pt-2 text-[9px] font-black uppercase tracking-widest text-amber-800">
+        <div className="px-3 pt-2 text-[9px] font-black uppercase tracking-widest text-amber-800">
           Prior billing cycle
         </div>
       )}
-      <div className="flex flex-col gap-2 p-2 min-w-0 w-full">
+      <div className="flex flex-col gap-2.5 p-2.5 sm:p-2 min-w-0 w-full">
         <div className="flex items-start gap-2 min-w-0 w-full">
           {canDragReorder ? (
             <TodoDragHandle
@@ -592,7 +592,7 @@ export default function KioskClientTodoItem({
             className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4 shrink-0 mt-0.5"
           />
           <div className="min-w-0 flex-1">
-            <div className={`text-sm break-words ${item.done ? 'line-through opacity-70' : ''}`}>
+            <div className={`text-sm break-words leading-snug ${item.done ? 'line-through opacity-70' : ''}`}>
               {safeDisplayForReact(item.text) || '(no text)'}
               {item.recurring && (
                 <span className="ml-2 text-[9px] font-black uppercase tracking-widest text-[#fd7414]">
@@ -600,11 +600,11 @@ export default function KioskClientTodoItem({
                 </span>
               )}
             </div>
-            <div className="mt-0.5 flex flex-wrap gap-1.5 items-center">
+            <div className="mt-1 flex flex-wrap gap-1.5 items-center">
               <TodoApprovalBadge item={item} />
             </div>
             {(item.dueDate || (subs.length > 0 && !item.done)) && (
-              <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] font-black uppercase tracking-widest">
+              <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] font-black uppercase tracking-widest">
                 {item.dueDate && (
                   <span>Due {new Date(item.dueDate).toLocaleDateString()}</span>
                 )}
@@ -624,7 +624,7 @@ export default function KioskClientTodoItem({
           )}
         </div>
         {canManageTodos && (
-          <div className="flex sm:hidden justify-end pl-8">
+          <div className="flex sm:hidden w-full pl-1">
             {renderPrimaryControls()}
           </div>
         )}

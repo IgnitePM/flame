@@ -3809,18 +3809,46 @@ export default function App() {
               </span>
             </div>
 
-            {/* Mobile hamburger */}
-            <button
-              type="button"
-              className="md:hidden touch-target inline-flex items-center justify-center rounded-xl border border-white/10 bg-white/5 p-2 text-zinc-200"
-              onClick={() => setStaffMobileNavOpen(true)}
-              aria-label="Open menu"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-2 shrink-0 min-w-0">
+              {activeShift ? (
+                <button
+                  type="button"
+                  onClick={() => navigate('/kiosk')}
+                  title={
+                    activeTask?.clientName
+                      ? `Active on ${activeTask.clientName} — open kiosk`
+                      : 'Clocked in — open kiosk'
+                  }
+                  className="inline-flex items-center gap-1.5 max-w-[min(48vw,12rem)] md:max-w-[14rem] rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1.5 text-left hover:bg-emerald-500/25 transition-colors"
+                >
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[9px] font-black uppercase tracking-widest text-emerald-300 leading-none">
+                      {activeShift.status === 'break' ? 'On break' : 'Active'}
+                    </span>
+                    <span className="block text-[10px] font-bold text-white truncate leading-tight mt-0.5">
+                      {activeTask?.clientName
+                        ? activeTask.clientName
+                        : 'Clocked in'}
+                    </span>
+                  </span>
+                </button>
+              ) : null}
+
+              <button
+                type="button"
+                className="md:hidden touch-target inline-flex items-center justify-center rounded-xl border border-white/10 bg-white/5 p-2 text-zinc-200"
+                onClick={() => setStaffMobileNavOpen(true)}
+                aria-label="Open menu"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
 
             {/* Desktop / tablet pill strip */}
-            <div className="hidden md:flex items-center gap-1 sm:gap-2 rounded-2xl border border-white/10 bg-white/5 p-1.5 overflow-x-auto no-scrollbar max-w-[calc(100vw-8rem)]">
+            <div className="hidden md:flex items-center gap-1 sm:gap-2 rounded-2xl border border-white/10 bg-white/5 p-1.5 overflow-x-auto no-scrollbar max-w-[calc(100vw-14rem)]">
               <button
                 onClick={() => navigate('/kiosk')}
                 className={`px-3 sm:px-5 py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap ${
@@ -3918,6 +3946,7 @@ export default function App() {
               >
                 <LogOut className="w-5 h-5" />
               </button>
+            </div>
             </div>
           </div>
         </nav>

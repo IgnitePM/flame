@@ -225,7 +225,7 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
   }, [client?.id, range.from, range.to]);
 
   const tabBar = (
-    <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+    <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1 -mx-1 px-1">
       {SEO_TABS.map((tab) => (
         <button
           key={tab.id}
@@ -647,7 +647,7 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
                 </p>
               ) : null}
               {Array.isArray(traffic.queries) && traffic.queries.length > 0 ? (
-                <div className="overflow-x-auto rounded-2xl border border-slate-100">
+                <div className="overflow-x-auto no-scrollbar rounded-2xl border border-slate-100">
                   <table className="w-full text-left text-sm">
                     <thead>
                       <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100 bg-slate-50/80">
@@ -704,7 +704,7 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
               No keyword data for this range.
             </p>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto no-scrollbar">
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">

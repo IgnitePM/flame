@@ -361,7 +361,7 @@ function EmailAnalyticsPanel({ client, dateFromMs, dateToMs }) {
                   Monthly subscribed vs unsubscribed (last {growth.length} months)
                 </p>
               </div>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto no-scrollbar">
                 <table className="w-full text-left text-sm">
                   <thead>
                     <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">
@@ -405,7 +405,7 @@ function EmailAnalyticsPanel({ client, dateFromMs, dateToMs }) {
                 No campaigns sent in this date range.
               </p>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto no-scrollbar">
                 <table className="w-full text-left text-sm">
                   <thead>
                     <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">
@@ -596,7 +596,7 @@ function SocialAnalyticsPanel({ client, dateFromMs, dateToMs }) {
             No Planable pages found for this workspace.
           </p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto no-scrollbar">
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">
@@ -650,7 +650,7 @@ function SocialAnalyticsPanel({ client, dateFromMs, dateToMs }) {
             Planable.
           </p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto no-scrollbar">
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">
@@ -761,7 +761,7 @@ function AdsAnalyticsPanel({ client, dateFromMs, dateToMs }) {
             No campaign activity in this date range.
           </p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto no-scrollbar">
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">
@@ -852,7 +852,7 @@ export default function ClientPortalAnalyticsPanel({
   );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-full overflow-x-hidden">
       <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
         <div className="flex items-center gap-3 mb-1">
           <div className="w-11 h-11 rounded-2xl bg-slate-100 flex items-center justify-center">
@@ -918,7 +918,7 @@ export default function ClientPortalAnalyticsPanel({
         </div>
       </div>
 
-      <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+      <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1 -mx-1 px-1">
         {enabledTabs.map((tab) => (
           <button
             key={tab.id}
