@@ -8,6 +8,7 @@ export const NOTIFICATION_TYPES = {
   AI_INSIGHT: 'ai_insight',
   TODO_APPROVAL: 'todo_approval',
   PORTAL_FEEDBACK: 'portal_feedback',
+  PORTAL_TODO_NOTE: 'portal_todo_note',
 };
 
 export function notificationTypeLabel(type) {
@@ -17,6 +18,7 @@ export function notificationTypeLabel(type) {
   if (type === NOTIFICATION_TYPES.AI_INSIGHT) return 'AI brief';
   if (type === NOTIFICATION_TYPES.TODO_APPROVAL) return 'Task approval';
   if (type === NOTIFICATION_TYPES.PORTAL_FEEDBACK) return 'Portal feedback';
+  if (type === NOTIFICATION_TYPES.PORTAL_TODO_NOTE) return 'Task note';
   return 'Update';
 }
 

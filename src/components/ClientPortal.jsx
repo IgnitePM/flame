@@ -24,13 +24,12 @@ import ClientMessagesPanel from './ClientMessagesPanel.jsx';
 import ClientReviewsPanel from './ClientReviewsPanel.jsx';
 import PortalTaskApprovalsPanel from './PortalTaskApprovalsPanel.jsx';
 import ClientPortalFilesPanel from './ClientPortalFilesPanel.jsx';
-import { TodoApprovalBadge } from './TaskApprovalModal.jsx';
-import { isTodoAwaitingClientApproval } from '../utils/todoApproval.js';
 import PortalTaskRequestForm from './PortalTaskRequestForm.jsx';
 import PortalCompanyProfilePanel from './PortalCompanyProfilePanel.jsx';
 import ClientPortalToolsPanel from './ClientPortalToolsPanel.jsx';
 import ClientPortalAnalyticsPanel from './ClientPortalAnalyticsPanel.jsx';
 import ClientPortalFeedbackModal from './ClientPortalFeedbackModal.jsx';
+import PortalClientTodoItem from './PortalClientTodoItem.jsx';
 import {
   ChevronLeft,
   ChevronRight,
@@ -899,50 +898,16 @@ const ClientPortal = ({
                           </span>
                         )}
                       </div>
-                      <ul className="space-y-2">
+                      <ul className="space-y-3">
                         {items.map((item) => (
-                          <li
+                          <PortalClientTodoItem
                             key={item.id}
-                            className={`flex flex-wrap items-baseline gap-2 text-sm ${
-                              item.done
-                                ? 'text-slate-400 line-through'
-                                : 'text-slate-800 font-medium'
-                            }`}
-                          >
-                            <span>{item.text || '(No description)'}</span>
-                            {item.pinned && (
-                              <span className="text-[9px] font-black uppercase tracking-widest text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
-                                Pinned
-                              </span>
-                            )}
-                            {item.recurring && (
-                              <span className="text-[9px] font-black uppercase tracking-widest text-[#fd7414] bg-orange-50 px-1.5 py-0.5 rounded">
-                                Recurring
-                              </span>
-                            )}
-                            {item.dueDate && (
-                              <span className="text-[10px] font-bold text-slate-400">
-                                Due{' '}
-                                {new Date(item.dueDate).toLocaleDateString()}
-                              </span>
-                            )}
-                            {Number(item.estimatedHours) > 0 ? (
-                              <span className="text-[10px] font-bold text-slate-500">
-                                Est. {Number(item.estimatedHours).toFixed(2)}h
-                              </span>
-                            ) : null}
-                            {item.requestStatus === 'pending' ? (
-                              <span className="text-[9px] font-black uppercase tracking-widest text-sky-700 bg-sky-50 px-1.5 py-0.5 rounded">
-                                Pending approval
-                              </span>
-                            ) : null}
-                            <TodoApprovalBadge item={item} />
-                            {isTodoAwaitingClientApproval(item) ? (
-                              <span className="text-[9px] font-black uppercase tracking-widest text-violet-700">
-                                See Approvals tab
-                              </span>
-                            ) : null}
-                          </li>
+                            item={item}
+                            client={clientProfile}
+                            cycleStart={mStart}
+                            categoryKey={catKey}
+                            user={user}
+                          />
                         ))}
                       </ul>
                     </div>

@@ -23,6 +23,7 @@ export const CLIENT_ACTIVITY_TYPES = {
   todo_approval_decision: { label: 'Task approval decision', group: 'tasks' },
   todo_note_mention: { label: 'Client tagged on task note', group: 'tasks' },
   portal_feedback: { label: 'Portal feedback', group: 'portal' },
+  portal_todo_note: { label: 'Portal task note', group: 'tasks' },
   addon_request: { label: 'Add-on hours', group: 'portal' },
 };
 

@@ -472,6 +472,41 @@ export async function notifyStaffPortalFeedback({
   return { sent: to.length };
 }
 
+export async function notifyStaffPortalTodoNote({
+  client,
+  title,
+  note,
+  byEmail,
+  notifyEmails = [],
+}) {
+  const fallback = staffNotifyEmails(client);
+  const to = [
+    ...new Set(
+      [...(notifyEmails || []), ...fallback]
+        .map((e) => String(e || '').trim().toLowerCase())
+        .filter((e) => e.includes('@')),
+    ),
+  ];
+  if (!to.length) return { sent: 0, skipped: 'no_staff_emails' };
+  const href = `${appBaseUrl()}/clients/${client.id}`;
+  const { text, html } = emailShell({
+    eyebrow: 'Ignite PM · Task note',
+    title: `New note on: ${title || 'Task'}`,
+    bodyText: `${byEmail || 'A client contact'} left a note on ${
+      client.name || 'a client'
+    }:\n\n${note || '(no note)'}`,
+    ctaLabel: 'Open client',
+    ctaHref: href,
+  });
+  await sendDigestEmail({
+    to,
+    subject: `Task note: ${title || 'Task'} — ${client.name || 'Client'}`,
+    text,
+    html,
+  });
+  return { sent: to.length };
+}
+
 export async function updateReviewDoc(reviewId, patch) {
   const db = await getDigestDb();
   await mergeDoc(db, `clientReviews/${reviewId}`, {
