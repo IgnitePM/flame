@@ -41,7 +41,14 @@ import {
   CheckSquare,
   MessageSquare,
   Sparkles,
+  Menu,
+  Monitor,
+  ListChecks,
+  Building2,
+  Inbox,
 } from 'lucide-react';
+import MobileNavDrawer, { MobileNavItem } from './components/mobile/MobileNavDrawer.jsx';
+import MobileSafeModal from './components/mobile/MobileSafeModal.jsx';
 import {
   auth,
   db,
@@ -478,6 +485,7 @@ export default function App() {
 
   // Employee Form states
   const [selectedClient, setSelectedClient] = useState('');
+  const [staffMobileNavOpen, setStaffMobileNavOpen] = useState(false);
   const [selectedBillingTarget, setSelectedBillingTarget] = useState('');
   const [kioskAutostartPending, setKioskAutostartPending] = useState(false);
   const kioskAutostartSearchProcessedRef = useRef('');
@@ -3559,6 +3567,7 @@ export default function App() {
     notifications: inboxNotifications,
     dismissNotification: dismissInboxNotification,
     dismissAllNotifications: dismissAllInboxNotifications,
+    navigateToClient: (id) => navigate(`/clients/${id}`),
     timesheets,
     getShiftDuration,
     generateAiSummary: async ({ scope = 'overall', clientId = null } = {}) => {
@@ -3786,13 +3795,13 @@ export default function App() {
       />
     ) : (
       <div className="min-h-screen bg-[#0f0f11] text-zinc-100 font-sans">
-        <nav className="sticky top-0 z-40 border-b border-white/10 bg-[#0f0f11]/90 backdrop-blur-md">
+        <nav className="sticky top-0 z-40 border-b border-white/10 bg-[#0f0f11]/90 backdrop-blur-md safe-pt">
           <div className="mx-auto flex w-full max-w-[min(1720px,calc(100vw-1.5rem))] items-center justify-between px-4 py-3 sm:px-6">
             <div
-              className="flex items-center gap-2 group cursor-pointer"
+              className="flex items-center gap-2 group cursor-pointer min-w-0"
               onClick={() => navigate('/kiosk')}
             >
-              <div className="w-10 h-10 flex items-center justify-center group-hover:scale-110 transition-transform">
+              <div className="w-10 h-10 flex items-center justify-center group-hover:scale-110 transition-transform shrink-0">
                 <IgniteLogo className="w-full h-full object-contain" />
               </div>
               <span className="font-black text-xl tracking-tighter text-white hidden sm:inline">
@@ -3800,7 +3809,18 @@ export default function App() {
               </span>
             </div>
 
-          <div className="flex items-center gap-1 sm:gap-2 rounded-2xl border border-white/10 bg-white/5 p-1.5 overflow-x-auto no-scrollbar max-w-[calc(100vw-8rem)]">
+            {/* Mobile hamburger */}
+            <button
+              type="button"
+              className="md:hidden touch-target inline-flex items-center justify-center rounded-xl border border-white/10 bg-white/5 p-2 text-zinc-200"
+              onClick={() => setStaffMobileNavOpen(true)}
+              aria-label="Open menu"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+
+            {/* Desktop / tablet pill strip */}
+            <div className="hidden md:flex items-center gap-1 sm:gap-2 rounded-2xl border border-white/10 bg-white/5 p-1.5 overflow-x-auto no-scrollbar max-w-[calc(100vw-8rem)]">
               <button
                 onClick={() => navigate('/kiosk')}
                 className={`px-3 sm:px-5 py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap ${
@@ -3863,31 +3883,31 @@ export default function App() {
                   Sales
                 </button>
               )}
-            {currentUserRole === 'kiosk' ? (
-              <button
-                onClick={() => navigate('/workspace')}
-                className={`px-3 sm:px-5 py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap ${
-                  location.pathname.startsWith('/workspace') ||
-                  location.pathname.startsWith('/admin')
-                    ? 'bg-[#fd7414] text-white shadow-md shadow-[#fd7414]/25'
-                    : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                Admin
-              </button>
-            ) : (
-              <button
-                onClick={() => navigate('/admin')}
-                className={`px-3 sm:px-5 py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap ${
-                  location.pathname.startsWith('/admin') ||
-                  location.pathname.startsWith('/workspace')
-                    ? 'bg-[#fd7414] text-white shadow-md shadow-[#fd7414]/25'
-                    : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                Admin
-              </button>
-            )}
+              {currentUserRole === 'kiosk' ? (
+                <button
+                  onClick={() => navigate('/workspace')}
+                  className={`px-3 sm:px-5 py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                    location.pathname.startsWith('/workspace') ||
+                    location.pathname.startsWith('/admin')
+                      ? 'bg-[#fd7414] text-white shadow-md shadow-[#fd7414]/25'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  Admin
+                </button>
+              ) : (
+                <button
+                  onClick={() => navigate('/admin')}
+                  className={`px-3 sm:px-5 py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                    location.pathname.startsWith('/admin') ||
+                    location.pathname.startsWith('/workspace')
+                      ? 'bg-[#fd7414] text-white shadow-md shadow-[#fd7414]/25'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  Admin
+                </button>
+              )}
               <button
                 onClick={() => {
                   setUser(null);
@@ -3901,6 +3921,92 @@ export default function App() {
             </div>
           </div>
         </nav>
+
+        <MobileNavDrawer
+          open={staffMobileNavOpen}
+          onClose={() => setStaffMobileNavOpen(false)}
+          title="Menu"
+          side="right"
+        >
+          <MobileNavItem
+            label="Kiosk"
+            icon={Monitor}
+            active={location.pathname.startsWith('/kiosk')}
+            onClick={() => {
+              setStaffMobileNavOpen(false);
+              navigate('/kiosk');
+            }}
+          />
+          <MobileNavItem
+            label="Tasks"
+            icon={ListChecks}
+            active={location.pathname.startsWith('/tasks')}
+            onClick={() => {
+              setStaffMobileNavOpen(false);
+              navigate('/tasks');
+            }}
+          />
+          <MobileNavItem
+            label="Messages"
+            icon={MessageSquare}
+            active={location.pathname.startsWith('/messages')}
+            onClick={() => {
+              setStaffMobileNavOpen(false);
+              navigate('/messages');
+            }}
+          />
+          <MobileNavItem
+            label="Emails"
+            icon={Inbox}
+            active={location.pathname.startsWith('/emails')}
+            onClick={() => {
+              setStaffMobileNavOpen(false);
+              navigate('/emails');
+            }}
+          />
+          <MobileNavItem
+            label="Clients"
+            icon={Building2}
+            active={location.pathname.startsWith('/clients')}
+            onClick={() => {
+              setStaffMobileNavOpen(false);
+              navigate('/clients');
+            }}
+          />
+          {!!myAdminDoc?.features?.salesFunnel && (
+            <MobileNavItem
+              label="Sales"
+              icon={Briefcase}
+              active={location.pathname.startsWith('/sales')}
+              onClick={() => {
+                setStaffMobileNavOpen(false);
+                navigate('/sales');
+              }}
+            />
+          )}
+          <MobileNavItem
+            label="Admin"
+            icon={Settings}
+            active={
+              location.pathname.startsWith('/admin') ||
+              location.pathname.startsWith('/workspace')
+            }
+            onClick={() => {
+              setStaffMobileNavOpen(false);
+              navigate(currentUserRole === 'kiosk' ? '/workspace' : '/admin');
+            }}
+          />
+          <MobileNavItem
+            label="Sign out"
+            icon={LogOut}
+            danger
+            onClick={() => {
+              setStaffMobileNavOpen(false);
+              setUser(null);
+              signOut(auth);
+            }}
+          />
+        </MobileNavDrawer>
 
         <main className="mx-auto w-full max-w-[min(1720px,calc(100vw-1.5rem))] px-4 py-6 pb-24 sm:px-6 sm:py-8">
           <IdleFailsafeGuard
@@ -4195,16 +4301,16 @@ export default function App() {
 
       {/* Expense Modal */}
       {expenseModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[100] animate-in fade-in">
-          <div className="bg-white rounded-[32px] w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95">
-            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-blue-50/50 text-left">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[100] animate-in fade-in safe-pb">
+          <div className="bg-white rounded-t-3xl sm:rounded-[32px] w-full max-w-sm shadow-2xl animate-in zoom-in-95 mobile-safe-dialog">
+            <div className="shrink-0 p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-blue-50/50 text-left">
               <div>
-                <h3 className="font-black text-2xl text-blue-900">Add Expense</h3>
+                <h3 className="font-black text-xl sm:text-2xl text-blue-900">Add Expense</h3>
                 <p className="text-[10px] font-bold text-blue-500 uppercase tracking-widest mt-1">{expenseModal.name}</p>
               </div>
-              <button onClick={() => setExpenseModal(null)} className="p-2 bg-white rounded-full hover:bg-slate-100 border border-slate-200"><X className="w-5 h-5" /></button>
+              <button onClick={() => setExpenseModal(null)} className="touch-target p-2 bg-white rounded-full hover:bg-slate-100 border border-slate-200"><X className="w-5 h-5" /></button>
             </div>
-            <div className="p-8 space-y-5 text-left">
+            <div className="mobile-safe-dialog-body p-4 sm:p-6 space-y-5 text-left">
               {!expenseModal.hourlyRate ? (
                 <div className="bg-red-50 text-red-600 p-4 rounded-2xl text-sm font-bold border border-red-100">
                   Please set an Hourly Rate in this client's settings before adding expenses, so we can deduct the correct hours.
@@ -4442,14 +4548,14 @@ export default function App() {
 
       {/* Editing Shift/Task Modal */}
       {editingItem && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[100] animate-in fade-in duration-200">
-          <div className="bg-white rounded-[32px] w-full max-w-lg shadow-2xl overflow-hidden animate-in zoom-in-95">
-            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-              <h3 className="font-black text-2xl">Edit {editingItem.type === 'shift' ? 'Shift Log' : 'Task Record'}</h3>
-              <button onClick={() => setEditingItem(null)} className="p-2 bg-white rounded-full hover:bg-slate-100 border border-slate-200"><X className="w-5 h-5" /></button>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[100] animate-in fade-in duration-200 safe-pb">
+          <div className="bg-white rounded-t-3xl sm:rounded-[32px] w-full max-w-lg shadow-2xl animate-in zoom-in-95 mobile-safe-dialog">
+            <div className="shrink-0 p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <h3 className="font-black text-xl sm:text-2xl">Edit {editingItem.type === 'shift' ? 'Shift Log' : 'Task Record'}</h3>
+              <button onClick={() => setEditingItem(null)} className="touch-target p-2 bg-white rounded-full hover:bg-slate-100 border border-slate-200"><X className="w-5 h-5" /></button>
             </div>
             
-            <div className="p-8 space-y-6">
+            <div className="mobile-safe-dialog-body p-4 sm:p-6 space-y-6">
               <div className="space-y-2 text-left">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Clock In Time</label>
                 <input type="datetime-local" value={editValues.clockInDate} onChange={e => setEditValues({...editValues, clockInDate: e.target.value})} className="w-full bg-slate-50 border-slate-200 border p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]" />
@@ -5934,15 +6040,15 @@ export default function App() {
 
       {/* Addon Modal */}
       {addonModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[100] animate-in fade-in">
-          <div className="bg-white rounded-[32px] w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95">
-            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 text-left">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[100] animate-in fade-in safe-pb">
+          <div className="bg-white rounded-t-3xl sm:rounded-[32px] w-full max-w-sm shadow-2xl animate-in zoom-in-95 mobile-safe-dialog">
+            <div className="shrink-0 p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 text-left">
               <div>
-                <h3 className="font-black text-2xl text-slate-900">Add Hours</h3>
+                <h3 className="font-black text-xl sm:text-2xl text-slate-900">Add Hours</h3>
               </div>
-              <button onClick={() => setAddonModal(null)} className="p-2 bg-white rounded-full hover:bg-slate-100 border border-slate-200"><X className="w-5 h-5" /></button>
+              <button onClick={() => setAddonModal(null)} className="touch-target p-2 bg-white rounded-full hover:bg-slate-100 border border-slate-200"><X className="w-5 h-5" /></button>
             </div>
-            <div className="p-8 space-y-5 text-left">
+            <div className="mobile-safe-dialog-body p-4 sm:p-6 space-y-5 text-left">
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
                   Apply hours to
@@ -6062,11 +6168,11 @@ export default function App() {
 
       {/* Project Modal */}
       {projectModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[100] animate-in fade-in">
-          <div className="bg-white rounded-[32px] w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95">
-            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 text-left">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[100] animate-in fade-in safe-pb">
+          <div className="bg-white rounded-t-3xl sm:rounded-[32px] w-full max-w-sm shadow-2xl animate-in zoom-in-95 mobile-safe-dialog">
+            <div className="shrink-0 p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 text-left">
               <div>
-                <h3 className="font-black text-2xl text-slate-900">Custom Project</h3>
+                <h3 className="font-black text-xl sm:text-2xl text-slate-900">Custom Project</h3>
               </div>
               <button
                 onClick={() => {
@@ -6075,12 +6181,12 @@ export default function App() {
                   setProjectSubmitting(false);
                   setProjectSubmitError('');
                 }}
-                className="p-2 bg-white rounded-full hover:bg-slate-100 border border-slate-200"
+                className="touch-target p-2 bg-white rounded-full hover:bg-slate-100 border border-slate-200"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-8 space-y-5 text-left">
+            <div className="mobile-safe-dialog-body p-4 sm:p-6 space-y-5 text-left">
               {projectSubmitError && (
                 <div className="bg-red-50 text-red-700 border border-red-100 p-3 rounded-2xl text-sm font-bold">
                   {projectSubmitError}

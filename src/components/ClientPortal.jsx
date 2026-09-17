@@ -30,6 +30,7 @@ import ClientPortalToolsPanel from './ClientPortalToolsPanel.jsx';
 import ClientPortalAnalyticsPanel from './ClientPortalAnalyticsPanel.jsx';
 import ClientPortalFeedbackModal from './ClientPortalFeedbackModal.jsx';
 import PortalClientTodoItem from './PortalClientTodoItem.jsx';
+import MobileNavDrawer, { MobileNavItem } from './mobile/MobileNavDrawer.jsx';
 import {
   ChevronLeft,
   ChevronRight,
@@ -48,6 +49,7 @@ import {
   Wrench,
   BarChart3,
   MessageSquareWarning,
+  MoreHorizontal,
 } from 'lucide-react';
 
 const STRATEGY_BOOKING_URL = 'https://calendar.app.google/nsL6wM7189fAM1Vd7';
@@ -116,6 +118,7 @@ const ClientPortal = ({
 }) => {
   const [portalSection, setPortalSection] = useState('dashboard');
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [latestStaffMessageAt, setLatestStaffMessageAt] = useState(0);
   const [messagesQueryReady, setMessagesQueryReady] = useState(false);
   const [messagesLastReadAt, setMessagesLastReadAt] = useState(0);
@@ -338,9 +341,44 @@ const ClientPortal = ({
     getTaskDuration,
   });
 
+  const analyticsEnabled = clientHasActiveAnalyticsRetainer(clientProfile);
+  const primaryTabs = [
+    { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
+    { id: 'messages', label: 'Messages', icon: MessageSquare },
+    { id: 'approvals', label: 'Approvals', icon: ClipboardCheck },
+    { id: 'files', label: 'Files', icon: FolderOpen },
+  ];
+  const moreTabs = [
+    { id: 'company', label: 'Company', icon: Building2 },
+    {
+      id: 'analytics',
+      label: 'Analytics',
+      icon: BarChart3,
+      disabled: !analyticsEnabled,
+      disabledTitle: 'Available with an active SEO, Email, Social, or Ads retainer',
+    },
+    { id: 'tools', label: 'Tools', icon: Wrench },
+  ];
+  const allPortalTabs = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    ...moreTabs,
+    { id: 'messages', label: 'Messages', icon: MessageSquare },
+    { id: 'approvals', label: 'Approvals', icon: ClipboardCheck },
+    { id: 'files', label: 'Files', icon: FolderOpen },
+  ];
+  const moreSectionActive = moreTabs.some((t) => t.id === portalSection);
+
+  const goPortalSection = (id) => {
+    const tab = allPortalTabs.find((t) => t.id === id);
+    if (tab?.disabled) return;
+    setPortalSection(id);
+    if (id === 'messages') markMessagesRead();
+    setMoreOpen(false);
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
-      <nav className="bg-white border-b border-slate-100 p-4 sticky top-0 z-40 shadow-sm flex justify-between items-center px-8">
+      <nav className="bg-white border-b border-slate-100 sticky top-0 z-40 shadow-sm flex justify-between items-center px-4 sm:px-8 py-3 safe-pt">
         <div className="flex items-center gap-3 min-w-0">
           <img
             src="/logo.png"
@@ -366,7 +404,7 @@ const ClientPortal = ({
             type="button"
             onClick={() => setFeedbackOpen(true)}
             title="Feedback or report a bug"
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-500 bg-slate-100 hover:bg-slate-200 hover:text-slate-700 transition-colors"
+            className="touch-target inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-500 bg-slate-100 hover:bg-slate-200 hover:text-slate-700 transition-colors"
           >
             <MessageSquareWarning className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Feedback</span>
@@ -376,40 +414,23 @@ const ClientPortal = ({
               setUser(null);
               signOut(auth);
             }}
-            className="p-2 text-slate-400 hover:text-red-500 transition-colors"
+            className="touch-target p-2 text-slate-400 hover:text-red-500 transition-colors"
           >
             <LogOut className="w-5 h-5" />
           </button>
         </div>
       </nav>
 
-      <div className="bg-white border-b border-slate-100 px-4 sm:px-8">
+      {/* Desktop / tablet section chips */}
+      <div className="hidden md:block bg-white border-b border-slate-100 px-4 sm:px-8">
         <div className="max-w-5xl mx-auto flex gap-2 overflow-x-auto py-2">
-          {[
-            { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-            { id: 'company', label: 'Company', icon: Building2 },
-            {
-              id: 'analytics',
-              label: 'Analytics',
-              icon: BarChart3,
-              disabled: !clientHasActiveAnalyticsRetainer(clientProfile),
-              disabledTitle: 'Available with an active SEO, Email, Social, or Ads retainer',
-            },
-            { id: 'tools', label: 'Tools', icon: Wrench },
-            { id: 'messages', label: 'Messages', icon: MessageSquare },
-            { id: 'approvals', label: 'Approvals', icon: ClipboardCheck },
-            { id: 'files', label: 'Files', icon: FolderOpen },
-          ].map((tab) => (
+          {allPortalTabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
               disabled={!!tab.disabled}
               title={tab.disabled ? tab.disabledTitle : undefined}
-              onClick={() => {
-                if (tab.disabled) return;
-                setPortalSection(tab.id);
-                if (tab.id === 'messages') markMessagesRead();
-              }}
+              onClick={() => goPortalSection(tab.id)}
               className={`relative shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
                 tab.disabled
                   ? 'bg-slate-50 text-slate-300 cursor-not-allowed opacity-60'
@@ -430,7 +451,7 @@ const ClientPortal = ({
         </div>
       </div>
 
-      <main className="max-w-5xl mx-auto p-6 pb-24 space-y-8 animate-in fade-in duration-500">
+      <main className="max-w-5xl mx-auto p-4 sm:p-6 pb-28 md:pb-24 space-y-6 sm:space-y-8 animate-in fade-in duration-500">
         {portalSection === 'messages' ? (
           <ClientMessagesPanel
             client={clientProfile}
@@ -516,7 +537,7 @@ const ClientPortal = ({
             </p>
           </div>
 
-          <div className="flex items-center gap-4 bg-white border border-slate-200 p-2 rounded-2xl shadow-sm">
+          <div className="flex items-center gap-2 sm:gap-4 bg-white border border-slate-200 p-2 rounded-2xl shadow-sm w-full sm:w-auto">
             <button
               onClick={() => {
                 setPortalOffset((prev) => {
@@ -529,7 +550,7 @@ const ClientPortal = ({
                 });
               }}
               disabled={effectivePortalOffset <= minPortalOffset}
-              className={`p-2 rounded-xl transition-colors ${
+              className={`touch-target p-2 rounded-xl transition-colors shrink-0 ${
                 effectivePortalOffset <= minPortalOffset
                   ? 'opacity-30 cursor-not-allowed'
                   : 'hover:bg-slate-100'
@@ -537,7 +558,7 @@ const ClientPortal = ({
             >
               <ChevronLeft className="w-5 h-5" />
             </button>
-            <div className="text-sm font-bold text-slate-700 min-w-[160px] text-center">
+            <div className="text-sm font-bold text-slate-700 flex-1 min-w-0 text-center px-1">
               {new Date(mStart).toLocaleDateString()} -{' '}
               {new Date(mEnd).toLocaleDateString()}
               {portalOffset === 0 && computeRetainerDaysLeft(mEnd) != null && (
@@ -561,7 +582,7 @@ const ClientPortal = ({
           </div>
         </div>
 
-        <div className="bg-white p-8 sm:p-10 rounded-[40px] shadow-sm border border-slate-100 space-y-8">
+        <div className="bg-white p-4 sm:p-8 rounded-2xl sm:rounded-[40px] shadow-sm border border-slate-100 space-y-8">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <h3 className="font-black text-xl text-slate-900">
               Retainer usage (hour lines)
@@ -624,7 +645,7 @@ const ClientPortal = ({
         </div>
 
         {pendingRequests.length > 0 && (
-          <div className="bg-white p-8 sm:p-10 rounded-[40px] shadow-sm border border-slate-100 space-y-6">
+          <div className="bg-white p-4 sm:p-8 rounded-2xl sm:rounded-[40px] shadow-sm border border-slate-100 space-y-6">
             <h3 className="font-black text-xl text-slate-900 mb-2">
               Project Requests
             </h3>
@@ -670,7 +691,7 @@ const ClientPortal = ({
                     </div>
 
                     {p.status === 'estimate_sent' && p.estimate && (
-                      <div className="bg-white border border-slate-200 rounded-2xl p-4 min-w-[220px]">
+                      <div className="bg-white border border-slate-200 rounded-2xl p-4 w-full sm:w-auto sm:min-w-[200px]">
                         <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
                           Estimate
                         </div>
@@ -690,7 +711,7 @@ const ClientPortal = ({
                   </div>
 
                   {p.status === 'estimate_sent' && (
-                    <div className="flex gap-3 mt-5">
+                    <div className="flex flex-col sm:flex-row gap-3 mt-5">
                       <button
                         onClick={() =>
                           updateProject(p.id, {
@@ -778,7 +799,7 @@ const ClientPortal = ({
         )}
 
         {visibleProjects.length > 0 && (
-          <div className="bg-white p-8 sm:p-10 rounded-[40px] shadow-sm border border-slate-100 space-y-6">
+          <div className="bg-white p-4 sm:p-8 rounded-2xl sm:rounded-[40px] shadow-sm border border-slate-100 space-y-6">
             <h3 className="font-black text-xl text-slate-900 mb-2">
               Custom Projects
             </h3>
@@ -826,7 +847,7 @@ const ClientPortal = ({
         )}
 
         {getTodoStateForCycle && todoCategoryKey && (
-          <div className="bg-white p-8 sm:p-10 rounded-[40px] shadow-sm border border-slate-100 space-y-6">
+          <div className="bg-white p-4 sm:p-8 rounded-2xl sm:rounded-[40px] shadow-sm border border-slate-100 space-y-6">
             <div className="flex items-center gap-3">
               <ListChecks className="w-6 h-6 text-[#fd7414]" />
               <div>
@@ -924,7 +945,7 @@ const ClientPortal = ({
           </div>
         )}
 
-        <div className="bg-white p-8 sm:p-10 rounded-[40px] shadow-sm border border-slate-100 space-y-6">
+        <div className="bg-white p-4 sm:p-8 rounded-2xl sm:rounded-[40px] shadow-sm border border-slate-100 space-y-6">
           <h3 className="font-black text-xl text-slate-900 mb-2">
             Activity — retainer (this cycle)
           </h3>
@@ -994,7 +1015,7 @@ const ClientPortal = ({
           )}
         </div>
 
-        <div className="bg-white p-8 sm:p-10 rounded-[40px] shadow-sm border border-slate-100 space-y-6">
+        <div className="bg-white p-4 sm:p-8 rounded-2xl sm:rounded-[40px] shadow-sm border border-slate-100 space-y-6">
           <h3 className="font-black text-xl text-slate-900 mb-2">
             Activity — custom projects (this cycle)
           </h3>
@@ -1076,6 +1097,77 @@ const ClientPortal = ({
         </>
         ) : null}
       </main>
+
+      {/* Mobile bottom tabs */}
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur-md portal-bottom-tabs safe-px">
+        <div className="mx-auto max-w-5xl grid grid-cols-5 gap-0.5 px-1 pt-1">
+          {primaryTabs.map((tab) => {
+            const active = portalSection === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => goPortalSection(tab.id)}
+                className={`relative flex flex-col items-center justify-center gap-0.5 min-h-[52px] rounded-xl text-[9px] font-black uppercase tracking-wider ${
+                  active ? 'text-[#fd7414]' : 'text-slate-400'
+                }`}
+              >
+                <tab.icon className={`w-5 h-5 ${active ? 'text-[#fd7414]' : ''}`} />
+                <span>{tab.label}</span>
+                {tab.id === 'messages' && hasNewMessages ? (
+                  <span className="absolute top-1 right-[18%] h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white" />
+                ) : null}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setMoreOpen(true)}
+            className={`flex flex-col items-center justify-center gap-0.5 min-h-[52px] rounded-xl text-[9px] font-black uppercase tracking-wider ${
+              moreSectionActive || moreOpen ? 'text-[#fd7414]' : 'text-slate-400'
+            }`}
+          >
+            <MoreHorizontal className="w-5 h-5" />
+            <span>More</span>
+          </button>
+        </div>
+      </nav>
+
+      <MobileNavDrawer
+        open={moreOpen}
+        onClose={() => setMoreOpen(false)}
+        title="More"
+        side="bottom"
+      >
+        {moreTabs.map((tab) => (
+          <MobileNavItem
+            key={tab.id}
+            label={tab.label}
+            icon={tab.icon}
+            active={portalSection === tab.id}
+            disabled={!!tab.disabled}
+            onClick={() => goPortalSection(tab.id)}
+          />
+        ))}
+        <MobileNavItem
+          label="Feedback"
+          icon={MessageSquareWarning}
+          onClick={() => {
+            setMoreOpen(false);
+            setFeedbackOpen(true);
+          }}
+        />
+        <MobileNavItem
+          label="Sign out"
+          icon={LogOut}
+          danger
+          onClick={() => {
+            setMoreOpen(false);
+            setUser(null);
+            signOut(auth);
+          }}
+        />
+      </MobileNavDrawer>
 
       {feedbackOpen ? (
         <ClientPortalFeedbackModal

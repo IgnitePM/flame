@@ -71,7 +71,7 @@ export default function PortalCompanyProfilePanel({ client }) {
   };
 
   return (
-    <div className="bg-white p-8 sm:p-10 rounded-[40px] shadow-sm border border-slate-100 space-y-8">
+    <div className="bg-white p-4 sm:p-8 rounded-2xl sm:rounded-[40px] shadow-sm border border-slate-100 space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h3 className="font-black text-xl text-slate-900">Company profile</h3>

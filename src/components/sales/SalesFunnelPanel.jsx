@@ -180,8 +180,8 @@ function ConvertLeadModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-[28px] w-full max-w-md p-6 space-y-4 shadow-2xl">
+    <div className="fixed inset-0 z-[90] flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4 safe-pb">
+      <div className="bg-white rounded-t-3xl sm:rounded-[28px] w-full max-w-md p-5 sm:p-6 space-y-4 shadow-2xl max-h-[min(90dvh,100%)] overflow-y-auto">
         <h3 className="font-black text-lg">Convert lead to client</h3>
         <p className="text-sm text-slate-500">
           Creates a client record. Default status is paused so they stay out of

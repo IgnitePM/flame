@@ -161,9 +161,21 @@ const EmployeeKiosk = ({
   dismissNotification,
   dismissAllNotifications,
   generateAiSummary,
+  navigateToClient,
 }) => {
   const canManageClientTodos =
     currentUserRole === 'admin' || currentUserRole === 'billing';
+  const openClientPage = (clientId) => {
+    const id = String(clientId || '').trim();
+    if (!id || !navigateToClient) return;
+    navigateToClient(id);
+  };
+  const openClientPageByName = (clientName) => {
+    const name = String(clientName || '').trim();
+    if (!name || name === 'General Admin') return;
+    const match = (clientsFull || []).find((c) => c.name === name);
+    if (match?.id) openClientPage(match.id);
+  };
   const expenseFx = fxToCad || FALLBACK_FX_TO_CAD;
   const [clientSearch, setClientSearch] = React.useState('');
   const [socialAdAmount, setSocialAdAmount] = React.useState('');
@@ -1769,7 +1781,15 @@ const EmployeeKiosk = ({
                       {selectedClientObj && selectedTodoCategoryLabel && (
                         <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4 space-y-3">
                           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                            Company profile — {selectedClientObj.name}
+                            Company profile —{' '}
+                            <button
+                              type="button"
+                              onClick={() => openClientPage(selectedClientObj.id)}
+                              className="text-[#fd7414] hover:underline"
+                              title="Open client page"
+                            >
+                              {selectedClientObj.name}
+                            </button>
                           </div>
                           <ClientProfileSummary client={selectedClientObj} />
                           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 pt-2 border-t border-slate-100">
@@ -2148,9 +2168,14 @@ const EmployeeKiosk = ({
                             />
                           ) : null}
                           <div className="min-w-0">
-                          <div className="font-black text-2xl text-slate-900 break-words">
+                          <button
+                            type="button"
+                            onClick={() => openClientPageByName(activeTask.clientName)}
+                            className="font-black text-2xl text-slate-900 break-words text-left hover:text-[#fd7414] hover:underline"
+                            title="Open client page"
+                          >
                             {activeTask.clientName}
-                          </div>
+                          </button>
                           <div className="text-[#fd7414] font-bold uppercase text-[10px] tracking-widest mt-1 break-words">
                             {activeTask.projectId
                               ? `Project: ${activeTask.projectName}`
@@ -2453,7 +2478,16 @@ const EmployeeKiosk = ({
                       {selectedClientObj && selectedRetainerCategory && (
                         <div className="mt-5 bg-white border border-slate-200 rounded-[24px] p-4">
                           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
-                            Notes for {selectedClientObj.name} • {selectedRetainerCategory}
+                            Notes for{' '}
+                            <button
+                              type="button"
+                              onClick={() => openClientPage(selectedClientObj.id)}
+                              className="text-[#fd7414] hover:underline"
+                              title="Open client page"
+                            >
+                              {selectedClientObj.name}
+                            </button>{' '}
+                            • {selectedRetainerCategory}
                           </div>
                           <div className="space-y-3">
                             <div>
@@ -2687,9 +2721,14 @@ const EmployeeKiosk = ({
                             className="bg-white rounded-2xl p-4 flex justify-between items-center border border-slate-200 shadow-sm group"
                           >
                             <div>
-                              <div className="font-bold text-slate-800 text-sm mb-0.5">
+                              <button
+                                type="button"
+                                onClick={() => openClientPageByName(task.clientName)}
+                                className="font-bold text-slate-800 text-sm mb-0.5 text-left hover:text-[#fd7414] hover:underline"
+                                title="Open client page"
+                              >
                                 {task.clientName}
-                              </div>
+                              </button>
                               <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
                                 {task.projectId
                                   ? `Proj: ${task.projectName}`
@@ -2728,7 +2767,7 @@ const EmployeeKiosk = ({
         </div>
         {todoOptionsOpen && (
           <div className="fixed inset-0 z-[150] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 p-5 space-y-4">
+            <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 p-5 space-y-4 max-h-[min(90dvh,100%)] overflow-y-auto">
               <div className="flex items-center justify-between">
                 <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">
                   To-do Options
@@ -2883,9 +2922,14 @@ const EmployeeKiosk = ({
                           />
                         ) : null}
                         <div className="min-w-0 flex-1">
-                          <div className="text-xs font-black text-zinc-100 truncate">
+                          <button
+                            type="button"
+                            onClick={() => openClientPage(row.clientId)}
+                            className="text-xs font-black text-zinc-100 truncate block max-w-full text-left hover:text-[#fd7414] hover:underline"
+                            title="Open client page"
+                          >
                             {row.clientName}
-                          </div>
+                          </button>
                           <div className="text-[10px] font-bold text-zinc-300 truncate">
                             {row.category}
                           </div>
@@ -2972,33 +3016,35 @@ const EmployeeKiosk = ({
             selectedClientName={selectedClientObj?.name || ''}
             canGenerateAi={typeof generateAiSummary === 'function'}
           />
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
             <button
               type="button"
               onClick={() => setKioskSideTab('client')}
-              className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+              className={`touch-target px-1.5 sm:px-2 py-2.5 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all leading-tight ${
                 kioskSideTab === 'client'
                   ? 'bg-[#fd7414] text-white shadow-sm'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              Client to-dos
+              <span className="sm:hidden">To-dos</span>
+              <span className="hidden sm:inline">Client to-dos</span>
             </button>
             <button
               type="button"
               onClick={() => setKioskSideTab('personal')}
-              className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+              className={`touch-target px-1.5 sm:px-2 py-2.5 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all leading-tight ${
                 kioskSideTab === 'personal'
                   ? 'bg-[#fd7414] text-white shadow-sm'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              Your list
+              <span className="sm:hidden">Yours</span>
+              <span className="hidden sm:inline">Your list</span>
             </button>
             <button
               type="button"
               onClick={() => setKioskSideTab('calendar')}
-              className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+              className={`touch-target px-1.5 sm:px-2 py-2.5 rounded-xl text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all leading-tight ${
                 kioskSideTab === 'calendar'
                   ? 'bg-[#fd7414] text-white shadow-sm'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -3083,7 +3129,18 @@ const EmployeeKiosk = ({
                     key={`${row.clientId}__${row.categoryKey}__${row.item.id}`}
                     className={`rounded-xl p-2 border border-slate-100 ${getUrgencyClass(row.item)}`}
                   >
-                    <div className={`text-[10px] font-black truncate ${titleClass}`}>{row.clientName}</div>
+                    <button
+                      type="button"
+                      onClick={() => openClientPage(row.clientId)}
+                      className={`text-[10px] font-black truncate block max-w-full text-left hover:underline ${
+                        tone === 'normal'
+                          ? 'text-[#fd7414]'
+                          : `${titleClass} hover:opacity-90`
+                      }`}
+                      title="Open client page"
+                    >
+                      {row.clientName}
+                    </button>
                     <div className={`text-[9px] truncate ${metaClass}`}>{row.categoryLabel}</div>
                     <div className={`text-xs font-bold leading-snug line-clamp-2 ${titleClass}`}>{safeDisplayForReact(row.item.text) || '(no text)'}</div>
                     <div className="mt-0.5">
@@ -3689,7 +3746,7 @@ const EmployeeKiosk = ({
 
       {personalOptionsItemId && personalOptionsTargetItem && (
         <div className="fixed inset-0 z-[140] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 p-5 space-y-4">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 p-5 space-y-4 max-h-[min(90dvh,100%)] overflow-y-auto">
             <div className="flex justify-between items-start">
               <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">
                 To-do options
@@ -3820,7 +3877,7 @@ const EmployeeKiosk = ({
 
       {clientTodoEditTarget && (
         <div className="fixed inset-0 z-[151] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 p-5 space-y-4">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 p-5 space-y-4 max-h-[min(90dvh,100%)] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">
                 {clientTodoEditTarget.subtaskId
