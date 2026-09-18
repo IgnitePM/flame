@@ -58,6 +58,8 @@ export default async (req) => {
   const reviewerEmails = Array.isArray(body.reviewerEmails)
     ? body.reviewerEmails
     : [];
+  const reviewDeadlineRaw = Number(body.reviewDeadline) || 0;
+  const approvalAutoApprove = Boolean(body.approvalAutoApprove);
 
   if (!clientId || !categoryKey || !itemId) {
     return new Response(
@@ -103,6 +105,8 @@ export default async (req) => {
         reviewerEmails,
         note,
         byEmail: caller.email,
+        reviewDeadline: reviewDeadlineRaw > 0 ? reviewDeadlineRaw : null,
+        approvalAutoApprove: target === 'client' ? approvalAutoApprove : false,
       });
     } catch (err) {
       return new Response(JSON.stringify({ error: err?.message || 'Invalid approval request.' }), {

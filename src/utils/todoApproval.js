@@ -46,6 +46,9 @@ export function clearTodoApprovalFields(item = {}) {
     approvalRequestedAt: null,
     approvalDecisionByEmail: null,
     approvalDecisionAt: null,
+    reviewDeadline: null,
+    approvalAutoApprove: false,
+    approvalAutoApprovedAt: null,
   };
 }
 
@@ -55,6 +58,8 @@ export function applyTodoApprovalSend(item, {
   note = '',
   byEmail = '',
   now = Date.now(),
+  reviewDeadline = null,
+  approvalAutoApprove = false,
 }) {
   const t = target === 'staff' ? 'staff' : 'client';
   const reviewers = (Array.isArray(reviewerEmails) ? reviewerEmails : [])
@@ -63,6 +68,8 @@ export function applyTodoApprovalSend(item, {
   if (t === 'staff' && !reviewers.length) {
     throw new Error('Pick at least one staff reviewer.');
   }
+  const deadlineMs = Number(reviewDeadline) || 0;
+  const autoApprove = t === 'client' && Boolean(approvalAutoApprove) && deadlineMs > 0;
   return {
     ...item,
     done: false,
@@ -77,6 +84,9 @@ export function applyTodoApprovalSend(item, {
     approvalRequestedAt: now,
     approvalDecisionByEmail: null,
     approvalDecisionAt: null,
+    reviewDeadline: autoApprove || (t === 'client' && deadlineMs > 0) ? deadlineMs : null,
+    approvalAutoApprove: autoApprove,
+    approvalAutoApprovedAt: null,
   };
 }
 
@@ -85,6 +95,7 @@ export function applyTodoApprovalDecision(item, {
   note = '',
   byEmail = '',
   now = Date.now(),
+  autoApproved = false,
 }) {
   const d = String(decision || '').trim();
   if (d === 'approved') {
@@ -95,6 +106,7 @@ export function applyTodoApprovalDecision(item, {
       approvalDecisionNote: String(note || '').trim(),
       approvalDecisionByEmail: String(byEmail || '').trim().toLowerCase() || null,
       approvalDecisionAt: now,
+      approvalAutoApprovedAt: autoApproved ? now : null,
     };
   }
   if (d === 'revisions_requested') {
@@ -117,4 +129,12 @@ export function isTodoOpenForWork(item) {
   if (item?.requestStatus === 'rejected') return false;
   if (isTodoPendingApproval(item)) return false;
   return true;
+}
+
+/** Client review past deadline and flagged for auto-approve. */
+export function isTodoReadyForAutoApprove(item, now = Date.now()) {
+  if (!isTodoAwaitingClientApproval(item)) return false;
+  if (!item?.approvalAutoApprove) return false;
+  const deadline = Number(item?.reviewDeadline || 0);
+  return deadline > 0 && now >= deadline;
 }

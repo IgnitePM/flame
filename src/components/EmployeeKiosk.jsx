@@ -46,6 +46,12 @@ import {
   sortTodoRowsByDueThenClient,
   sortTodoRowsByClientThenDue,
 } from '../utils/todoFilters.js';
+import {
+  getKioskUrgencyClass,
+  getTodoUrgencyTone,
+  formatReviewDeadlineLabel,
+} from '../utils/todoUrgency.js';
+import { isTodoPendingApproval } from '../utils/todoApproval.js';
 import { safeDisplayForReact } from '../utils/safeReactText.js';
 import RetainerCategoryStats from './RetainerCategoryStats.jsx';
 import TodoDeleteConfirmModal from './TodoDeleteConfirmModal.jsx';
@@ -53,7 +59,6 @@ import TaskApprovalModal, {
   canCurrentUserDecideStaffApproval,
   TodoApprovalBadge,
 } from './TaskApprovalModal.jsx';
-import { isTodoPendingApproval } from '../utils/todoApproval.js';
 import {
   filterClientsForTeamMember,
   teamMemberCanViewClient,
@@ -189,8 +194,9 @@ const EmployeeKiosk = ({
   const [categoryTodoMineOnly, setCategoryTodoMineOnly] = React.useState(
     () => currentUserRole !== 'kiosk',
   );
-  const [kioskTaskStatusFilter, setKioskTaskStatusFilter] = React.useState('open');
+  const [kioskTaskStatusFilter, setKioskTaskStatusFilter] = React.useState('open_work');
   const [kioskTaskDueFilter, setKioskTaskDueFilter] = React.useState('next30');
+  const [kioskTaskUrgencyFilter, setKioskTaskUrgencyFilter] = React.useState('all');
   const [kioskTaskSortMode, setKioskTaskSortMode] = React.useState('due');
   const [todoRecurrenceMode, setTodoRecurrenceMode] = React.useState('none');
   const [todoOptionsOpen, setTodoOptionsOpen] = React.useState(false);
@@ -287,26 +293,8 @@ const EmployeeKiosk = ({
     return user?.email ? [String(user.email).trim().toLowerCase()] : [];
   };
 
-  const getUrgencyClass = (item) => {
-    const due = Number(item?.dueDate || 0);
-    if (!due) return 'bg-white border border-slate-100 text-slate-800';
-    const now = Date.now();
-    const fiveDays = 5 * 24 * 60 * 60 * 1000;
-    // Dedicated classes: dark-theme remaps turn soft *-50 fills + slate text into unreadable pairs.
-    if (due < now) return 'kiosk-todo-urgency-overdue border';
-    if (due - now <= fiveDays) return 'kiosk-todo-urgency-soon border';
-    return 'bg-white border border-slate-100 text-slate-800';
-  };
-
-  const getUrgencyTone = (item) => {
-    const due = Number(item?.dueDate || 0);
-    if (!due) return 'normal';
-    const now = Date.now();
-    const fiveDays = 5 * 24 * 60 * 60 * 1000;
-    if (due < now) return 'overdue';
-    if (due - now <= fiveDays) return 'soon';
-    return 'normal';
-  };
+  const getUrgencyClass = (item) => getKioskUrgencyClass(item);
+  const getUrgencyTone = (item) => getTodoUrgencyTone(item);
 
   const getDraftRecurrence = (dueDateMs) => {
     const m = String(todoRecurrenceMode || 'none');
@@ -1409,7 +1397,13 @@ const EmployeeKiosk = ({
 
   const kioskFilteredRows = React.useMemo(() => {
     let rows = globalTodoRows.filter((row) =>
-      todoRowMatchesFilters(row, kioskTaskStatusFilter, kioskTaskDueFilter),
+      todoRowMatchesFilters(
+        row,
+        kioskTaskStatusFilter,
+        kioskTaskDueFilter,
+        Date.now(),
+        kioskTaskUrgencyFilter,
+      ),
     );
     if (kioskTaskAssigneeFilter === 'me') {
       rows = rows.filter((row) => todoTreeExplicitlyAssignsUser(row.item, meLower));
@@ -1424,6 +1418,7 @@ const EmployeeKiosk = ({
     globalTodoRows,
     kioskTaskStatusFilter,
     kioskTaskDueFilter,
+    kioskTaskUrgencyFilter,
     kioskTaskSortMode,
     kioskTaskAssigneeFilter,
     meLower,
@@ -3066,9 +3061,24 @@ const EmployeeKiosk = ({
               onChange={(e) => setKioskTaskStatusFilter(e.target.value)}
               className="bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-[#fd7414]/40"
             >
-              <option value="open">Open</option>
-              <option value="pending_approval">Pending approval</option>
+              <option value="open_work">Open (workable)</option>
+              <option value="open">All open</option>
+              <option value="awaiting_client">Awaiting client</option>
+              <option value="awaiting_staff">Awaiting staff</option>
+              <option value="pending_approval">Any awaiting approval</option>
+              <option value="revisions">Revisions requested</option>
               <option value="completed">Completed</option>
+            </select>
+            <select
+              value={kioskTaskUrgencyFilter}
+              onChange={(e) => setKioskTaskUrgencyFilter(e.target.value)}
+              className="bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-[#fd7414]/40"
+            >
+              <option value="all">Urgency: All</option>
+              <option value="overdue">Due / overdue</option>
+              <option value="due_soon">Approaching due</option>
+              <option value="awaiting_approval">Awaiting approval</option>
+              <option value="not_due_yet">Not due yet</option>
             </select>
             <select
               value={kioskTaskDueFilter}
@@ -3083,7 +3093,7 @@ const EmployeeKiosk = ({
             <select
               value={kioskTaskAssigneeFilter}
               onChange={(e) => setKioskTaskAssigneeFilter(e.target.value)}
-              className="col-span-2 bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-[#fd7414]/40"
+              className="bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-[#fd7414]/40"
             >
               <option value="me">Assigned to me</option>
               <option value="all">All assignees</option>
@@ -3119,12 +3129,17 @@ const EmployeeKiosk = ({
                 .map((row) => {
                 const client = (clientsFull || []).find((cl) => cl.id === row.clientId);
                 const tone = getUrgencyTone(row.item);
-                const titleClass =
-                  tone === 'normal' ? 'text-slate-700' : 'text-white';
-                const metaClass =
-                  tone === 'normal' ? 'text-slate-500' : 'text-white/85';
-                const dueClass =
-                  tone === 'normal' ? 'text-slate-500' : 'text-white/90';
+                const onColored =
+                  tone === 'overdue' ||
+                  tone === 'soon' ||
+                  tone === 'awaiting_client' ||
+                  tone === 'awaiting_staff';
+                const titleClass = onColored ? 'text-white' : 'text-slate-700';
+                const metaClass = onColored ? 'text-white/85' : 'text-slate-500';
+                const dueClass = onColored ? 'text-white/90' : 'text-slate-500';
+                const reviewDeadlineLabel = formatReviewDeadlineLabel(
+                  row.item?.reviewDeadline,
+                );
                 return (
                   <div
                     key={`${row.clientId}__${row.categoryKey}__${row.item.id}`}
@@ -3134,9 +3149,9 @@ const EmployeeKiosk = ({
                       type="button"
                       onClick={() => openClientPage(row.clientId)}
                       className={`text-[10px] font-black truncate block max-w-full text-left hover:underline ${
-                        tone === 'normal'
-                          ? 'text-[#fd7414]'
-                          : `${titleClass} hover:opacity-90`
+                        onColored
+                          ? `${titleClass} hover:opacity-90`
+                          : 'text-[#fd7414]'
                       }`}
                       title="Open client page"
                     >
@@ -3147,7 +3162,13 @@ const EmployeeKiosk = ({
                     <div className="mt-0.5">
                       <TodoApprovalBadge item={row.item} />
                     </div>
-                    {row.item.dueDate ? (
+                    {isTodoPendingApproval(row.item) && reviewDeadlineLabel ? (
+                      <div className={`text-[9px] font-bold mt-0.5 ${dueClass}`}>
+                        {row.item.approvalAutoApprove
+                          ? `Auto-approves ${reviewDeadlineLabel}`
+                          : `Review by ${reviewDeadlineLabel}`}
+                      </div>
+                    ) : row.item.dueDate ? (
                       <div className={`text-[9px] font-bold mt-0.5 ${dueClass}`}>
                         Due {new Date(row.item.dueDate).toLocaleDateString()}
                       </div>

@@ -38,6 +38,7 @@ import TaskApprovalModal, {
 import {
   isTodoPendingApproval,
 } from '../utils/todoApproval.js';
+import { getAdminTodoUrgencyStyles } from '../utils/todoUrgency.js';
 import {
   orderTodosForDisplay,
   toggleTodoPinnedById,
@@ -2132,45 +2133,7 @@ const AdminDashboard = ({
     );
   };
 
-  const getTodoUrgencyStyles = (item) => {
-    const due = Number(item?.dueDate || 0);
-    if (!due) {
-      return {
-        rowClass: 'bg-white border border-slate-100',
-        textClass: item?.done
-          ? 'line-through text-slate-400 opacity-70'
-          : 'text-slate-800',
-        metaClass: 'text-slate-500',
-      };
-    }
-    const now = Date.now();
-    const fiveDaysMs = 5 * 24 * 60 * 60 * 1000;
-    if (due < now) {
-      return {
-        rowClass: 'kiosk-todo-urgency-overdue border',
-        textClass: item?.done
-          ? 'line-through text-white/70'
-          : 'text-white',
-        metaClass: 'text-white/85',
-      };
-    }
-    if (due - now <= fiveDaysMs) {
-      return {
-        rowClass: 'kiosk-todo-urgency-soon border',
-        textClass: item?.done
-          ? 'line-through text-white/70'
-          : 'text-white',
-        metaClass: 'text-white/85',
-      };
-    }
-    return {
-      rowClass: 'bg-white border border-slate-100',
-      textClass: item?.done
-        ? 'line-through text-slate-400 opacity-70'
-        : 'text-slate-800',
-      metaClass: 'text-slate-500',
-    };
-  };
+  const getTodoUrgencyStyles = (item) => getAdminTodoUrgencyStyles(item);
 
   const workspaceRouteClient = clientId
     ? (clients || []).find((cl) => String(cl.id) === String(clientId))
@@ -2915,7 +2878,11 @@ const AdminDashboard = ({
                 className="w-full bg-slate-50 border border-slate-200 p-3.5 rounded-2xl outline-none focus:ring-2 focus:ring-[#fd7414]/50 transition-all font-bold text-sm"
               >
                 <option value="open">Open</option>
-                <option value="pending_approval">Pending approval</option>
+                <option value="open_work">Open (workable)</option>
+                <option value="awaiting_client">Awaiting client</option>
+                <option value="awaiting_staff">Awaiting staff</option>
+                <option value="pending_approval">Any awaiting approval</option>
+                <option value="revisions">Revisions requested</option>
                 <option value="completed">Completed</option>
               </select>
             </div>

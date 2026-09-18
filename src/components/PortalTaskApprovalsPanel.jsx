@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { authedFetch } from '../utils/authedFetch.js';
 import { isTodoAwaitingClientApproval } from '../utils/todoApproval.js';
+import { formatReviewDeadlineLabel } from '../utils/todoUrgency.js';
 import { TextWithLinks } from '../utils/textWithLinks.jsx';
 
 /**
@@ -122,6 +123,13 @@ export default function PortalTaskApprovalsPanel({
                     <TextWithLinks text={detail} />
                   </p>
                 </div>
+              ) : null}
+              {row.item.reviewDeadline ? (
+                <p className="text-[11px] font-bold text-violet-800 bg-white/80 border border-violet-100 rounded-xl px-3 py-2">
+                  {row.item.approvalAutoApprove
+                    ? `Auto-approves on ${formatReviewDeadlineLabel(row.item.reviewDeadline)} if you don’t respond.`
+                    : `Please review by ${formatReviewDeadlineLabel(row.item.reviewDeadline)}.`}
+                </p>
               ) : null}
               <textarea
                 value={notes[row.item.id] || ''}

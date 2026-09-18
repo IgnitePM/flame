@@ -6,7 +6,27 @@ import {
   isTodoPendingApproval,
   todoApprovalBadgeLabel,
 } from '../utils/todoApproval.js';
+import {
+  defaultClientReviewDeadlineMs,
+  formatReviewDeadlineLabel,
+} from '../utils/todoUrgency.js';
 import { TextWithLinks } from '../utils/textWithLinks.jsx';
+
+function asDateInput(ms) {
+  if (!ms) return '';
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function parseDateInputEndOfDay(value) {
+  if (!value) return null;
+  const d = new Date(`${value}T23:59:59`);
+  return Number.isNaN(d.getTime()) ? null : d.getTime();
+}
 
 /**
  * Modal to finish a task (complete / send for approval), send for review, or decide.
@@ -27,6 +47,10 @@ export default function TaskApprovalModal({
   const [target, setTarget] = useState('client');
   const [reviewers, setReviewers] = useState([]);
   const [note, setNote] = useState(() => String(item?.approvalNote || '').trim());
+  const [reviewDeadlineInput, setReviewDeadlineInput] = useState(() =>
+    asDateInput(defaultClientReviewDeadlineMs()),
+  );
+  const [autoApprove, setAutoApprove] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -92,6 +116,12 @@ export default function TaskApprovalModal({
       setError('Add details or a URL so the client knows what to approve.');
       return;
     }
+    const reviewDeadline =
+      target === 'client' ? parseDateInputEndOfDay(reviewDeadlineInput) : null;
+    if (target === 'client' && autoApprove && !reviewDeadline) {
+      setError('Pick a review deadline for auto-approve, or turn auto-approve off.');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
@@ -103,6 +133,8 @@ export default function TaskApprovalModal({
         target,
         reviewerEmails: target === 'staff' ? reviewers : [],
         note,
+        reviewDeadline: reviewDeadline || null,
+        approvalAutoApprove: target === 'client' ? autoApprove : false,
       });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(data.error || 'Could not send for approval.');
@@ -274,10 +306,37 @@ export default function TaskApprovalModal({
                 </div>
               </div>
             ) : (
-              <p className="text-[11px] font-medium text-slate-500">
-                The client will see your details and links on the Approvals tab and can approve
-                or request revisions. (Social Media creative still goes through Planable.)
-              </p>
+              <div className="space-y-3">
+                <p className="text-[11px] font-medium text-slate-500">
+                  The client will see your details and links on the Approvals tab and can approve
+                  or request revisions. (Social Media creative still goes through Planable.)
+                </p>
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                    Review deadline
+                  </label>
+                  <input
+                    type="date"
+                    value={reviewDeadlineInput}
+                    onChange={(e) => setReviewDeadlineInput(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                  />
+                </div>
+                <label className="flex items-start gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414]"
+                    checked={autoApprove}
+                    onChange={(e) => setAutoApprove(e.target.checked)}
+                  />
+                  <span>
+                    Auto-approve if the client has not responded by the deadline
+                    <span className="block text-[10px] font-medium text-slate-400 mt-0.5">
+                      Defaults to 5 days. The task will mark complete automatically.
+                    </span>
+                  </span>
+                </label>
+              </div>
             )}
             {noteField}
           </>
@@ -354,15 +413,25 @@ export function TodoApprovalBadge({ item }) {
   const label = todoApprovalBadgeLabel(item);
   if (!label) return null;
   const pending = isTodoPendingApproval(item);
+  const deadline = formatReviewDeadlineLabel(item?.reviewDeadline);
+  const suffix =
+    pending && isTodoAwaitingClientApproval(item) && deadline
+      ? item?.approvalAutoApprove
+        ? ` · auto ${deadline}`
+        : ` · by ${deadline}`
+      : '';
   return (
     <span
       className={`text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded ${
         pending
-          ? 'text-violet-800 bg-violet-50'
-          : 'text-amber-800 bg-amber-50'
+          ? isTodoAwaitingClientApproval(item)
+            ? 'text-violet-900 bg-white/95 border border-violet-200'
+            : 'text-indigo-900 bg-white/95 border border-indigo-200'
+          : 'text-amber-800 bg-amber-50 border border-amber-100'
       }`}
     >
       {label}
+      {suffix}
     </span>
   );
 }

@@ -1,11 +1,20 @@
-/** @typedef {"open" | "completed"} TodoStatusFilter */
+/** @typedef {"open" | "open_work" | "awaiting_client" | "awaiting_staff" | "pending_approval" | "revisions" | "completed"} TodoStatusFilter */
 /** @typedef {"next7" | "next14" | "next30" | "all_future"} TodoDueWindowFilter */
+/** @typedef {"all" | "overdue" | "due_soon" | "awaiting_approval" | "not_due_yet"} TodoUrgencyFilter */
 
 import {
   collectEffectiveAssigneesForTodoTree,
   getSubtasks,
 } from './todoSubtasks.js';
-import { isTodoPendingApproval } from './todoApproval.js';
+import {
+  isTodoAwaitingClientApproval,
+  isTodoAwaitingStaffApproval,
+  isTodoOpenForWork,
+  isTodoPendingApproval,
+  TODO_APPROVAL,
+  getTodoApprovalStatus,
+} from './todoApproval.js';
+import { taskMatchesUrgencyFilter } from './todoUrgency.js';
 
 export function startOfTodayMs(now = Date.now()) {
   const d = new Date(now);
@@ -18,12 +27,23 @@ export function addDaysMs(ms, days) {
 }
 
 export function taskMatchesStatus(item, statusFilter) {
-  if (statusFilter === "open") {
-    return !item?.done;
-  }
-  if (statusFilter === "completed") return !!item?.done;
-  if (statusFilter === "pending_approval") {
+  const f = String(statusFilter || 'open');
+  if (f === 'open') return !item?.done;
+  if (f === 'open_work') return isTodoOpenForWork(item);
+  if (f === 'completed') return !!item?.done;
+  if (f === 'pending_approval') {
     return !item?.done && isTodoPendingApproval(item);
+  }
+  if (f === 'awaiting_client') {
+    return !item?.done && isTodoAwaitingClientApproval(item);
+  }
+  if (f === 'awaiting_staff') {
+    return !item?.done && isTodoAwaitingStaffApproval(item);
+  }
+  if (f === 'revisions') {
+    return (
+      !item?.done && getTodoApprovalStatus(item) === TODO_APPROVAL.REVISION_REQUESTED
+    );
   }
   return true;
 }
@@ -34,12 +54,12 @@ export function taskMatchesDueWindow(item, dueFilter, now = Date.now()) {
   if (!due) return true;
   // Overdue tasks stay visible in every window (consistent with the shorter
   // windows below) — hiding them under "all future" buried late work.
-  if (dueFilter === "all_future") return true;
+  if (dueFilter === 'all_future') return true;
   if (due < t0) return true;
   const end =
-    dueFilter === "next7"
+    dueFilter === 'next7'
       ? addDaysMs(t0, 7)
-      : dueFilter === "next14"
+      : dueFilter === 'next14'
         ? addDaysMs(t0, 14)
         : addDaysMs(t0, 30);
   return due < end;
@@ -50,10 +70,17 @@ export function itemMatchesDueWindowWithSubtasks(item, dueFilter, now = Date.now
   return getSubtasks(item).some((s) => taskMatchesDueWindow(s, dueFilter, now));
 }
 
-export function todoRowMatchesFilters(row, statusFilter, dueFilter, now = Date.now()) {
+export function todoRowMatchesFilters(
+  row,
+  statusFilter,
+  dueFilter,
+  now = Date.now(),
+  urgencyFilter = 'all',
+) {
   return (
     taskMatchesStatus(row.item, statusFilter) &&
-    itemMatchesDueWindowWithSubtasks(row.item, dueFilter, now)
+    itemMatchesDueWindowWithSubtasks(row.item, dueFilter, now) &&
+    taskMatchesUrgencyFilter(row.item, urgencyFilter, now)
   );
 }
 
@@ -68,10 +95,12 @@ export function globalAdminTaskRowMatchesFilters(
   assigneeSpecificEmail,
   userEmail,
   now = Date.now(),
+  urgencyFilter = 'all',
 ) {
   if (
     !taskMatchesStatus(row.item, statusFilter) ||
-    !itemMatchesDueWindowWithSubtasks(row.item, dueFilter, now)
+    !itemMatchesDueWindowWithSubtasks(row.item, dueFilter, now) ||
+    !taskMatchesUrgencyFilter(row.item, urgencyFilter, now)
   ) {
     return false;
   }
@@ -96,7 +125,7 @@ function compareTodoRowsByDueThenClient(a, b, t0) {
   if (ad && bd) return ad - bd;
   if (ad && !bd) return -1;
   if (!ad && bd) return 1;
-  return String(a.clientName || "").localeCompare(String(b.clientName || ""));
+  return String(a.clientName || '').localeCompare(String(b.clientName || ''));
 }
 
 export function sortTodoRowsByDueThenClient(rows) {
@@ -124,11 +153,11 @@ export function buildKioskBillingTargetFromTodoRow(
   const catKey = row.categoryKey;
   const gk = todoCategoryKey(generalLabel);
   if (String(catKey) === String(gk)) {
-    return "retainer_GENERAL_UNCLASSIFIED";
+    return 'retainer_GENERAL_UNCLASSIFIED';
   }
   const plist = projects || [];
   const proj = plist.find((p) => {
-    if (!p || String(p.clientId || "") !== String(client?.id || "")) return false;
+    if (!p || String(p.clientId || '') !== String(client?.id || '')) return false;
     const k = todoCategoryKey(`project_${p.id}`);
     return String(k) === String(catKey);
   });

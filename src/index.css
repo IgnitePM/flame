@@ -256,6 +256,32 @@ body {
   color: rgb(209 250 229) !important;
 }
 
+.kiosk-todo-urgency-awaiting-client {
+  background-color: rgb(91 33 182) !important;
+  border-color: rgb(124 58 237) !important;
+  color: rgb(245 243 255) !important;
+}
+.kiosk-todo-urgency-awaiting-client .text-slate-500,
+.kiosk-todo-urgency-awaiting-client .text-slate-600,
+.kiosk-todo-urgency-awaiting-client .text-slate-700,
+.kiosk-todo-urgency-awaiting-client .text-slate-800,
+.kiosk-todo-urgency-awaiting-client .text-slate-900 {
+  color: rgb(221 214 254) !important;
+}
+
+.kiosk-todo-urgency-awaiting-staff {
+  background-color: rgb(55 48 163) !important;
+  border-color: rgb(79 70 229) !important;
+  color: rgb(238 242 255) !important;
+}
+.kiosk-todo-urgency-awaiting-staff .text-slate-500,
+.kiosk-todo-urgency-awaiting-staff .text-slate-600,
+.kiosk-todo-urgency-awaiting-staff .text-slate-700,
+.kiosk-todo-urgency-awaiting-staff .text-slate-800,
+.kiosk-todo-urgency-awaiting-staff .text-slate-900 {
+  color: rgb(199 210 254) !important;
+}
+
 .kiosk-todo-drag-handle {
   display: inline-flex;
   align-items: center;
