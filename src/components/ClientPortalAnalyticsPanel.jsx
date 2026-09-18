@@ -16,6 +16,7 @@ import {
   clientHasActiveSocialMediaRetainer,
 } from '../utils/retainerCategories.js';
 import { authedFetch } from '../utils/authedFetch.js';
+import { getEmailMarketingProviderMeta } from '../utils/emailMarketingProvider.js';
 import ClientPortalSeoPanel from './ClientPortalSeoPanel.jsx';
 
 const TABS = [
@@ -249,8 +250,9 @@ function useAnalyticsReport(endpoint, clientId, dateFromMs, dateToMs, enabled) {
 }
 
 function EmailAnalyticsPanel({ client, dateFromMs, dateToMs }) {
+  const providerMeta = getEmailMarketingProviderMeta(client?.emailMarketingProvider);
   const { loading, error, report, load, range } = useAnalyticsReport(
-    '/.netlify/functions/portal-mailchimp',
+    providerMeta.endpoint,
     client?.id,
     dateFromMs,
     dateToMs,
@@ -283,11 +285,12 @@ function EmailAnalyticsPanel({ client, dateFromMs, dateToMs }) {
   const availableAudiences = Array.isArray(report?.availableAudiences)
     ? report.availableAudiences
     : [];
+  const isMailchimp = providerMeta.id === 'mailchimp';
 
   return (
     <PanelShell
       title="Email"
-      subtitle={`Mailchimp · ${formatDay(range.from)} – ${formatDay(range.to)}${cacheSubtitleSuffix(report)}`}
+      subtitle={`${providerMeta.label} · ${formatDay(range.from)} – ${formatDay(range.to)}${cacheSubtitleSuffix(report)}`}
       onRefresh={load}
       loading={loading}
     >
@@ -296,7 +299,7 @@ function EmailAnalyticsPanel({ client, dateFromMs, dateToMs }) {
           <p className="text-sm font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3">
             {report.warning}
           </p>
-          {availableAudiences.length > 0 ? (
+          {isMailchimp && availableAudiences.length > 0 ? (
             <div className="bg-white border border-slate-200 rounded-2xl p-4 text-sm">
               <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
                 Audiences on this Mailchimp account

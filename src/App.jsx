@@ -115,6 +115,10 @@ import {
 import { buildClientActivityDoc } from './utils/clientActivity.js';
 import { normalizeClientConnectionFields } from './utils/clientConnections.js';
 import { normalizeCompanyProfileFields } from './utils/clientCompanyProfile.js';
+import {
+  EMAIL_MARKETING_PROVIDERS,
+  normalizeEmailMarketingProvider,
+} from './utils/emailMarketingProvider.js';
 import ClientEnrichPreviewModal from './components/ClientEnrichPreviewModal.jsx';
 import GlobalEmailsHub from './components/GlobalEmailsHub.jsx';
 import GlobalMessagesHub from './components/GlobalMessagesHub.jsx';
@@ -413,7 +417,7 @@ export default function App() {
   const [archiveConfirm, setArchiveConfirm] = useState(null);
   const [editingClient, setEditingClient] = useState(null);
 
-  // Load whether a Mailchimp API key is saved (never load the raw key into UI state).
+  // Load whether email ESP API keys are saved (never load raw keys into UI state).
   useEffect(() => {
     const clientId = editingClient?.id;
     if (!clientId) return undefined;
@@ -422,14 +426,21 @@ export default function App() {
       try {
         const snap = await getDoc(doc(db, 'clientIntegrationSecrets', clientId));
         if (cancelled) return;
-        const hasKey = Boolean(String(snap.data()?.mailchimpApiKey || '').trim());
+        const data = snap.data() || {};
+        const hasMailchimpKey = Boolean(String(data.mailchimpApiKey || '').trim());
+        const hasGhlToken = Boolean(
+          String(data.ghlPrivateApiToken || data.goHighLevelApiToken || '').trim(),
+        );
         setEditingClient((prev) =>
           prev && prev.id === clientId
             ? {
                 ...prev,
-                mailchimpApiKeyConfigured: hasKey,
+                mailchimpApiKeyConfigured: hasMailchimpKey,
                 mailchimpApiKeyDraft: prev.mailchimpApiKeyDraft || '',
                 mailchimpApiKeyClear: false,
+                ghlPrivateApiTokenConfigured: hasGhlToken,
+                ghlPrivateApiTokenDraft: prev.ghlPrivateApiTokenDraft || '',
+                ghlPrivateApiTokenClear: false,
               }
             : prev,
         );
@@ -5047,6 +5058,36 @@ export default function App() {
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                      Email marketing provider
+                    </label>
+                    <select
+                      value={normalizeEmailMarketingProvider(
+                        editingClient.emailMarketingProvider,
+                      )}
+                      onChange={(e) =>
+                        setEditingClient({
+                          ...editingClient,
+                          emailMarketingProvider: e.target.value,
+                        })
+                      }
+                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                    >
+                      {EMAIL_MARKETING_PROVIDERS.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] font-bold text-slate-400">
+                      Controls which ESP powers portal Analytics → Email for this client.
+                    </p>
+                  </div>
+                  {normalizeEmailMarketingProvider(
+                    editingClient.emailMarketingProvider,
+                  ) === 'mailchimp' ? (
+                    <>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
                       Mailchimp API key (this client’s account)
                     </label>
                     <input
@@ -5108,6 +5149,74 @@ export default function App() {
                       Audience ID from that same client account (Audience → Settings → Audience name and defaults). If the account has only one audience, it can be detected automatically.
                     </p>
                   </div>
+                    </>
+                  ) : (
+                    <>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                      GoHighLevel Private Integration token
+                    </label>
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      value={editingClient.ghlPrivateApiTokenDraft ?? ''}
+                      onChange={(e) =>
+                        setEditingClient({
+                          ...editingClient,
+                          ghlPrivateApiTokenDraft: e.target.value,
+                        })
+                      }
+                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      placeholder={
+                        editingClient.ghlPrivateApiTokenConfigured
+                          ? 'Token saved — paste a new token to replace'
+                          : 'Sub-account Private Integration token'
+                      }
+                    />
+                    <p className="text-[10px] font-bold text-slate-400">
+                      {editingClient.ghlPrivateApiTokenConfigured
+                        ? 'A GHL token is saved for this client (stored separately from the profile). Leave blank to keep it.'
+                        : 'Create a Sub-Account Private Integration with emails/campaigns.readonly and emails/stats.readonly (contacts.readonly optional for audience size).'}
+                    </p>
+                    {editingClient.ghlPrivateApiTokenConfigured ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditingClient({
+                            ...editingClient,
+                            ghlPrivateApiTokenClear: true,
+                            ghlPrivateApiTokenDraft: '',
+                            ghlPrivateApiTokenConfigured: false,
+                          })
+                        }
+                        className="text-[10px] font-black uppercase tracking-widest text-rose-600 hover:text-rose-700"
+                      >
+                        Remove saved token
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                      GoHighLevel Location ID
+                    </label>
+                    <input
+                      type="text"
+                      value={editingClient.ghlLocationId ?? ''}
+                      onChange={(e) =>
+                        setEditingClient({
+                          ...editingClient,
+                          ghlLocationId: e.target.value.trim(),
+                        })
+                      }
+                      className="w-full bg-white border border-slate-200 p-4 rounded-xl font-medium text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
+                      placeholder="e.g. ve9EPM428h8vShlRW1KT"
+                    />
+                    <p className="text-[10px] font-bold text-slate-400">
+                      Sub-account / location ID for this client’s GHL account (often in the agency URL or Settings → Company).
+                    </p>
+                  </div>
+                    </>
+                  )}
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
                       Planable workspace ID
@@ -5998,6 +6107,11 @@ export default function App() {
                       .trim() || null,
                     mailchimpAudienceId:
                       String(editingClient.mailchimpAudienceId || '').trim() || null,
+                    emailMarketingProvider: normalizeEmailMarketingProvider(
+                      editingClient.emailMarketingProvider,
+                    ),
+                    ghlLocationId:
+                      String(editingClient.ghlLocationId || '').trim() || null,
                     planableWorkspaceId:
                       String(editingClient.planableWorkspaceId || '').trim() || null,
                     googleAdsCustomerId: String(editingClient.googleAdsCustomerId || '')
@@ -6013,21 +6127,26 @@ export default function App() {
                   });
                   const secretRef = doc(db, 'clientIntegrationSecrets', editingClient.id);
                   const draftKey = String(editingClient.mailchimpApiKeyDraft || '').trim();
+                  const draftGhl = String(editingClient.ghlPrivateApiTokenDraft || '').trim();
+                  const secretPatch = { updatedAt: Date.now() };
+                  let writeSecrets = false;
                   if (editingClient.mailchimpApiKeyClear && !draftKey) {
-                    await setDoc(
-                      secretRef,
-                      { mailchimpApiKey: deleteField(), updatedAt: Date.now() },
-                      { merge: true },
-                    );
+                    secretPatch.mailchimpApiKey = deleteField();
+                    writeSecrets = true;
                   } else if (draftKey) {
-                    await setDoc(
-                      secretRef,
-                      {
-                        mailchimpApiKey: draftKey,
-                        updatedAt: Date.now(),
-                      },
-                      { merge: true },
-                    );
+                    secretPatch.mailchimpApiKey = draftKey;
+                    writeSecrets = true;
+                  }
+                  if (editingClient.ghlPrivateApiTokenClear && !draftGhl) {
+                    secretPatch.ghlPrivateApiToken = deleteField();
+                    secretPatch.goHighLevelApiToken = deleteField();
+                    writeSecrets = true;
+                  } else if (draftGhl) {
+                    secretPatch.ghlPrivateApiToken = draftGhl;
+                    writeSecrets = true;
+                  }
+                  if (writeSecrets) {
+                    await setDoc(secretRef, secretPatch, { merge: true });
                   }
                   if (currentUserRole === 'admin' && removed.length) {
                     await Promise.all(
