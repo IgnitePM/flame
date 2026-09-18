@@ -3,6 +3,7 @@ import {
   collectGeminiText,
   geminiJsonGenerationConfig,
   geminiModelCandidates,
+  geminiUrlContextModelCandidates,
   shouldTryNextGeminiModel,
 } from './lib/geminiModels.mjs';
 
@@ -459,59 +460,116 @@ function mergeExtractedOverModel(extracted, modelSuggestion, website) {
   return out;
 }
 
-async function callGeminiJson({ apiKey, model, prompt, tools = null }) {
+function geminiErrorMessage(data, fallback = 'Gemini request failed') {
+  return (
+    data?.error?.message ||
+    data?.message ||
+    data?.candidates?.[0]?.finishReason ||
+    fallback
+  );
+}
+
+/**
+ * Call Gemini. When `tools` are set (e.g. url_context), omit JSON mime type —
+ * structured outputs + built-in tools is only supported on a few Gemini 3 models,
+ * and combining them on 2.5 often fails the whole enrichment fallback path.
+ */
+async function callGeminiJson({
+  apiKey,
+  model,
+  prompt,
+  tools = null,
+  forceJsonMime = null,
+}) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model,
   )}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const makeBody = (withThinking) => {
+
+  // Tools + responseMimeType:application/json is unsupported on most models.
+  const useJsonMime = forceJsonMime != null ? !!forceJsonMime : !tools;
+
+  const makeBody = ({ withThinking, jsonMime }) => {
+    let generationConfig;
+    if (withThinking) {
+      generationConfig = geminiJsonGenerationConfig({
+        temperature: 0.1,
+        topP: 0.8,
+        maxOutputTokens: 4096,
+      });
+      if (!jsonMime) delete generationConfig.responseMimeType;
+    } else {
+      generationConfig = {
+        temperature: 0.1,
+        topP: 0.8,
+        maxOutputTokens: 4096,
+      };
+      if (jsonMime) generationConfig.responseMimeType = 'application/json';
+    }
     const body = {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: withThinking
-        ? geminiJsonGenerationConfig({
-            temperature: 0.1,
-            topP: 0.8,
-            maxOutputTokens: 4096,
-          })
-        : {
-            temperature: 0.1,
-            topP: 0.8,
-            maxOutputTokens: 4096,
-            responseMimeType: 'application/json',
-          },
+      generationConfig,
     };
     if (tools) body.tools = tools;
     return body;
   };
 
-  let resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(makeBody(true)),
-  });
-  let data = await resp.json().catch(() => ({}));
-  if (
-    !resp.ok &&
-    /thinking|unknown name|invalid.*argument/i.test(
-      String(data?.error?.message || data?.message || ''),
-    )
-  ) {
+  const attempts = [
+    { withThinking: true, jsonMime: useJsonMime },
+    { withThinking: false, jsonMime: useJsonMime },
+  ];
+  // If tools + JSON failed, retry without JSON mime (parse free text).
+  if (tools && useJsonMime) {
+    attempts.push({ withThinking: false, jsonMime: false });
+  }
+
+  let resp = null;
+  let data = {};
+  for (const attempt of attempts) {
     resp = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(makeBody(false)),
+      body: JSON.stringify(makeBody(attempt)),
     });
     data = await resp.json().catch(() => ({}));
+    if (resp.ok) return { resp, data };
+    const lastMsg = geminiErrorMessage(data);
+    const retryable =
+      /thinking|unknown name|invalid.*argument|mime|structured|tool|json/i.test(
+        String(lastMsg),
+      );
+    if (!retryable) break;
   }
   return { resp, data };
 }
 
+function relatedSiteUrls(website) {
+  try {
+    const u = new URL(website);
+    const origin = u.origin;
+    return Array.from(
+      new Set([
+        website,
+        `${origin}/`,
+        `${origin}/about`,
+        `${origin}/about-us`,
+        `${origin}/contact`,
+        `${origin}/contact-us`,
+        `${origin}/company`,
+      ]),
+    ).slice(0, 8);
+  } catch {
+    return [website];
+  }
+}
+
 async function enrichViaUrlContext({ apiKey, website, companyName }) {
+  const urls = relatedSiteUrls(website);
   const prompt = `
 You extract a CRM company profile for this business website.
-Website: ${website}
+Primary website: ${website}
+Also read these pages with the URL context tool when available:
+${urls.map((u) => `- ${u}`).join('\n')}
 ${companyName ? `CRM record name (may be informal): "${companyName}"` : ''}
-
-Use the URL context tool to read the website (and about/contact pages if linked).
 
 HARD RULES:
 - Use ONLY facts present on the website pages you retrieved.
@@ -521,7 +579,7 @@ HARD RULES:
 - industry: short label only if obvious.
 - primaryContact: only if a real person is clearly listed; otherwise empty strings.
 - website must stay on the same company domain.
-- Respond with one JSON object only:
+- Respond with one JSON object only (no markdown fences):
 {
   "name": "",
   "website": "",
@@ -544,26 +602,30 @@ HARD RULES:
 `.trim();
 
   let lastError = null;
-  for (const model of geminiModelCandidates()) {
+  for (const model of geminiUrlContextModelCandidates()) {
     const { resp, data } = await callGeminiJson({
       apiKey,
       model,
       prompt,
       tools: [{ url_context: {} }],
+      forceJsonMime: false,
     });
     if (!resp.ok) {
-      lastError = data?.error?.message || data?.message || 'Gemini request failed';
+      lastError = geminiErrorMessage(data);
       if (shouldTryNextGeminiModel(lastError)) continue;
-      // Some models reject url_context — try next
-      if (/url.?context|tool/i.test(String(lastError))) continue;
-      break;
+      continue;
     }
     const text = collectCandidateText(data);
     const parsed = text ? extractFirstJsonObject(text) : null;
     if (parsed) {
       return { ok: true, suggestion: cleanSuggestion(parsed), model, lastError: null };
     }
-    lastError = 'Model returned non-JSON enrichment output.';
+    const finish = data?.candidates?.[0]?.finishReason;
+    lastError = text
+      ? 'Model returned non-JSON enrichment output.'
+      : finish
+        ? `Model returned empty enrichment output (${finish}).`
+        : 'Model returned empty enrichment output.';
   }
   return { ok: false, error: lastError || 'URL-context enrichment failed.' };
 }
@@ -643,10 +705,13 @@ export default async (req) => {
     }
     return new Response(
       JSON.stringify({
-        error:
-          gathered.error ||
-          viaUrl.error ||
-          'Could not load that website. Check the URL is public and try again.',
+        error: [
+          'Could not enrich from that website.',
+          gathered.error ? `Fetch: ${gathered.error}` : null,
+          viaUrl.error ? `AI: ${viaUrl.error}` : null,
+        ]
+          .filter(Boolean)
+          .join(' '),
       }),
       { status: 422, headers: { 'Content-Type': 'application/json' } },
     );
@@ -728,7 +793,7 @@ ${pageCorpus || '(empty)'}
   for (const model of modelCandidates) {
     const { resp, data } = await callGeminiJson({ apiKey, model, prompt });
     if (!resp.ok) {
-      lastError = data?.error?.message || data?.message || 'Gemini request failed';
+      lastError = geminiErrorMessage(data);
       if (shouldTryNextGeminiModel(lastError)) continue;
       // Still return deterministic HTML extraction below
       break;

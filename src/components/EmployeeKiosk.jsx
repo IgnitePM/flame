@@ -292,13 +292,9 @@ const EmployeeKiosk = ({
     if (!due) return 'bg-white border border-slate-100 text-slate-800';
     const now = Date.now();
     const fiveDays = 5 * 24 * 60 * 60 * 1000;
-    // Soft tinted cards on phones/tablets so notes/controls stay readable; solid fills on large screens.
-    if (due < now) {
-      return 'bg-red-50 border border-red-200 text-slate-900 md:bg-red-700 md:border-red-900 md:text-white';
-    }
-    if (due - now <= fiveDays) {
-      return 'bg-emerald-50 border border-emerald-200 text-slate-900 md:bg-emerald-700 md:border-emerald-900 md:text-white';
-    }
+    // Dedicated classes: dark-theme remaps turn soft *-50 fills + slate text into unreadable pairs.
+    if (due < now) return 'kiosk-todo-urgency-overdue border';
+    if (due - now <= fiveDays) return 'kiosk-todo-urgency-soon border';
     return 'bg-white border border-slate-100 text-slate-800';
   };
 
@@ -3124,17 +3120,11 @@ const EmployeeKiosk = ({
                 const client = (clientsFull || []).find((cl) => cl.id === row.clientId);
                 const tone = getUrgencyTone(row.item);
                 const titleClass =
-                  tone === 'normal'
-                    ? 'text-slate-700'
-                    : 'text-slate-900 sm:text-white';
+                  tone === 'normal' ? 'text-slate-700' : 'text-white';
                 const metaClass =
-                  tone === 'normal'
-                    ? 'text-slate-500'
-                    : 'text-slate-600 sm:text-white/90';
+                  tone === 'normal' ? 'text-slate-500' : 'text-white/85';
                 const dueClass =
-                  tone === 'normal'
-                    ? 'text-slate-500'
-                    : 'text-slate-600 sm:text-white';
+                  tone === 'normal' ? 'text-slate-500' : 'text-white/90';
                 return (
                   <div
                     key={`${row.clientId}__${row.categoryKey}__${row.item.id}`}

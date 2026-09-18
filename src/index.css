@@ -229,6 +229,33 @@ body {
   background-color: rgb(244 244 245) !important;
 }
 
+/* High-contrast urgency cards (soft *-50 + remapped slate text was unreadable) */
+.kiosk-todo-urgency-overdue {
+  background-color: rgb(127 29 29) !important;
+  border-color: rgb(185 28 28) !important;
+  color: rgb(254 242 242) !important;
+}
+.kiosk-todo-urgency-overdue .text-slate-500,
+.kiosk-todo-urgency-overdue .text-slate-600,
+.kiosk-todo-urgency-overdue .text-slate-700,
+.kiosk-todo-urgency-overdue .text-slate-800,
+.kiosk-todo-urgency-overdue .text-slate-900 {
+  color: rgb(254 226 226) !important;
+}
+
+.kiosk-todo-urgency-soon {
+  background-color: rgb(6 78 59) !important;
+  border-color: rgb(4 120 87) !important;
+  color: rgb(236 253 245) !important;
+}
+.kiosk-todo-urgency-soon .text-slate-500,
+.kiosk-todo-urgency-soon .text-slate-600,
+.kiosk-todo-urgency-soon .text-slate-700,
+.kiosk-todo-urgency-soon .text-slate-800,
+.kiosk-todo-urgency-soon .text-slate-900 {
+  color: rgb(209 250 229) !important;
+}
+
 .kiosk-todo-drag-handle {
   display: inline-flex;
   align-items: center;

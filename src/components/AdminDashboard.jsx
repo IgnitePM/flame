@@ -2147,22 +2147,20 @@ const AdminDashboard = ({
     const fiveDaysMs = 5 * 24 * 60 * 60 * 1000;
     if (due < now) {
       return {
-        rowClass:
-          'bg-red-50 border border-red-200 md:bg-red-600 md:border-red-700',
+        rowClass: 'kiosk-todo-urgency-overdue border',
         textClass: item?.done
-          ? 'line-through text-slate-400 opacity-70 md:text-white/80'
-          : 'text-slate-900 md:text-white',
-        metaClass: 'text-slate-600 md:text-white/90',
+          ? 'line-through text-white/70'
+          : 'text-white',
+        metaClass: 'text-white/85',
       };
     }
     if (due - now <= fiveDaysMs) {
       return {
-        rowClass:
-          'bg-emerald-50 border border-emerald-200 md:bg-emerald-600 md:border-emerald-700',
+        rowClass: 'kiosk-todo-urgency-soon border',
         textClass: item?.done
-          ? 'line-through text-slate-400 opacity-70 md:text-white/80'
-          : 'text-slate-900 md:text-white',
-        metaClass: 'text-slate-600 md:text-white/90',
+          ? 'line-through text-white/70'
+          : 'text-white',
+        metaClass: 'text-white/85',
       };
     }
     return {

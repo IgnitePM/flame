@@ -11,10 +11,31 @@ export function geminiModelCandidates(preferred) {
       [
         fromEnv,
         'gemini-flash-latest',
+        'gemini-3.8-flash',
         'gemini-3.5-flash',
         'gemini-3.1-flash-lite',
         'gemini-2.5-flash',
         'gemini-2.5-flash-lite',
+      ].filter(Boolean),
+    ),
+  );
+}
+
+/**
+ * Models known to support the URL Context tool well.
+ * Prefer these when scrape fails and we need url_context.
+ */
+export function geminiUrlContextModelCandidates(preferred) {
+  const fromEnv = String(preferred || process.env.GEMINI_MODEL || '').trim();
+  return Array.from(
+    new Set(
+      [
+        fromEnv,
+        'gemini-2.5-flash',
+        'gemini-3.8-flash',
+        'gemini-3.5-flash',
+        'gemini-2.5-flash-lite',
+        'gemini-flash-latest',
       ].filter(Boolean),
     ),
   );
@@ -31,7 +52,12 @@ export function shouldTryNextGeminiModel(errorMessage) {
     msg.includes('deprecated') ||
     msg.includes('not available') ||
     msg.includes('invalid model') ||
-    msg.includes('is not enabled')
+    msg.includes('is not enabled') ||
+    msg.includes('url context') ||
+    msg.includes('url_context') ||
+    msg.includes('structured output') ||
+    msg.includes('response mime') ||
+    msg.includes('tool')
   );
 }
 
