@@ -430,5 +430,24 @@ service cloud.firestore {
       allow update: if isAnyStaff() || isBilling();
       allow delete: if isAdmin();
     }
+
+    // Company-wide (or targeted) announcements shown on client portal Home.
+    match /portalAnnouncements/{announcementId} {
+      allow read: if isAnyStaff() || isSignedIn();
+      allow create, update: if isAnyStaff();
+      allow delete: if isAdmin();
+    }
+
+    // Per-contact dismissals for portal announcements.
+    match /portalAnnouncementDismissals/{dismissalId} {
+      allow read: if isAnyStaff() ||
+        (isSignedIn() && resource.data.email == emailLower());
+      allow create, update: if isAnyStaff() ||
+        (isSignedIn() &&
+         request.resource.data.email == emailLower() &&
+         request.resource.data.announcementId is string &&
+         request.resource.data.announcementId != '');
+      allow delete: if isAdmin();
+    }
   }
 }

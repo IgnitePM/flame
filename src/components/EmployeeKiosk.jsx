@@ -5,6 +5,7 @@ import {
   Coffee,
   History,
   LogOut,
+  MessageSquare,
   Pause,
   Play,
 } from 'lucide-react';
@@ -59,6 +60,7 @@ import TaskApprovalModal, {
   canCurrentUserDecideStaffApproval,
   TodoApprovalBadge,
 } from './TaskApprovalModal.jsx';
+import ClientMessagesPanel from './ClientMessagesPanel.jsx';
 import {
   filterClientsForTeamMember,
   teamMemberCanViewClient,
@@ -217,6 +219,7 @@ const EmployeeKiosk = ({
   const [linkPickProjectId, setLinkPickProjectId] = React.useState('');
   const [aiSummary, setAiSummary] = React.useState(null);
   const [aiLoading, setAiLoading] = React.useState(false);
+  const [clientMessagesOpen, setClientMessagesOpen] = React.useState(false);
   const [aiError, setAiError] = React.useState('');
   const [personalOptionsItemId, setPersonalOptionsItemId] = React.useState(null);
   const [personalOptionsTitle, setPersonalOptionsTitle] = React.useState('');
@@ -932,6 +935,11 @@ const EmployeeKiosk = ({
   // so the retainer progress bar doesn't lag behind when switching tasks.
   const effectiveClientName = activeTask?.clientName || selectedClient;
   const selectedClientObj = clientsFull?.find((c) => c.name === effectiveClientName);
+
+  React.useEffect(() => {
+    if (!selectedClientObj?.id) setClientMessagesOpen(false);
+  }, [selectedClientObj?.id]);
+
   const normalizeCategoryName = (value) =>
     String(value || '').trim().toLowerCase();
   const resolveClientCategoryName = React.useCallback(
@@ -1725,6 +1733,16 @@ const EmployeeKiosk = ({
                               ))}
                             <option value="General Admin">General Admin</option>
                           </select>
+                          {selectedClientObj ? (
+                            <button
+                              type="button"
+                              onClick={() => setClientMessagesOpen(true)}
+                              className="mt-2 w-full inline-flex items-center justify-center gap-2 bg-white border border-slate-200 hover:border-[#fd7414]/50 hover:bg-orange-50 text-slate-800 p-3 rounded-xl font-black text-xs uppercase tracking-widest transition-colors"
+                            >
+                              <MessageSquare className="w-4 h-4 text-[#fd7414]" />
+                              Message {selectedClientObj.name}
+                            </button>
+                          ) : null}
                         </div>
                         <div className="space-y-1">
                           <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
@@ -2178,8 +2196,20 @@ const EmployeeKiosk = ({
                           </div>
                           </div>
                         </div>
-                        <div className="bg-white px-3 py-1.5 rounded-full border border-orange-200 text-[10px] font-black text-orange-600 shadow-sm shrink-0">
-                          IN PROGRESS
+                        <div className="flex flex-col items-end gap-2 shrink-0">
+                          {selectedClientObj ? (
+                            <button
+                              type="button"
+                              onClick={() => setClientMessagesOpen(true)}
+                              className="inline-flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-full border border-orange-200 text-[10px] font-black text-slate-700 hover:border-[#fd7414] hover:text-[#fd7414] shadow-sm transition-colors"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5 text-[#fd7414]" />
+                              Message
+                            </button>
+                          ) : null}
+                          <div className="bg-white px-3 py-1.5 rounded-full border border-orange-200 text-[10px] font-black text-orange-600 shadow-sm">
+                            IN PROGRESS
+                          </div>
                         </div>
                       </div>
                       <div className="text-6xl font-black text-slate-900 text-center mb-8 font-mono tracking-tighter">
@@ -4085,6 +4115,41 @@ const EmployeeKiosk = ({
           </div>
         </div>
       )}
+
+      {clientMessagesOpen && selectedClientObj ? (
+        <div className="fixed inset-0 z-[150] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-100 flex flex-col max-h-[min(90dvh,100%)] overflow-hidden">
+            <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100 shrink-0">
+              <div className="min-w-0">
+                <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4 text-[#fd7414] shrink-0" />
+                  <span className="truncate">Message {selectedClientObj.name}</span>
+                </h4>
+                <p className="text-[10px] font-bold text-slate-400 mt-1">
+                  Portal inbox · clients get emailed when you send
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setClientMessagesOpen(false)}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-500 hover:bg-slate-100 shrink-0"
+              >
+                Close
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1 min-h-0">
+              <ClientMessagesPanel
+                client={selectedClientObj}
+                mode="staff"
+                userEmail={user?.email || staffEmail || ''}
+                userName={user?.displayName || user?.email || staffEmail || ''}
+                staffEmails={staffEmails}
+                adminUsers={adminUsers}
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <TodoDeleteConfirmModal
         open={!!clientTodoDeletePrompt}

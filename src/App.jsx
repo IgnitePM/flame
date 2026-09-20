@@ -122,6 +122,7 @@ import {
 import ClientEnrichPreviewModal from './components/ClientEnrichPreviewModal.jsx';
 import GlobalEmailsHub from './components/GlobalEmailsHub.jsx';
 import GlobalMessagesHub from './components/GlobalMessagesHub.jsx';
+import PortalAnnouncementsPanel from './components/PortalAnnouncementsPanel.jsx';
 import PortalSetPasswordPage from './components/PortalSetPasswordPage.jsx';
 import IdleFailsafeGuard from './components/IdleFailsafeGuard.jsx';
 import {
@@ -4103,7 +4104,11 @@ export default function App() {
               path="/messages"
               element={
                 <StaffThemeShell>
-                  <div className="mx-auto w-full max-w-[min(1200px,calc(100vw-1.5rem))] px-4 py-6 sm:px-6">
+                  <div className="mx-auto w-full max-w-[min(1200px,calc(100vw-1.5rem))] px-4 py-6 sm:px-6 space-y-10">
+                    <PortalAnnouncementsPanel
+                      clients={clients}
+                      userEmail={user?.email || ''}
+                    />
                     <GlobalMessagesHub
                       clients={clients}
                       onOpenClient={(id, tab) =>

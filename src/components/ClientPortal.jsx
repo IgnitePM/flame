@@ -31,6 +31,7 @@ import ClientPortalAnalyticsPanel from './ClientPortalAnalyticsPanel.jsx';
 import ClientPortalFeedbackModal from './ClientPortalFeedbackModal.jsx';
 import PortalClientTodoItem from './PortalClientTodoItem.jsx';
 import PortalAccountMenu from './PortalAccountMenu.jsx';
+import ClientPortalAnnouncements from './ClientPortalAnnouncements.jsx';
 import MobileNavDrawer, { MobileNavItem } from './mobile/MobileNavDrawer.jsx';
 import {
   ChevronLeft,
@@ -490,6 +491,11 @@ const ClientPortal = ({
 
         {portalSection === 'dashboard' ? (
         <>
+        <ClientPortalAnnouncements
+          clientId={clientProfile?.id}
+          portalEmail={portalEmail}
+        />
+
         <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-6 sm:p-8 rounded-[32px] shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-5">
           <div className="min-w-0">
             <div className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-[#fd7414] mb-2">
