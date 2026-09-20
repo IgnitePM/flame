@@ -3,9 +3,12 @@ import { Kanban, Upload, Users } from 'lucide-react';
 import HubspotImportModal from './HubspotImportModal.jsx';
 import SalesAiCoach from './SalesAiCoach.jsx';
 import {
+  leadDisplayName,
   resolvePipelineStages,
   staffDisplayFromEmail,
 } from '../../utils/salesPipeline.js';
+import { normalizeCompanyProfileFields } from '../../utils/clientCompanyProfile.js';
+import { normalizeClientContacts, normalizePrimaryContact } from '../../utils/clientDocuments.js';
 import { validatePortalEmailsExclusive } from '../../utils/portalAccess.js';
 import { buildLeadActivityDoc } from '../../utils/leadActivity.js';
 import SalesFunnelBoard from './SalesFunnelBoard.jsx';
@@ -33,7 +36,7 @@ function ConvertLeadModal({
   clients,
 }) {
   const [values, setValues] = useState({
-    name: lead?.companyName || lead?.name || '',
+    name: leadDisplayName(lead, ''),
     hourlyRate: '100',
     billingDay: '1',
     status: 'paused',
@@ -63,12 +66,9 @@ function ConvertLeadModal({
         setSaving(false);
         return;
       }
-      const primaryContact = lead.primaryContact || {
-        name: '',
-        email: '',
-        phone: '',
-        title: '',
-      };
+      const primaryContact = normalizePrimaryContact(lead.primaryContact);
+      const contacts = normalizeClientContacts(lead.contacts);
+      const profile = normalizeCompanyProfileFields(lead);
       const clientRef = await addDoc(collection('clients'), {
         name,
         status: values.status === 'active' ? 'active' : 'paused',
@@ -79,25 +79,15 @@ function ConvertLeadModal({
         clientEmails: emailCheck.emails,
         clientStartDate: Date.now(),
         primaryContact,
-        contacts: Array.isArray(lead.contacts) && lead.contacts.length
-          ? lead.contacts
-          : primaryContact.name || primaryContact.email
-            ? [primaryContact]
-            : [],
+        contacts:
+          contacts.length > 0
+            ? contacts
+            : primaryContact.name || primaryContact.email
+              ? [primaryContact]
+              : [],
         website: lead.website || '',
         phone: lead.phone || primaryContact.phone || '',
-        companyDescription: lead.companyDescription || '',
-        industry: lead.industry || '',
-        address: lead.address || '',
-        city: lead.city || '',
-        region: lead.region || '',
-        postalCode: lead.postalCode || '',
-        country: lead.country || '',
-        googleBusinessProfileUrl: lead.googleBusinessProfileUrl || '',
-        linkedinUrl: lead.linkedinUrl || '',
-        facebookUrl: lead.facebookUrl || '',
-        instagramUrl: lead.instagramUrl || '',
-        twitterUrl: lead.twitterUrl || '',
+        ...profile,
       });
       const clientId = clientRef.id;
       const now = Date.now();
@@ -153,7 +143,7 @@ function ConvertLeadModal({
           fbCollection(db, 'leadActivities'),
           buildLeadActivityDoc({
             leadId: lead.id,
-            leadName: lead.companyName || lead.name || '',
+            leadName: leadDisplayName(lead, ''),
             type: 'note',
             title: 'Converted to client',
             body: migratedEmails
@@ -450,6 +440,11 @@ export default function SalesFunnelPanel({
             onConvertLead={setConvertLead}
             onImport={() => setImportOpen(true)}
             canComposeEmail={canComposeEmail}
+            onAddDeal={({ leadId } = {}) => {
+              setSubTab('board');
+              setNewDealDefaults({ leadId: leadId || '' });
+              setNewDealOpen(true);
+            }}
             onOpenDeal={(id) => {
               setSubTab('board');
               setSelectedDealId(id);

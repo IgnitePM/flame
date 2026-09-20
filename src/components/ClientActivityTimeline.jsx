@@ -9,6 +9,7 @@ import {
   formatActivityWhen,
 } from '../utils/clientActivity.js';
 import { db, collection, query, where, orderBy, onSnapshot, limit } from '../firebase';
+import { leadDisplayName } from '../utils/salesPipeline.js';
 
 function ActivityRow({ activity: a }) {
   const collapsible = activityIsCollapsible(a.type);
@@ -177,7 +178,7 @@ export default function ClientActivityTimeline({
       if (kind === 'lead') {
         await logger({
           leadId: resolved.id,
-          leadName: resolved.name || resolved.companyName || '',
+          leadName: leadDisplayName(resolved, ''),
           type: composeType,
           title,
           body: composeBody.trim(),

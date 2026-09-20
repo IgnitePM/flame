@@ -222,6 +222,7 @@ export function hubspotLeadDocId(recordId) {
 /**
  * Parse a HubSpot "all deals" CSV into importable rows.
  * Expected headers: Record ID, Deal Name, Deal Stage, Close Date, Deal owner, Amount
+ * Optional: Company Name / Associated Company (used as lead company identity).
  */
 export function parseHubspotDealsCsv(text, { stages, adminUsers, clients, fallbackOwnerEmail } = {}) {
   const table = parseCsv(text);
@@ -231,6 +232,12 @@ export function parseHubspotDealsCsv(text, { stages, adminUsers, clients, fallba
   const headers = table[0];
   const idIdx = headerIndex(headers, ['record id', 'deal id', 'id']);
   const nameIdx = headerIndex(headers, ['deal name', 'name']);
+  const companyIdx = headerIndex(headers, [
+    'company name',
+    'company',
+    'associated company',
+    'associated company name',
+  ]);
   const stageIdx = headerIndex(headers, ['deal stage', 'stage']);
   const closeIdx = headerIndex(headers, ['close date']);
   const ownerIdx = headerIndex(headers, ['deal owner', 'owner', 'deal owner name']);
@@ -244,12 +251,15 @@ export function parseHubspotDealsCsv(text, { stages, adminUsers, clients, fallba
   return table.slice(1).map((cols, i) => {
     const recordId = idIdx >= 0 ? String(cols[idIdx] || '').trim() : `row_${i + 1}`;
     const name = String(cols[nameIdx] || '').trim();
+    const companyName =
+      companyIdx >= 0 ? String(cols[companyIdx] || '').trim() : '';
     const stageLabel = stageIdx >= 0 ? String(cols[stageIdx] || '').trim() : '';
     const ownerName = ownerIdx >= 0 ? String(cols[ownerIdx] || '').trim() : '';
-    const clientId = matchClientId(name, clients);
+    const clientId = matchClientId(companyName || name, clients);
     return {
       recordId,
       name: name || 'Untitled deal',
+      companyName: companyName || '',
       stageLabel,
       stageId: mapHubspotStageId(stageLabel, stages),
       closeDate: parseCloseDate(closeIdx >= 0 ? cols[closeIdx] : ''),

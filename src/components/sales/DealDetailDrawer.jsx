@@ -3,11 +3,13 @@ import { Mail, X } from 'lucide-react';
 import {
   formatDealAmount,
   formatDealDate,
+  leadDisplayName,
   makeDealNote,
   normalizeDealAssociation,
   staffDisplayFromEmail,
   todayYmd,
 } from '../../utils/salesPipeline.js';
+import { normalizePrimaryContact } from '../../utils/clientDocuments.js';
 import { parseMentionEmails } from '../../utils/taskComments.js';
 import MentionTextarea from '../MentionTextarea.jsx';
 
@@ -301,7 +303,7 @@ export default function DealDetailDrawer({
               <option value="">Select lead…</option>
               {openLeads.map((l) => (
                 <option key={l.id} value={l.id}>
-                  {l.companyName || l.name}
+                  {leadDisplayName(l)}
                 </option>
               ))}
             </select>
@@ -430,8 +432,16 @@ export function NewDealModal({
     ownerEmail: me,
     closeDate: '',
     assocType: defaultClientId ? 'client' : 'lead',
+    leadMode: 'existing',
     leadId: defaultLeadId || '',
     clientId: defaultClientId || '',
+    newLeadCompany: '',
+    newLeadWebsite: '',
+    newLeadPhone: '',
+    newLeadContactName: '',
+    newLeadContactEmail: '',
+    newLeadContactPhone: '',
+    newLeadContactTitle: '',
   });
   const [saving, setSaving] = useState(false);
 
@@ -444,8 +454,16 @@ export function NewDealModal({
       ownerEmail: me,
       closeDate: '',
       assocType: defaultClientId ? 'client' : 'lead',
+      leadMode: defaultLeadId ? 'existing' : 'existing',
       leadId: defaultLeadId || '',
       clientId: defaultClientId || '',
+      newLeadCompany: '',
+      newLeadWebsite: '',
+      newLeadPhone: '',
+      newLeadContactName: '',
+      newLeadContactEmail: '',
+      newLeadContactPhone: '',
+      newLeadContactTitle: '',
     });
   }, [open, defaultLeadId, defaultClientId, defaultStageId, stages, me]);
 
@@ -461,10 +479,59 @@ export function NewDealModal({
   const submit = async () => {
     setSaving(true);
     try {
-      const assoc = normalizeDealAssociation({
-        leadId: form.assocType === 'lead' ? form.leadId : null,
-        clientId: form.assocType === 'client' ? form.clientId : null,
-      });
+      let leadId =
+        form.assocType === 'lead' && form.leadMode === 'existing'
+          ? form.leadId
+          : null;
+      const clientId = form.assocType === 'client' ? form.clientId : null;
+      let createdCompanyName = '';
+
+      if (form.assocType === 'lead' && form.leadMode === 'new') {
+        const companyName = form.newLeadCompany.trim();
+        if (!companyName) {
+          window.alert('Company name is required for the new lead.');
+          setSaving(false);
+          return;
+        }
+        const nowLead = Date.now();
+        const primaryContact = normalizePrimaryContact({
+          name: form.newLeadContactName,
+          email: form.newLeadContactEmail,
+          phone: form.newLeadContactPhone,
+          title: form.newLeadContactTitle,
+        });
+        const leadRef = await addDoc(collection('leads'), {
+          name: companyName,
+          companyName,
+          website: form.newLeadWebsite.trim(),
+          phone: form.newLeadPhone.trim(),
+          notes: '',
+          ownerEmail: String(form.ownerEmail || me).trim().toLowerCase(),
+          primaryContact,
+          contacts: [],
+          companyDescription: '',
+          industry: '',
+          address: '',
+          city: '',
+          region: '',
+          postalCode: '',
+          country: '',
+          googleBusinessProfileUrl: '',
+          linkedinUrl: '',
+          facebookUrl: '',
+          instagramUrl: '',
+          twitterUrl: '',
+          status: 'open',
+          convertedClientId: null,
+          createdAt: nowLead,
+          updatedAt: nowLead,
+          lastActivityAt: nowLead,
+        });
+        leadId = leadRef.id;
+        createdCompanyName = companyName;
+      }
+
+      const assoc = normalizeDealAssociation({ leadId, clientId });
       if (!assoc.leadId && !assoc.clientId) {
         window.alert('Link this deal to a lead or a client.');
         setSaving(false);
@@ -498,8 +565,12 @@ export function NewDealModal({
       let name = form.name.trim();
       if (!name) {
         if (assoc.leadId) {
-          const lead = openLeads.find((l) => l.id === assoc.leadId);
-          name = lead?.companyName || lead?.name || 'New deal';
+          if (createdCompanyName) {
+            name = createdCompanyName;
+          } else {
+            const lead = openLeads.find((l) => l.id === assoc.leadId);
+            name = leadDisplayName(lead, 'New deal');
+          }
         } else {
           const client = activeClients.find((c) => c.id === assoc.clientId);
           name = client?.name ? `${client.name} — New business` : 'New deal';
@@ -530,8 +601,8 @@ export function NewDealModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-[28px] w-full max-w-md p-6 space-y-4 shadow-2xl">
+    <div className="fixed inset-0 z-[90] flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4 safe-pb">
+      <div className="bg-white rounded-t-3xl sm:rounded-[28px] w-full max-w-md p-5 sm:p-6 space-y-4 shadow-2xl max-h-[min(90dvh,100%)] overflow-y-auto">
         <div className="flex items-center justify-between">
           <h3 className="font-black text-lg">Add deal</h3>
           <button type="button" onClick={onClose} className="text-slate-400">
@@ -544,7 +615,7 @@ export function NewDealModal({
             className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none"
             value={form.name}
             onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-            placeholder="Optional — defaults from lead/client"
+            placeholder="Opportunity title (optional)"
           />
         </label>
         <div className="grid grid-cols-2 gap-3">
@@ -583,6 +654,23 @@ export function NewDealModal({
             ))}
           </select>
         </label>
+        <label className="block text-xs font-bold text-slate-500 space-y-1">
+          Owner
+          <select
+            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none"
+            value={form.ownerEmail}
+            onChange={(e) => setForm((f) => ({ ...f, ownerEmail: e.target.value }))}
+          >
+            {(adminUsers || []).map((a) => {
+              const email = String(a.email || a.id || '').toLowerCase();
+              return (
+                <option key={email} value={email}>
+                  {staffDisplayFromEmail(email, adminUsers)} ({email})
+                </option>
+              );
+            })}
+          </select>
+        </label>
         <div className="flex gap-2">
           <button
             type="button"
@@ -604,18 +692,140 @@ export function NewDealModal({
           </button>
         </div>
         {form.assocType === 'lead' ? (
-          <select
-            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none"
-            value={form.leadId}
-            onChange={(e) => setForm((f) => ({ ...f, leadId: e.target.value }))}
-          >
-            <option value="">Select lead…</option>
-            {openLeads.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.companyName || l.name}
-              </option>
-            ))}
-          </select>
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, leadMode: 'existing' }))}
+                className={`flex-1 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${
+                  form.leadMode === 'existing'
+                    ? 'bg-slate-800 text-white'
+                    : 'bg-slate-100 text-slate-500'
+                }`}
+              >
+                Existing lead
+              </button>
+              <button
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, leadMode: 'new', leadId: '' }))}
+                className={`flex-1 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${
+                  form.leadMode === 'new'
+                    ? 'bg-slate-800 text-white'
+                    : 'bg-slate-100 text-slate-500'
+                }`}
+              >
+                Create new lead
+              </button>
+            </div>
+            {form.leadMode === 'existing' ? (
+              <select
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none"
+                value={form.leadId}
+                onChange={(e) => setForm((f) => ({ ...f, leadId: e.target.value }))}
+              >
+                <option value="">Select lead…</option>
+                {openLeads.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {leadDisplayName(l)}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  New company lead
+                </p>
+                <label className="block text-xs font-bold text-slate-500 space-y-1">
+                  Company name *
+                  <input
+                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none"
+                    value={form.newLeadCompany}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, newLeadCompany: e.target.value }))
+                    }
+                    placeholder="Acme Co"
+                  />
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="text-xs font-bold text-slate-500 space-y-1">
+                    Website
+                    <input
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold outline-none"
+                      value={form.newLeadWebsite}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, newLeadWebsite: e.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="text-xs font-bold text-slate-500 space-y-1">
+                    Phone
+                    <input
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold outline-none"
+                      value={form.newLeadPhone}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, newLeadPhone: e.target.value }))
+                      }
+                    />
+                  </label>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="text-xs font-bold text-slate-500 space-y-1">
+                    Contact name
+                    <input
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold outline-none"
+                      value={form.newLeadContactName}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          newLeadContactName: e.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="text-xs font-bold text-slate-500 space-y-1">
+                    Contact title
+                    <input
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold outline-none"
+                      value={form.newLeadContactTitle}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          newLeadContactTitle: e.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="text-xs font-bold text-slate-500 space-y-1">
+                    Contact email
+                    <input
+                      type="email"
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold outline-none"
+                      value={form.newLeadContactEmail}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          newLeadContactEmail: e.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="text-xs font-bold text-slate-500 space-y-1">
+                    Contact phone
+                    <input
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold outline-none"
+                      value={form.newLeadContactPhone}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          newLeadContactPhone: e.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
         ) : (
           <select
             className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold outline-none"

@@ -1,5 +1,6 @@
 import {
   isClosedStage,
+  leadDisplayName,
   resolvePipelineStages,
   staffDisplayFromEmail,
 } from './salesPipeline.js';
@@ -80,7 +81,7 @@ export function listSalesDealsForCoach({
           const days = Math.floor((Date.now() - closeMs) / DAY_MS);
           return days > 0 ? days : null;
         })(),
-        linked: client?.name || lead?.companyName || lead?.name || '',
+        linked: client?.name || leadDisplayName(lead, ''),
         linkedType: client ? 'client' : lead ? 'lead' : '',
         contactEmail,
         contactName: lead?.primaryContact?.name || client?.primaryContact?.name || '',

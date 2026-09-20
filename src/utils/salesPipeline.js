@@ -131,10 +131,19 @@ export function makeDealNote(body, authorEmail, mentions = []) {
   };
 }
 
+/** Company-first display name for a lead (legacy `name` is fallback only). */
+export function leadDisplayName(lead, fallback = 'Untitled lead') {
+  const company = String(lead?.companyName || '').trim();
+  if (company) return company;
+  const legacy = String(lead?.name || '').trim();
+  if (legacy) return legacy;
+  return fallback;
+}
+
 export function dealAssociationLabel(deal, leads, clients) {
   if (deal?.leadId) {
     const lead = (leads || []).find((l) => l.id === deal.leadId);
-    return lead?.companyName || lead?.name || 'Lead';
+    return lead ? leadDisplayName(lead, 'Lead') : 'Lead';
   }
   if (deal?.clientId) {
     const client = (clients || []).find((c) => c.id === deal.clientId);

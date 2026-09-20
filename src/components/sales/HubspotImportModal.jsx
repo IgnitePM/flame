@@ -98,13 +98,15 @@ export default function HubspotImportModal({
         let leadId = null;
         let clientId = row.clientId || null;
         if (!clientId) {
-          leadId = findOpenLeadIdForDealName(row.name, openLeadsForMatch);
+          const companyKey = row.companyName || row.name;
+          leadId = findOpenLeadIdForDealName(companyKey, openLeadsForMatch);
 
           if (!leadId) {
             leadId = row.leadDocId;
+            const companyName = String(row.companyName || row.name || '').trim() || 'Untitled company';
             const leadDoc = {
-              name: row.name,
-              companyName: row.name,
+              name: companyName,
+              companyName,
               website: '',
               phone: '',
               notes: `Imported from HubSpot (Record ID ${row.recordId}).`,

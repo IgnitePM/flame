@@ -1,9 +1,17 @@
 import React, { useMemo, useState } from 'react';
-import { Mail, Sparkles, Trash2, UserPlus, X } from 'lucide-react';
+import { Mail, Plus, Sparkles, Trash2, UserPlus, X } from 'lucide-react';
 import {
   formatRelativeActivity,
+  leadDisplayName,
   staffDisplayFromEmail,
 } from '../../utils/salesPipeline.js';
+import { normalizeCompanyProfileFields } from '../../utils/clientCompanyProfile.js';
+import {
+  emptyPrimaryContact,
+  newContactId,
+  normalizeClientContacts,
+  normalizePrimaryContact,
+} from '../../utils/clientDocuments.js';
 import { findDuplicateLeadGroups } from '../../utils/hubspotDealsImport.js';
 import MentionTextarea from '../MentionTextarea.jsx';
 import ClientActivityTimeline from '../ClientActivityTimeline.jsx';
@@ -14,9 +22,12 @@ import { buildLeadActivityDoc } from '../../utils/leadActivity.js';
 import { authedFetch } from '../../utils/authedFetch.js';
 import { db, addDoc as fbAddDoc, collection as fbCollection } from '../../firebase.js';
 
+const inputClass =
+  'w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-[#fd7414]';
+
 function emptyLeadForm(ownerEmail = '') {
+  const profile = normalizeCompanyProfileFields({});
   return {
-    name: '',
     companyName: '',
     website: '',
     phone: '',
@@ -26,6 +37,35 @@ function emptyLeadForm(ownerEmail = '') {
     contactEmail: '',
     contactPhone: '',
     contactTitle: '',
+    extraContacts: [],
+    ...profile,
+  };
+}
+
+function formFromLead(lead, ownerFallback = '') {
+  const profile = normalizeCompanyProfileFields(lead || {});
+  const primary = normalizePrimaryContact(lead?.primaryContact);
+  const allContacts = normalizeClientContacts(lead?.contacts);
+  const extraContacts = allContacts.filter(
+    (c) =>
+      !(
+        primary.email &&
+        String(c.email || '').toLowerCase() === primary.email.toLowerCase() &&
+        String(c.name || '').trim() === String(primary.name || '').trim()
+      ),
+  );
+  return {
+    companyName: String(lead?.companyName || lead?.name || '').trim(),
+    website: String(lead?.website || '').trim(),
+    phone: String(lead?.phone || '').trim(),
+    notes: String(lead?.notes || '').trim(),
+    ownerEmail: lead?.ownerEmail || ownerFallback || '',
+    contactName: primary.name,
+    contactEmail: primary.email,
+    contactPhone: primary.phone,
+    contactTitle: primary.title,
+    extraContacts,
+    ...profile,
   };
 }
 
@@ -48,6 +88,7 @@ export default function LeadsPanel({
   doc,
   onConvertLead,
   onOpenDeal,
+  onAddDeal,
   onImport,
   canComposeEmail = false,
 }) {
@@ -82,18 +123,7 @@ export default function LeadsPanel({
   const openEdit = (lead) => {
     setEditingId(lead.id);
     setCreateOpen(false);
-    setForm({
-      name: lead.name || '',
-      companyName: lead.companyName || '',
-      website: lead.website || '',
-      phone: lead.phone || '',
-      notes: lead.notes || '',
-      ownerEmail: lead.ownerEmail || me,
-      contactName: lead.primaryContact?.name || '',
-      contactEmail: lead.primaryContact?.email || '',
-      contactPhone: lead.primaryContact?.phone || '',
-      contactTitle: lead.primaryContact?.title || '',
-    });
+    setForm(formFromLead(lead, me));
   };
 
   const openCreate = () => {
@@ -110,27 +140,37 @@ export default function LeadsPanel({
 
   const buildPayload = () => {
     const now = Date.now();
-    const primaryContact = {
-      name: form.contactName.trim(),
-      email: form.contactEmail.trim().toLowerCase(),
-      phone: form.contactPhone.trim(),
-      title: form.contactTitle.trim(),
-    };
+    const companyName = form.companyName.trim();
+    const primaryContact = normalizePrimaryContact({
+      name: form.contactName,
+      email: form.contactEmail,
+      phone: form.contactPhone,
+      title: form.contactTitle,
+    });
+    const extraContacts = normalizeClientContacts(form.extraContacts);
+    const profile = normalizeCompanyProfileFields(form);
     return {
-      name: form.name.trim() || form.companyName.trim() || 'Untitled lead',
-      companyName: form.companyName.trim(),
+      // Keep `name` in sync with company for digests / legacy readers.
+      name: companyName || 'Untitled lead',
+      companyName,
       website: form.website.trim(),
       phone: form.phone.trim(),
       notes: form.notes.trim(),
       ownerEmail: String(form.ownerEmail || me).trim().toLowerCase(),
       primaryContact,
-      contacts: primaryContact.name || primaryContact.email ? [primaryContact] : [],
+      contacts: extraContacts,
+      ...profile,
       updatedAt: now,
       lastActivityAt: now,
     };
   };
 
   const saveLead = async () => {
+    const companyName = form.companyName.trim();
+    if (!companyName) {
+      window.alert('Company name is required.');
+      return;
+    }
     setSaving(true);
     try {
       const payload = buildPayload();
@@ -150,8 +190,8 @@ export default function LeadsPanel({
       notifyTextMentions?.({
         text: payload.notes,
         prevText: prevNotes,
-        title: `Lead notes · ${payload.name || payload.companyName || 'Lead'}`,
-        clientName: payload.companyName || payload.name || null,
+        title: `Lead notes · ${leadDisplayName(payload)}`,
+        clientName: leadDisplayName(payload, null),
         itemId: editingId || null,
       });
       closeForm();
@@ -163,7 +203,7 @@ export default function LeadsPanel({
   };
 
   const archiveLead = async (lead) => {
-    if (!window.confirm(`Archive lead "${lead.name || lead.companyName}"?`)) return;
+    if (!window.confirm(`Archive lead "${leadDisplayName(lead)}"?`)) return;
     try {
       await updateDoc(doc('leads', lead.id), {
         status: 'archived',
@@ -210,7 +250,7 @@ export default function LeadsPanel({
             status: 'archived',
             mergedIntoLeadId: keeper.id,
             notes: `${extra.notes || ''}\n\n[Merged into ${
-              keeper.name || keeper.companyName || keeper.id
+              leadDisplayName(keeper, keeper.id)
             } on ${new Date(now).toISOString().slice(0, 10)}]`.trim(),
             updatedAt: now,
             lastActivityAt: now,
@@ -255,7 +295,7 @@ export default function LeadsPanel({
     try {
       const resp = await authedFetch('/.netlify/functions/enrich-client-from-website', {
         website,
-        companyName: lead.companyName || lead.name || '',
+        companyName: leadDisplayName(lead, ''),
       });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(data.error || 'Enrichment failed');
@@ -274,42 +314,21 @@ export default function LeadsPanel({
   const applyEnrich = async (nextLead) => {
     if (!enrichPreview?.lead?.id) return;
     const leadId = enrichPreview.lead.id;
-    const primaryContact = nextLead.primaryContact || {};
+    const companyName = String(
+      nextLead.companyName || nextLead.name || enrichPreview.lead.companyName || '',
+    ).trim();
+    const primaryContact =
+      normalizePrimaryContact(nextLead.primaryContact) || emptyPrimaryContact();
+    const profile = normalizeCompanyProfileFields(nextLead);
+    const existingExtra = normalizeClientContacts(enrichPreview.lead.contacts);
     await updateDoc(doc('leads', leadId), {
-      name: nextLead.name || enrichPreview.lead.name,
-      companyName:
-        nextLead.companyName || nextLead.name || enrichPreview.lead.companyName,
-      website: nextLead.website || '',
-      phone: nextLead.phone || '',
-      companyDescription: nextLead.companyDescription || '',
-      industry: nextLead.industry || '',
-      address: nextLead.address || '',
-      city: nextLead.city || '',
-      region: nextLead.region || '',
-      postalCode: nextLead.postalCode || '',
-      country: nextLead.country || '',
-      googleBusinessProfileUrl: nextLead.googleBusinessProfileUrl || '',
-      linkedinUrl: nextLead.linkedinUrl || '',
-      facebookUrl: nextLead.facebookUrl || '',
-      instagramUrl: nextLead.instagramUrl || '',
-      twitterUrl: nextLead.twitterUrl || '',
-      primaryContact: {
-        name: primaryContact.name || '',
-        email: primaryContact.email || '',
-        phone: primaryContact.phone || '',
-        title: primaryContact.title || '',
-      },
-      contacts:
-        primaryContact.name || primaryContact.email
-          ? [
-              {
-                name: primaryContact.name || '',
-                email: primaryContact.email || '',
-                phone: primaryContact.phone || '',
-                title: primaryContact.title || '',
-              },
-            ]
-          : enrichPreview.lead.contacts || [],
+      name: companyName || leadDisplayName(enrichPreview.lead),
+      companyName: companyName || leadDisplayName(enrichPreview.lead, ''),
+      website: nextLead.website || enrichPreview.lead.website || '',
+      phone: nextLead.phone || enrichPreview.lead.phone || '',
+      ...profile,
+      primaryContact,
+      contacts: existingExtra,
       updatedAt: Date.now(),
       lastActivityAt: Date.now(),
     });
@@ -321,9 +340,11 @@ export default function LeadsPanel({
     lead
       ? {
           ...lead,
-          name: lead.companyName || lead.name || 'Lead',
+          name: leadDisplayName(lead, 'Lead'),
         }
       : null;
+
+  const setFormField = (key, value) => setForm((f) => ({ ...f, [key]: value }));
 
   return (
     <div className="space-y-4">
@@ -331,7 +352,7 @@ export default function LeadsPanel({
         <div>
           <h3 className="font-black text-lg text-slate-800">Leads</h3>
           <p className="text-sm text-slate-400 font-medium">
-            Prospects who are not clients yet. They never appear in the kiosk.
+            Prospect companies — same kind of profile as clients, before they convert.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -375,7 +396,7 @@ export default function LeadsPanel({
       </div>
 
       {formOpen && (
-        <div className="bg-white border border-slate-200 rounded-[28px] p-6 space-y-4 shadow-sm">
+        <div className="bg-white border border-slate-200 rounded-[28px] p-6 space-y-6 shadow-sm">
           <div className="flex items-center justify-between">
             <h4 className="font-black text-slate-800">
               {editingId ? 'Edit lead' : 'New lead'}
@@ -384,102 +405,292 @@ export default function LeadsPanel({
               <X className="w-5 h-5" />
             </button>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <label className="text-xs font-bold text-slate-500 space-y-1">
-              Lead / opportunity name
-              <input
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 outline-none"
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              />
-            </label>
-            <label className="text-xs font-bold text-slate-500 space-y-1">
+
+          <div className="space-y-3">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
               Company
-              <input
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 outline-none"
-                value={form.companyName}
-                onChange={(e) => setForm((f) => ({ ...f, companyName: e.target.value }))}
-              />
-            </label>
-            <label className="text-xs font-bold text-slate-500 space-y-1">
-              Website
-              <input
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 outline-none"
-                value={form.website}
-                onChange={(e) => setForm((f) => ({ ...f, website: e.target.value }))}
-              />
-            </label>
-            <label className="text-xs font-bold text-slate-500 space-y-1">
-              Phone
-              <input
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 outline-none"
-                value={form.phone}
-                onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
-              />
-            </label>
-            <label className="text-xs font-bold text-slate-500 space-y-1 md:col-span-2">
-              Owner
-              <select
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 outline-none"
-                value={form.ownerEmail}
-                onChange={(e) => setForm((f) => ({ ...f, ownerEmail: e.target.value }))}
-              >
-                {(adminUsers || []).map((a) => {
-                  const email = String(a.email || a.id || '').toLowerCase();
-                  return (
-                    <option key={email} value={email}>
-                      {staffDisplayFromEmail(email, adminUsers)} ({email})
-                    </option>
-                  );
-                })}
-              </select>
-            </label>
-            <label className="text-xs font-bold text-slate-500 space-y-1">
-              Contact name
-              <input
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 outline-none"
-                value={form.contactName}
-                onChange={(e) => setForm((f) => ({ ...f, contactName: e.target.value }))}
-              />
-            </label>
-            <label className="text-xs font-bold text-slate-500 space-y-1">
-              Contact email
-              <input
-                type="email"
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 outline-none"
-                value={form.contactEmail}
-                onChange={(e) => setForm((f) => ({ ...f, contactEmail: e.target.value }))}
-              />
-            </label>
-            <label className="text-xs font-bold text-slate-500 space-y-1">
-              Contact phone
-              <input
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 outline-none"
-                value={form.contactPhone}
-                onChange={(e) => setForm((f) => ({ ...f, contactPhone: e.target.value }))}
-              />
-            </label>
-            <label className="text-xs font-bold text-slate-500 space-y-1">
-              Contact title
-              <input
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 outline-none"
-                value={form.contactTitle}
-                onChange={(e) => setForm((f) => ({ ...f, contactTitle: e.target.value }))}
-              />
-            </label>
-            <label className="text-xs font-bold text-slate-500 space-y-1 md:col-span-2">
-              Notes
-              <MentionTextarea
-                rows={3}
-                textareaClassName="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-800 outline-none resize-y"
-                value={form.notes}
-                onChange={(next) => setForm((f) => ({ ...f, notes: next }))}
-                staffEmails={staffEmails}
-                adminUsers={adminUsers}
-                placeholder="Notes… Use @name to tag a teammate"
-              />
-            </label>
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label className="text-xs font-bold text-slate-500 space-y-1 md:col-span-2">
+                Company name *
+                <input
+                  className={inputClass}
+                  value={form.companyName}
+                  onChange={(e) => setFormField('companyName', e.target.value)}
+                  placeholder="Acme Co"
+                  required
+                />
+              </label>
+              <label className="text-xs font-bold text-slate-500 space-y-1">
+                Website
+                <input
+                  className={inputClass}
+                  value={form.website}
+                  onChange={(e) => setFormField('website', e.target.value)}
+                  placeholder="https://"
+                />
+              </label>
+              <label className="text-xs font-bold text-slate-500 space-y-1">
+                Phone
+                <input
+                  className={inputClass}
+                  value={form.phone}
+                  onChange={(e) => setFormField('phone', e.target.value)}
+                />
+              </label>
+              <label className="text-xs font-bold text-slate-500 space-y-1">
+                Industry
+                <input
+                  className={inputClass}
+                  value={form.industry}
+                  onChange={(e) => setFormField('industry', e.target.value)}
+                />
+              </label>
+              <label className="text-xs font-bold text-slate-500 space-y-1 md:col-span-2">
+                About
+                <textarea
+                  className={`${inputClass} font-medium min-h-[80px] resize-y`}
+                  value={form.companyDescription}
+                  onChange={(e) => setFormField('companyDescription', e.target.value)}
+                  placeholder="Short company description…"
+                />
+              </label>
+              <label className="text-xs font-bold text-slate-500 space-y-1 md:col-span-2">
+                Street address
+                <input
+                  className={inputClass}
+                  value={form.address}
+                  onChange={(e) => setFormField('address', e.target.value)}
+                />
+              </label>
+              <label className="text-xs font-bold text-slate-500 space-y-1">
+                City
+                <input
+                  className={inputClass}
+                  value={form.city}
+                  onChange={(e) => setFormField('city', e.target.value)}
+                />
+              </label>
+              <label className="text-xs font-bold text-slate-500 space-y-1">
+                State / province
+                <input
+                  className={inputClass}
+                  value={form.region}
+                  onChange={(e) => setFormField('region', e.target.value)}
+                />
+              </label>
+              <label className="text-xs font-bold text-slate-500 space-y-1">
+                Postal code
+                <input
+                  className={inputClass}
+                  value={form.postalCode}
+                  onChange={(e) => setFormField('postalCode', e.target.value)}
+                />
+              </label>
+              <label className="text-xs font-bold text-slate-500 space-y-1">
+                Country
+                <input
+                  className={inputClass}
+                  value={form.country}
+                  onChange={(e) => setFormField('country', e.target.value)}
+                />
+              </label>
+              <label className="text-xs font-bold text-slate-500 space-y-1 md:col-span-2">
+                Google Business Profile
+                <input
+                  className={inputClass}
+                  value={form.googleBusinessProfileUrl}
+                  onChange={(e) => setFormField('googleBusinessProfileUrl', e.target.value)}
+                />
+              </label>
+              <label className="text-xs font-bold text-slate-500 space-y-1">
+                LinkedIn
+                <input
+                  className={inputClass}
+                  value={form.linkedinUrl}
+                  onChange={(e) => setFormField('linkedinUrl', e.target.value)}
+                />
+              </label>
+              <label className="text-xs font-bold text-slate-500 space-y-1">
+                Facebook
+                <input
+                  className={inputClass}
+                  value={form.facebookUrl}
+                  onChange={(e) => setFormField('facebookUrl', e.target.value)}
+                />
+              </label>
+              <label className="text-xs font-bold text-slate-500 space-y-1">
+                Instagram
+                <input
+                  className={inputClass}
+                  value={form.instagramUrl}
+                  onChange={(e) => setFormField('instagramUrl', e.target.value)}
+                />
+              </label>
+              <label className="text-xs font-bold text-slate-500 space-y-1">
+                X / Twitter
+                <input
+                  className={inputClass}
+                  value={form.twitterUrl}
+                  onChange={(e) => setFormField('twitterUrl', e.target.value)}
+                />
+              </label>
+              <label className="text-xs font-bold text-slate-500 space-y-1 md:col-span-2">
+                Owner
+                <select
+                  className={inputClass}
+                  value={form.ownerEmail}
+                  onChange={(e) => setFormField('ownerEmail', e.target.value)}
+                >
+                  {(adminUsers || []).map((a) => {
+                    const email = String(a.email || a.id || '').toLowerCase();
+                    return (
+                      <option key={email} value={email}>
+                        {staffDisplayFromEmail(email, adminUsers)} ({email})
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
+            </div>
           </div>
+
+          <div className="space-y-3 border-t border-slate-100 pt-4">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+              Primary contact
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label className="text-xs font-bold text-slate-500 space-y-1">
+                Name
+                <input
+                  className={inputClass}
+                  value={form.contactName}
+                  onChange={(e) => setFormField('contactName', e.target.value)}
+                />
+              </label>
+              <label className="text-xs font-bold text-slate-500 space-y-1">
+                Title
+                <input
+                  className={inputClass}
+                  value={form.contactTitle}
+                  onChange={(e) => setFormField('contactTitle', e.target.value)}
+                />
+              </label>
+              <label className="text-xs font-bold text-slate-500 space-y-1">
+                Email
+                <input
+                  type="email"
+                  className={inputClass}
+                  value={form.contactEmail}
+                  onChange={(e) => setFormField('contactEmail', e.target.value)}
+                />
+              </label>
+              <label className="text-xs font-bold text-slate-500 space-y-1">
+                Phone
+                <input
+                  className={inputClass}
+                  value={form.contactPhone}
+                  onChange={(e) => setFormField('contactPhone', e.target.value)}
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="space-y-3 border-t border-slate-100 pt-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                Additional contacts
+              </p>
+              <button
+                type="button"
+                onClick={() =>
+                  setForm((f) => ({
+                    ...f,
+                    extraContacts: [
+                      ...(f.extraContacts || []),
+                      {
+                        id: newContactId(),
+                        name: '',
+                        email: '',
+                        phone: '',
+                        title: '',
+                        notes: '',
+                      },
+                    ],
+                  }))
+                }
+                className="inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-widest text-[#fd7414]"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add
+              </button>
+            </div>
+            {(form.extraContacts || []).length === 0 ? (
+              <p className="text-sm text-slate-400 italic">No additional contacts yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {form.extraContacts.map((c, idx) => (
+                  <div
+                    key={c.id || idx}
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3"
+                  >
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setForm((f) => ({
+                            ...f,
+                            extraContacts: f.extraContacts.filter((_, i) => i !== idx),
+                          }))
+                        }
+                        className="text-slate-400 hover:text-red-500 p-1"
+                        title="Remove contact"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {['name', 'title', 'email', 'phone'].map((key) => (
+                        <label
+                          key={key}
+                          className="text-xs font-bold text-slate-500 space-y-1"
+                        >
+                          {key.charAt(0).toUpperCase() + key.slice(1)}
+                          <input
+                            type={key === 'email' ? 'email' : 'text'}
+                            className={inputClass}
+                            value={c[key] || ''}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setForm((f) => ({
+                                ...f,
+                                extraContacts: f.extraContacts.map((row, i) =>
+                                  i === idx ? { ...row, [key]: value } : row,
+                                ),
+                              }));
+                            }}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <label className="text-xs font-bold text-slate-500 space-y-1 block border-t border-slate-100 pt-4">
+            Notes
+            <MentionTextarea
+              rows={3}
+              textareaClassName="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-800 outline-none resize-y"
+              value={form.notes}
+              onChange={(next) => setFormField('notes', next)}
+              staffEmails={staffEmails}
+              adminUsers={adminUsers}
+              placeholder="Notes… Use @name to tag a teammate"
+            />
+          </label>
+
           <div className="flex justify-end gap-2">
             <button
               type="button"
@@ -503,7 +714,7 @@ export default function LeadsPanel({
       <div className="space-y-3">
         {visibleLeads.length === 0 ? (
           <p className="text-sm italic text-slate-400 py-8 text-center">
-            No leads yet. Add a prospect to start tracking them on the board.
+            No leads yet. Add a prospect company to start tracking deals.
           </p>
         ) : (
           visibleLeads.map((lead) => {
@@ -511,6 +722,8 @@ export default function LeadsPanel({
             const leadDeals = (deals || []).filter((d) => d.leadId === lead.id);
             const email = lead.primaryContact?.email;
             const isExpanded = expandedId === lead.id;
+            const title = leadDisplayName(lead);
+            const contactLine = lead.primaryContact?.name || lead.primaryContact?.email || '';
             return (
               <div
                 key={lead.id}
@@ -525,15 +738,9 @@ export default function LeadsPanel({
                     }}
                     className="flex-1 text-left space-y-1"
                   >
-                    <div className="font-black text-slate-800">
-                      {lead.name || lead.companyName || 'Untitled lead'}
-                    </div>
+                    <div className="font-black text-slate-800">{title}</div>
                     <div className="text-xs font-bold text-slate-400">
-                      {lead.companyName && lead.name ? lead.companyName : null}
-                      {lead.primaryContact?.name
-                        ? `${lead.companyName && lead.name ? ' · ' : ''}${lead.primaryContact.name}`
-                        : null}
-                      {' · '}
+                      {contactLine ? `${contactLine} · ` : ''}
                       Owner: {staffDisplayFromEmail(lead.ownerEmail, adminUsers)}
                       {activity ? ` · Updated ${activity}` : ''}
                       {lead.status === 'converted' ? ' · Converted' : ''}
@@ -554,6 +761,15 @@ export default function LeadsPanel({
                         <Mail className="w-3.5 h-3.5" /> Email
                       </a>
                     ) : null}
+                    {lead.status !== 'converted' && onAddDeal ? (
+                      <button
+                        type="button"
+                        onClick={() => onAddDeal({ leadId: lead.id })}
+                        className="px-3 py-2 rounded-xl bg-orange-50 text-[#fd7414] text-xs font-bold"
+                      >
+                        Add deal
+                      </button>
+                    ) : null}
                     {lead.status !== 'converted' && (
                       <button
                         type="button"
@@ -567,7 +783,7 @@ export default function LeadsPanel({
                       <button
                         type="button"
                         onClick={() => onOpenDeal?.(leadDeals[0].id)}
-                        className="px-3 py-2 rounded-xl bg-orange-50 text-[#fd7414] text-xs font-bold"
+                        className="px-3 py-2 rounded-xl bg-slate-50 text-slate-600 text-xs font-bold hover:bg-slate-100"
                       >
                         View deal
                       </button>

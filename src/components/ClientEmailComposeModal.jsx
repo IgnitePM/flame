@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { authedFetch } from '../utils/authedFetch.js';
 import { normalizePrimaryContact, normalizeClientContacts } from '../utils/clientDocuments.js';
 import { normalizePortalEmailList } from '../utils/portalAccess.js';
+import { leadDisplayName } from '../utils/salesPipeline.js';
 
 function collectRecipientOptions(entity) {
   const opts = [];
@@ -159,7 +160,9 @@ export default function ClientEmailComposeModal({
               {inReplyToId ? `Reply to ${label}` : `Email ${label}`}
             </h3>
             <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-1">
-              {resolved.name || resolved.companyName}
+              {kind === 'lead'
+                ? leadDisplayName(resolved)
+                : resolved.name || resolved.companyName}
               {gmail.connected && gmail.email ? ` · from ${gmail.email}` : ' · via your Gmail'}
             </p>
           </div>

@@ -8,6 +8,7 @@ import {
   limit,
   onSnapshot,
 } from '../firebase';
+import { leadDisplayName } from '../utils/salesPipeline.js';
 
 function formatWhen(ms) {
   const n = Number(ms || 0);
@@ -57,7 +58,7 @@ export default function GlobalEmailsHub({
 
   const nameByLeadId = useMemo(() => {
     const map = new Map();
-    for (const l of leads || []) map.set(l.id, l.name || l.companyName || l.id);
+    for (const l of leads || []) map.set(l.id, leadDisplayName(l, l.id));
     return map;
   }, [leads]);
 
