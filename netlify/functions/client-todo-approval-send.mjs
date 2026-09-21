@@ -16,12 +16,14 @@ import {
 } from './lib/clientMessaging.mjs';
 
 /**
- * Staff: send a retainer task for client or staff approval.
+ * Staff: send a retainer task for client or staff approval, or resend the email
+ * for a task already awaiting approval.
  * POST {
  *   clientId, cycleStart, categoryKey, itemId,
- *   target: 'client'|'staff',
+ *   target: 'client'|'staff',  // ignored when resend:true (uses stored target)
  *   reviewerEmails?: string[],
- *   note?: string
+ *   note?: string,
+ *   resend?: boolean
  * }
  */
 export default async (req) => {
@@ -53,6 +55,7 @@ export default async (req) => {
   const clientId = String(body.clientId || '').trim();
   const categoryKey = String(body.categoryKey || '').trim();
   const itemId = String(body.itemId || '').trim();
+  const resend = Boolean(body.resend);
   const target = String(body.target || '').trim() === 'staff' ? 'staff' : 'client';
   const note = String(body.note || '').trim();
   const reviewerEmails = Array.isArray(body.reviewerEmails)
@@ -70,7 +73,8 @@ export default async (req) => {
 
   try {
     const client = await loadClient(clientId);
-    const cycleStart = Number(body.cycleStart) || getBillingPeriod(client.billingDay || 1, 0).start;
+    const cycleStart =
+      Number(body.cycleStart) || getBillingPeriod(client.billingDay || 1, 0).start;
     const cycleKey = String(cycleStart);
     const cycles = { ...(client.todoCycles || {}) };
     const cycleData = { ...(cycles[cycleKey] || {}) };
@@ -91,6 +95,107 @@ export default async (req) => {
         { status: 400, headers: { 'Content-Type': 'application/json' } },
       );
     }
+
+    if (resend) {
+      if (!isTodoPendingApproval(item)) {
+        return new Response(
+          JSON.stringify({ error: 'This task is not awaiting approval.' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+
+      const resendTarget =
+        item.approvalTarget === 'staff' ||
+        String(item.approvalStatus || '') === 'pending_staff'
+          ? 'staff'
+          : 'client';
+      const title = String(item.text || 'Task').trim() || 'Task';
+      const resendNote = String(item.approvalNote || note || '').trim();
+      const now = Date.now();
+
+      let emailResult = { sent: 0 };
+      try {
+        if (resendTarget === 'client') {
+          emailResult = await notifyPortalTodoApprovalSent({
+            client,
+            title,
+            note: resendNote,
+          });
+        } else {
+          emailResult = await notifyStaffTodoReviewRequested({
+            client,
+            title,
+            note: resendNote,
+            byEmail: caller.email,
+            reviewerEmails: item.approvalReviewerEmails || [],
+          });
+        }
+      } catch (err) {
+        console.warn('[client-todo-approval-send] resend notify:', err?.message || err);
+        emailResult = { sent: 0, error: err?.message || String(err) };
+      }
+
+      const nextItem = {
+        ...item,
+        approvalLastResentAt: now,
+        approvalResendCount: Number(item.approvalResendCount || 0) + 1,
+      };
+      items[idx] = nextItem;
+      cycleData[categoryKey] = { ...catTodo, items };
+      cycles[cycleKey] = cycleData;
+
+      const db = await getDigestDb();
+      await mergeDoc(db, `clients/${clientId}`, { todoCycles: cycles });
+
+      try {
+        await writeClientActivity({
+          clientId,
+          clientName: client.name || '',
+          type: 'todo_approval_sent',
+          title:
+            resendTarget === 'client'
+              ? `Resent client approval email: ${title}`
+              : `Resent staff review email: ${title}`,
+          body: resendNote.slice(0, 500),
+          actorEmail: caller.email,
+          source: 'system',
+          meta: {
+            itemId,
+            categoryKey,
+            cycleStart,
+            target: resendTarget,
+            resent: true,
+            emailSent: Number(emailResult.sent || 0),
+            emailError: emailResult.error || null,
+          },
+        });
+      } catch (err) {
+        console.warn('[client-todo-approval-send] resend activity:', err?.message || err);
+      }
+
+      if (emailResult.error && !emailResult.sent) {
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            error: emailResult.error || 'Could not resend approval email.',
+            item: nextItem,
+            email: emailResult,
+          }),
+          { status: 502, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          resent: true,
+          item: nextItem,
+          email: emailResult,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+
     if (isTodoPendingApproval(item)) {
       return new Response(
         JSON.stringify({ error: 'This task is already awaiting approval.' }),

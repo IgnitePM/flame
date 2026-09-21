@@ -54,6 +54,7 @@ import {
 } from '../utils/todoUrgency.js';
 import { isTodoPendingApproval } from '../utils/todoApproval.js';
 import { safeDisplayForReact } from '../utils/safeReactText.js';
+import { authedFetch } from '../utils/authedFetch.js';
 import RetainerCategoryStats from './RetainerCategoryStats.jsx';
 import TodoDeleteConfirmModal from './TodoDeleteConfirmModal.jsx';
 import TaskApprovalModal, {
@@ -190,6 +191,7 @@ const EmployeeKiosk = ({
   const [socialAdSubmitting, setSocialAdSubmitting] = React.useState(false);
   const [todoNewText, setTodoNewText] = React.useState('');
   const [todoSaving, setTodoSaving] = React.useState(false);
+  const [approvalResendBusy, setApprovalResendBusy] = React.useState('');
   const [todoDueDate, setTodoDueDate] = React.useState('');
   const [todoEstimateHours, setTodoEstimateHours] = React.useState('');
   const [kioskTaskAssigneeFilter, setKioskTaskAssigneeFilter] = React.useState('me');
@@ -821,6 +823,41 @@ const EmployeeKiosk = ({
       categoryKey,
       item,
     });
+  };
+
+  const resendTodoApprovalEmail = async (
+    client,
+    cycleStart,
+    categoryKey,
+    item,
+  ) => {
+    if (!client || !item?.id || !isTodoPendingApproval(item)) return;
+    const key = `${client.id}__${categoryKey}__${item.id}`;
+    if (approvalResendBusy === key) return;
+    setApprovalResendBusy(key);
+    try {
+      const resp = await authedFetch('/.netlify/functions/client-todo-approval-send', {
+        clientId: client.id,
+        cycleStart,
+        categoryKey,
+        itemId: item.id,
+        resend: true,
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data?.error) {
+        throw new Error(data?.error || 'Could not resend approval email.');
+      }
+      const n = Number(data?.email?.sent || 0);
+      window.alert(
+        n > 0
+          ? `Approval email resent to ${n} recipient${n === 1 ? '' : 's'}.`
+          : 'Resend finished, but no recipients were notified (check portal emails / reviewers).',
+      );
+    } catch (err) {
+      window.alert(err?.message || String(err));
+    } finally {
+      setApprovalResendBusy('');
+    }
   };
 
   const resolveClientTodoEditItem = () => {
@@ -4076,9 +4113,37 @@ const EmployeeKiosk = ({
                       Send for approval
                     </button>
                   ) : (
-                    <p className="text-[11px] font-medium text-slate-500">
-                      Waiting on {resolved.item.approvalTarget === 'staff' ? 'staff' : 'client'} review.
-                    </p>
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-medium text-slate-500">
+                        Waiting on{' '}
+                        {resolved.item.approvalTarget === 'staff'
+                          ? 'staff'
+                          : 'client'}{' '}
+                        review.
+                      </p>
+                      <button
+                        type="button"
+                        disabled={
+                          todoSaving ||
+                          approvalResendBusy ===
+                            `${resolved.client.id}__${resolved.categoryKey}__${resolved.item.id}`
+                        }
+                        onClick={() =>
+                          resendTodoApprovalEmail(
+                            resolved.client,
+                            resolved.cycleStart,
+                            resolved.categoryKey,
+                            resolved.item,
+                          )
+                        }
+                        className="w-full px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest text-[#fd7414] bg-orange-50 hover:bg-orange-100 border border-orange-100 disabled:opacity-50"
+                      >
+                        {approvalResendBusy ===
+                        `${resolved.client.id}__${resolved.categoryKey}__${resolved.item.id}`
+                          ? 'Resending…'
+                          : 'Resend approval email'}
+                      </button>
+                    </div>
                   )}
                 </div>
               );

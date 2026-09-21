@@ -132,7 +132,13 @@ export async function refreshAccessToken(refreshToken) {
   });
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {
-    throw new Error(data?.error_description || data?.error || 'Token refresh failed.');
+    const detail = data?.error_description || data?.error || 'Token refresh failed.';
+    const err = new Error(detail);
+    err.code = data?.error || 'token_refresh_failed';
+    if (/expired|revoked|invalid_grant/i.test(String(detail))) {
+      err.reconnectRequired = true;
+    }
+    throw err;
   }
   return data;
 }
@@ -201,15 +207,24 @@ export async function getValidAccessToken(connection) {
   if (!connection.refreshToken) {
     throw new Error('Gmail connection expired — reconnect in Config.');
   }
-  const refreshed = await refreshAccessToken(connection.refreshToken);
-  const accessToken = refreshed.access_token;
-  const nextExpiry = Date.now() + Number(refreshed.expires_in || 3600) * 1000;
-  await saveConnection(connection.uid || connection.id, {
-    accessToken,
-    expiry: nextExpiry,
-    ...(refreshed.refresh_token ? { refreshToken: refreshed.refresh_token } : {}),
-  });
-  return accessToken;
+  try {
+    const refreshed = await refreshAccessToken(connection.refreshToken);
+    const accessToken = refreshed.access_token;
+    const nextExpiry = Date.now() + Number(refreshed.expires_in || 3600) * 1000;
+    await saveConnection(connection.uid || connection.id, {
+      accessToken,
+      expiry: nextExpiry,
+      ...(refreshed.refresh_token ? { refreshToken: refreshed.refresh_token } : {}),
+    });
+    return accessToken;
+  } catch (err) {
+    if (err?.reconnectRequired) {
+      throw new Error(
+        'Token has been expired or revoked. Reconnect Gmail in Admin → Config.',
+      );
+    }
+    throw err;
+  }
 }
 
 /** RFC 2047-safe simple subject; body as UTF-8 quoted-printable-ish plain + html. */

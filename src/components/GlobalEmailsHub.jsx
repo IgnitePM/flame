@@ -133,6 +133,10 @@ export default function GlobalEmailsHub({
         <p className="text-xs font-bold text-slate-400 mt-1">
           All client & lead email history · {filtered.length} shown
         </p>
+        <p className="text-[11px] text-slate-400 mt-1">
+          This list is CRM-synced Gmail (not your full inbox). If it looks stale,
+          open Admin → Config → Gmail and click Sync now.
+        </p>
       </div>
 
       <div className="bg-white border border-slate-200 rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">

@@ -83,6 +83,10 @@ import {
   formatTime,
 } from './utils/billingEngine.js';
 import {
+  getTasksForShift,
+  getUnassignedTasks,
+} from './utils/shiftTaskAssociation.js';
+import {
   buildNotificationDoc,
   collectMentionNotificationsFromText,
   collectTodoChangeNotifications,
@@ -3436,30 +3440,57 @@ export default function App() {
   };
 
   const exportCSV = () => {
-    let rows = [["Employee", "Date", "Client", "Task Type", "Start", "End", "Duration", "Notes"]];
+    let rows = [["Employee", "Date", "Client", "Task Type", "Start", "End", "Duration", "Notes", "Association"]];
+    const exportedTaskIds = new Set();
     filteredTimesheets.forEach(shift => {
       const shiftDate = new Date(shift.clockInTime).toLocaleDateString();
-      const tasks = taskLogs.filter(t => t.shiftId === shift.id);
+      const tasks = getTasksForShift(taskLogs, shift.id);
       
       if (tasks.length === 0) {
+        // Shift with no FK-linked tasks: do not invent a billable "General Shift" row.
         rows.push([
-          shift.employeeName, shiftDate, "N/A", "General Shift",
+          shift.employeeName, shiftDate, "UNRESOLVED", "NO_TASKS",
           new Date(shift.clockInTime).toLocaleTimeString(),
           shift.clockOutTime ? new Date(shift.clockOutTime).toLocaleTimeString() : "Active",
-          formatTime(getShiftDuration(shift)), ""
+          formatTime(getShiftDuration(shift)),
+          "",
+          "shift_without_tasks",
         ]);
       } else {
         tasks.forEach(t => {
-          if (clientFilter && t.clientName !== clientFilter) return; 
+          if (clientFilter && t.clientName !== clientFilter) return;
+          exportedTaskIds.add(t.id);
           rows.push([
             shift.employeeName, shiftDate, t.clientName, t.projectName,
             new Date(t.clockInTime).toLocaleTimeString(),
             t.clockOutTime ? new Date(t.clockOutTime).toLocaleTimeString() : "Active",
             formatTime(getTaskDurationForBilling(t)),
-            t.notes || ""
+            t.notes || "",
+            "shiftId",
           ]);
         });
       }
+    });
+
+    // Surface tasks that have no resolvable parent so they cannot vanish from exports.
+    getUnassignedTasks(taskLogs, timesheets).forEach((t) => {
+      if (exportedTaskIds.has(t.id)) return;
+      if (clientFilter && t.clientName !== clientFilter) return;
+      if (currentRange.start && currentRange.end) {
+        const cin = Number(t.clockInTime || 0);
+        if (cin < currentRange.start || cin > currentRange.end) return;
+      }
+      rows.push([
+        t.employeeName || "UNRESOLVED",
+        t.clockInTime ? new Date(t.clockInTime).toLocaleDateString() : "",
+        t.clientName || "UNRESOLVED",
+        t.projectName || "UNRESOLVED",
+        t.clockInTime ? new Date(t.clockInTime).toLocaleTimeString() : "",
+        t.clockOutTime ? new Date(t.clockOutTime).toLocaleTimeString() : "Active",
+        formatTime(getTaskDurationForBilling(t)),
+        t.notes || "",
+        `UNRESOLVED:${t.shiftId || "missing_shiftId"}`,
+      ]);
     });
 
     // Quote every field so commas/quotes/newlines in names or notes can't
@@ -3522,7 +3553,7 @@ export default function App() {
     `;
 
     filteredTimesheets.forEach(shift => {
-      const tasks = taskLogs.filter(t => t.shiftId === shift.id);
+      const tasks = getTasksForShift(taskLogs, shift.id);
       
       html += `
         <tr class="shift-row">
@@ -3547,8 +3578,38 @@ export default function App() {
             </tr>
           `;
         });
+      } else {
+        html += `
+          <tr>
+            <td></td>
+            <td></td>
+            <td colspan="4"><em>No FK-linked tasks (UNRESOLVED — not inventing General Shift)</em></td>
+          </tr>
+        `;
       }
     });
+
+    const unassigned = getUnassignedTasks(taskLogs, timesheets);
+    if (unassigned.length > 0) {
+      html += `
+        <tr class="shift-row">
+          <td colspan="6"><strong>Unassigned tasks (${unassigned.length})</strong></td>
+        </tr>
+      `;
+      unassigned.forEach((t) => {
+        if (clientFilter && t.clientName !== clientFilter) return;
+        html += `
+          <tr>
+            <td>${esc(t.employeeName || 'UNRESOLVED')}</td>
+            <td>${t.clockInTime ? new Date(t.clockInTime).toLocaleDateString() : ''}</td>
+            <td>${esc(t.clientName || 'UNRESOLVED')} - ${esc(t.projectName || 'UNRESOLVED')}<br/><small style="color:#666">${esc(t.notes)} · shiftId: ${esc(t.shiftId || 'missing')}</small></td>
+            <td>${t.clockInTime ? new Date(t.clockInTime).toLocaleTimeString() : ''}</td>
+            <td>${t.clockOutTime ? new Date(t.clockOutTime).toLocaleTimeString() : 'Active'}</td>
+            <td>${formatTime(getTaskDuration(t))}</td>
+          </tr>
+        `;
+      });
+    }
 
     html += `</tbody></table></body></html>`;
     printWindow.document.write(html);

@@ -1,12 +1,19 @@
 import { describeAuthError, requireStaffCaller } from './lib/requireAuth.mjs';
-import { syncGmailConnection, syncGmailFullHistoryStep } from './lib/gmailSync.mjs';
+import {
+  syncGmailConnection,
+  syncGmailFullHistoryStep,
+  syncGmailRecentStep,
+} from './lib/gmailSync.mjs';
 
 /**
  * Manual Gmail sync for the signed-in admin/billing caller.
  * POST body:
- *   { mode?: 'recent' | 'full', restart?: boolean }
- * - recent (default): ~30 day backfill / match pass
- * - full: one chunk of all-time CRM-targeted history (call repeatedly until done)
+ *   { mode?: 'recent' | 'full' | 'incremental', restart?: boolean }
+ * - recent (default): one small CRM-targeted page (call repeatedly until done)
+ * - full: one chunk of all-time CRM-targeted history
+ * - incremental: single-shot history / catch-up (may be slower)
+ *
+ * Keep each request small — large Sync-now jobs previously 504'd on Netlify.
  */
 export default async (req) => {
   if (req.method !== 'POST') {
@@ -34,14 +41,22 @@ export default async (req) => {
     body = {};
   }
 
-  const mode = String(body?.mode || 'recent').toLowerCase() === 'full' ? 'full' : 'recent';
+  const rawMode = String(body?.mode || 'recent').toLowerCase();
+  const mode =
+    rawMode === 'full'
+      ? 'full'
+      : rawMode === 'incremental'
+        ? 'incremental'
+        : 'recent';
   const restart = Boolean(body?.restart);
 
   try {
     const result =
       mode === 'full'
         ? await syncGmailFullHistoryStep(caller.uid, { restart })
-        : await syncGmailConnection(caller.uid, { forceBackfill: true });
+        : mode === 'incremental'
+          ? await syncGmailConnection(caller.uid, { forceBackfill: false })
+          : await syncGmailRecentStep(caller.uid, { restart });
     if (!result.ok) {
       return new Response(JSON.stringify({ error: result.error || 'Sync failed.' }), {
         status: 400,
@@ -60,3 +75,6 @@ export default async (req) => {
     );
   }
 };
+
+// Give each step enough room; Sync now issues multiple short requests instead of one huge one.
+export const config = { maxDuration: 26 };

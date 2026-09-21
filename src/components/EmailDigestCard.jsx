@@ -54,7 +54,10 @@ const EmailDigestCard = ({ notifySettings = {}, updateNotifySettings }) => {
       const resp = await authedFetch('/.netlify/functions/send-test-digest', { period });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data?.error) {
-        throw new Error(data?.error || 'Request failed');
+        const from = data?.fromAddress ? ` (from ${data.fromAddress})` : '';
+        const detail =
+          data?.errorSummary?.[0]?.error || data?.error || 'Request failed';
+        throw new Error(`${detail}${from}`);
       }
       let okMsg = 'Sent!';
       if (data?.skipped) okMsg = `Skipped — ${data.reason}`;
@@ -63,15 +66,24 @@ const EmailDigestCard = ({ notifySettings = {}, updateNotifySettings }) => {
           ? `Sent to ${data.alerted} user${data.alerted === 1 ? '' : 's'}`
           : 'No new assignments to send';
       } else if (data?.personalized) {
-        okMsg = `Sent ${data.recipientCount || 0} personal email${
-          (data.recipientCount || 0) === 1 ? '' : 's'
-        }`;
+        const delivered = Number(data.deliveredCount ?? data.recipientCount ?? 0);
+        const failed = Number(data.errorCount || 0);
+        const from = data.fromAddress ? ` via ${data.fromAddress}` : '';
+        if (failed > 0 && delivered > 0) {
+          okMsg = `Delivered ${delivered}, failed ${failed}${from}`;
+        } else if (failed > 0 && delivered === 0) {
+          okMsg = `Failed — ${data.errorSummary?.[0]?.error || 'SMTP error'}${from}`;
+        } else {
+          okMsg = `Delivered ${delivered} personal email${
+            delivered === 1 ? '' : 's'
+          }${from}`;
+        }
       }
       setTestState((s) => ({ ...s, [period]: okMsg }));
     } catch (err) {
       setTestState((s) => ({ ...s, [period]: `Failed — ${err.message}` }));
     }
-    setTimeout(() => setTestState((s) => ({ ...s, [period]: '' })), 8000);
+    setTimeout(() => setTestState((s) => ({ ...s, [period]: '' })), 12000);
   };
 
   return (

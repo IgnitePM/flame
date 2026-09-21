@@ -42,12 +42,39 @@ export default async (req) => {
         ? await runAssignmentAlerts()
         : await runWorkspaceDigest(period, { force: true });
 
-    // Counts only. The per-recipient debug objects carry staff email addresses
-    // and workload details that don't belong in an HTTP response.
-    const safe = { ...result, errorCount: (result.errors || []).length };
+    // Counts + safe error summaries. Omit per-recipient debug payloads.
+    const errors = Array.isArray(result.errors) ? result.errors : [];
+    const safe = {
+      ...result,
+      errorCount: errors.length,
+      errorSummary: errors.slice(0, 5).map((e) => ({
+        email: e.email || null,
+        error: e.error || 'unknown',
+      })),
+    };
     delete safe.details;
     delete safe.emptyDetails;
     delete safe.errors;
+
+    const failedHard =
+      !safe.skipped &&
+      Number(safe.deliveredCount || safe.alerted || 0) === 0 &&
+      errors.length > 0;
+    if (failedHard) {
+      const first = errors[0]?.error || 'SMTP send failed';
+      return new Response(
+        JSON.stringify({
+          ...safe,
+          error: `Email send failed for all recipients. ${first}`,
+          fromAddress: safe.fromAddress || process.env.GMAIL_USER || null,
+        }),
+        {
+          status: 502,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+    }
+
     return new Response(JSON.stringify(safe), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },

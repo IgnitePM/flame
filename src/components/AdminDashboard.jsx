@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, Component } from 'rea
 import { useLocation } from 'react-router-dom';
 import {
   Activity,
+  AlertTriangle,
   ArrowRight,
   BarChart3,
   CheckSquare,
@@ -93,6 +94,14 @@ import {
 } from '../utils/retainerCategories.js';
 import { computeRetainerDaysLeft } from '../utils/retainerCategoryStats.js';
 import { resolveExpenseEquivalentHours } from '../utils/billingEngine.js';
+import {
+  describeTaskOutsideWindow,
+  getDerivedShiftWindow,
+  getStoredShiftWindow,
+  getTasksForShift,
+  getUnassignedTasks,
+  isTaskOutsideShiftWindow,
+} from '../utils/shiftTaskAssociation.js';
 import ClientProfileSummary from './ClientProfileSummary.jsx';
 import ClientFilesPanel from './ClientFilesPanel.jsx';
 import ClientMessagesPanel from './ClientMessagesPanel.jsx';
@@ -1325,6 +1334,7 @@ const AdminDashboard = ({
   const [todoEditId, setTodoEditId] = useState(null);
   const [todoEditText, setTodoEditText] = useState('');
   const [todoSaving, setTodoSaving] = useState(false);
+  const [approvalResendBusy, setApprovalResendBusy] = useState('');
   const [todoAddTextDraft, setTodoAddTextDraft] = useState({});
   const [todoAddDueDraft, setTodoAddDueDraft] = useState({});
   const [todoAddAssigneesDraft, setTodoAddAssigneesDraft] = useState({});
@@ -1516,6 +1526,48 @@ const AdminDashboard = ({
     }
     return matchesSearch && matchesClient && matchesDate;
   });
+
+  const filteredUnassignedTasks = (() => {
+    let list = getUnassignedTasks(taskLogs, timesheets);
+    if (isRestrictedStaff) {
+      list = list.filter((t) => {
+        const uidOk = t.userId && t.userId === user?.uid;
+        const nameOk =
+          !t.userId &&
+          t.employeeName &&
+          (t.employeeName === user?.displayName ||
+            t.employeeName === user?.email);
+        return uidOk || nameOk;
+      });
+    }
+    if (clientFilter) {
+      list = list.filter(taskMatchesClientFilter);
+    }
+    if (currentRange.start && currentRange.end) {
+      list = list.filter((t) => {
+        const cin = Number(t.clockInTime || 0);
+        return cin >= currentRange.start && cin <= currentRange.end;
+      });
+    }
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(
+        (t) =>
+          String(t.employeeName || '')
+            .toLowerCase()
+            .includes(q) ||
+          String(t.clientName || '')
+            .toLowerCase()
+            .includes(q) ||
+          String(t.projectName || '')
+            .toLowerCase()
+            .includes(q),
+      );
+    }
+    return list.sort(
+      (a, b) => Number(b.clockInTime || 0) - Number(a.clockInTime || 0),
+    );
+  })();
 
   const getOrdinalSuffix = (i) => {
     let j = i % 10;
@@ -1710,6 +1762,41 @@ const AdminDashboard = ({
   ) => {
     if (!client || !item) return;
     setTaskApprovalModal({ mode, client, cycleStart, categoryKey, item });
+  };
+
+  const resendTodoApprovalEmail = async (
+    client,
+    cycleStart,
+    categoryKey,
+    item,
+  ) => {
+    if (!client || !item?.id || !isTodoPendingApproval(item)) return;
+    const key = `${client.id}__${categoryKey}__${item.id}`;
+    if (approvalResendBusy === key) return;
+    setApprovalResendBusy(key);
+    try {
+      const resp = await authedFetch('/.netlify/functions/client-todo-approval-send', {
+        clientId: client.id,
+        cycleStart,
+        categoryKey,
+        itemId: item.id,
+        resend: true,
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data?.error) {
+        throw new Error(data?.error || 'Could not resend approval email.');
+      }
+      const n = Number(data?.email?.sent || 0);
+      window.alert(
+        n > 0
+          ? `Approval email resent to ${n} recipient${n === 1 ? '' : 's'}.`
+          : 'Resend finished, but no recipients were notified (check portal emails / reviewers).',
+      );
+    } catch (err) {
+      window.alert(err?.message || String(err));
+    } finally {
+      setApprovalResendBusy('');
+    }
   };
 
   const markClientTodoCompleteNow = async (
@@ -2458,25 +2545,17 @@ const AdminDashboard = ({
 
           <div className="space-y-4">
             {filteredTimesheets.map((shift) => {
-              const shiftEnd = shift.clockOutTime || Date.now();
-              const byShiftId = taskLogs.filter((t) => t.shiftId === shift.id);
-              const shiftIdSet = new Set(byShiftId.map((t) => t.id));
-              const byCompletedThisShift = taskLogs.filter(
-                (t) =>
-                  !shiftIdSet.has(t.id) &&
-                  t.status === 'completed' &&
-                  t.clockOutTime &&
-                  t.clockOutTime >= shift.clockInTime &&
-                  t.clockOutTime <= shiftEnd &&
-                  shift.userId &&
-                  t.userId &&
-                  t.userId === shift.userId,
-              );
-              const shiftTasks = [...byShiftId, ...byCompletedThisShift];
+              const shiftTasks = getTasksForShift(taskLogs, shift.id);
+              const storedWindow = getStoredShiftWindow(shift);
+              const derivedWindow = getDerivedShiftWindow(shiftTasks);
+              const displayWindow = derivedWindow || storedWindow;
               const isExpanded = expandedShifts[shift.id];
               const visibleTasks = clientFilter
                 ? shiftTasks.filter(taskMatchesClientFilter)
                 : shiftTasks;
+              const outOfWindowCount = shiftTasks.filter((t) =>
+                isTaskOutsideShiftWindow(t, shift),
+              ).length;
 
               return (
                 <div
@@ -2506,15 +2585,40 @@ const AdminDashboard = ({
                         <h4 className="font-black text-lg">
                           {shift.employeeName}
                         </h4>
-                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1 flex gap-2">
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1 flex gap-2 flex-wrap">
                           <span>
                             {new Date(
-                              shift.clockInTime,
+                              displayWindow.start || shift.clockInTime,
                             ).toLocaleDateString()}
                           </span>
+                          {displayWindow.start ? (
+                            <span>
+                              {new Date(displayWindow.start).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                second: '2-digit',
+                              })}
+                              {' → '}
+                              {new Date(displayWindow.end).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                second: '2-digit',
+                              })}
+                              {derivedWindow ? ' (from tasks)' : ''}
+                            </span>
+                          ) : null}
                           <span className="text-[#fd7414]">
                             • {formatTime(getShiftDuration(shift))} Total
                           </span>
+                          {outOfWindowCount > 0 && (
+                            <span
+                              className="bg-amber-100 text-amber-800 px-1.5 rounded text-[8px] flex items-center gap-1"
+                              title="One or more tasks fall outside the stored shift clock-in/out window"
+                            >
+                              <AlertTriangle className="w-3 h-3" />
+                              {outOfWindowCount} outside window
+                            </span>
+                          )}
                           {shift.isManual && (
                             <span className="bg-blue-100 text-blue-600 px-1.5 rounded text-[8px] flex items-center">
                               Manual
@@ -2620,10 +2724,19 @@ const AdminDashboard = ({
                         </p>
                       ) : (
                         <div className="space-y-3">
-                          {visibleTasks.map((task) => (
+                          {visibleTasks.map((task) => {
+                            const outside = isTaskOutsideShiftWindow(task, shift);
+                            const outsideReason = outside
+                              ? describeTaskOutsideWindow(task, shift)
+                              : '';
+                            return (
                             <div
                               key={task.id}
-                              className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 group"
+                              className={`bg-white p-5 rounded-2xl border shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 group ${
+                                outside
+                                  ? 'border-amber-300 bg-amber-50/40'
+                                  : 'border-slate-100'
+                              }`}
                             >
                               <div className="flex-1 text-left">
                                 <div className="flex items-center gap-2 mb-2 flex-wrap">
@@ -2635,9 +2748,13 @@ const AdminDashboard = ({
                                       ? `Proj: ${task.projectName}`
                                       : task.projectName}
                                   </span>
-                                  {task.shiftId !== shift.id && (
-                                    <span className="bg-amber-50 text-amber-800 px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-tighter border border-amber-200">
-                                      Completed this shift
+                                  {outside && (
+                                    <span
+                                      className="bg-amber-100 text-amber-900 px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-tighter border border-amber-300 inline-flex items-center gap-1"
+                                      title={outsideReason}
+                                    >
+                                      <AlertTriangle className="w-3 h-3" />
+                                      Outside shift window — {outsideReason}
                                     </span>
                                   )}
                                 </div>
@@ -2654,6 +2771,7 @@ const AdminDashboard = ({
                                   ).toLocaleTimeString([], {
                                     hour: '2-digit',
                                     minute: '2-digit',
+                                    second: '2-digit',
                                   })}
                                   <ArrowRight className="w-3 h-3" />
                                   {task.clockOutTime
@@ -2662,6 +2780,7 @@ const AdminDashboard = ({
                                       ).toLocaleTimeString([], {
                                         hour: '2-digit',
                                         minute: '2-digit',
+                                        second: '2-digit',
                                       })
                                     : 'Active Now'}
                                 </div>
@@ -2695,7 +2814,8 @@ const AdminDashboard = ({
                                 )}
                               </div>
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -2709,6 +2829,93 @@ const AdminDashboard = ({
               </div>
             )}
           </div>
+
+          {filteredUnassignedTasks.length > 0 && (
+            <div className="mt-8 rounded-[32px] border border-amber-200 bg-amber-50/40 p-6 space-y-4">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h5 className="text-sm font-black text-amber-900 uppercase tracking-widest inline-flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4" />
+                    Unassigned tasks ({filteredUnassignedTasks.length})
+                  </h5>
+                  <p className="text-xs text-amber-800/80 mt-1">
+                    These task records have no resolvable parent shift (missing
+                    or unknown shiftId). They still count for billing — reassign
+                    them or run the shiftId backfill migration.
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-3">
+                {filteredUnassignedTasks.map((task) => (
+                  <div
+                    key={task.id}
+                    className="bg-white p-5 rounded-2xl border border-amber-200 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+                  >
+                    <div className="flex-1 text-left">
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
+                        <span className="font-black text-sm text-slate-800">
+                          {task.employeeName || 'Unknown employee'}
+                        </span>
+                        <span className="font-black text-sm text-slate-600">
+                          {task.clientName || 'No client'}
+                        </span>
+                        <span className="bg-slate-100 px-2 py-0.5 rounded-md text-[8px] font-black text-slate-500 uppercase tracking-tighter">
+                          {task.projectId
+                            ? `Proj: ${task.projectName}`
+                            : task.projectName || '—'}
+                        </span>
+                        <span className="bg-amber-100 text-amber-900 px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-tighter border border-amber-300">
+                          shiftId: {task.shiftId || 'UNRESOLVED'}
+                        </span>
+                      </div>
+                      <TaskLogSessionDetail
+                        task={task}
+                        clients={clients}
+                        getTodoStateForCycle={getTodoStateForCycle}
+                        getBillingPeriod={getBillingPeriod}
+                        todoCategoryKey={todoCategoryKey}
+                      />
+                      <div className="text-[10px] text-slate-400 font-bold flex items-center gap-2 mt-2">
+                        {new Date(task.clockInTime).toLocaleString()}
+                        <ArrowRight className="w-3 h-3" />
+                        {task.clockOutTime
+                          ? new Date(task.clockOutTime).toLocaleString()
+                          : 'Active Now'}
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-2 w-full sm:w-auto">
+                      <div className="font-black text-lg text-[#fd7414] font-mono">
+                        {formatTime(getTaskDuration(task))}
+                      </div>
+                      {!isRestrictedStaff && (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => startEditing('task', task)}
+                            className="p-2 text-slate-400 hover:text-[#fd7414]"
+                            title="Edit task"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() =>
+                              setDeleteConfirm({
+                                collection: 'taskLogs',
+                                id: task.id,
+                                title: 'this task record',
+                              })
+                            }
+                            className="p-2 text-slate-200 hover:text-red-500"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -3139,6 +3346,31 @@ const AdminDashboard = ({
                               className="shrink-0 px-3 py-2 rounded-xl border border-violet-200 bg-violet-50 text-[10px] font-black uppercase tracking-widest text-violet-800 hover:bg-violet-100 disabled:opacity-40"
                             >
                               Review
+                            </button>
+                          ) : null}
+                          {isTodoPendingApproval(row.item) ? (
+                            <button
+                              type="button"
+                              disabled={
+                                todoSaving ||
+                                approvalResendBusy ===
+                                  `${row.clientId}__${row.categoryKey}__${row.item.id}`
+                              }
+                              onClick={() =>
+                                resendTodoApprovalEmail(
+                                  rowClient,
+                                  row.cycleStart,
+                                  row.categoryKey,
+                                  row.item,
+                                )
+                              }
+                              className="shrink-0 px-3 py-2 rounded-xl border border-orange-200 bg-orange-50 text-[10px] font-black uppercase tracking-widest text-[#fd7414] hover:bg-orange-100 disabled:opacity-40"
+                              title="Resend the approval notification email"
+                            >
+                              {approvalResendBusy ===
+                              `${row.clientId}__${row.categoryKey}__${row.item.id}`
+                                ? 'Resending…'
+                                : 'Resend'}
                             </button>
                           ) : null}
                         </>
@@ -8013,9 +8245,35 @@ const AdminDashboard = ({
                       Send for approval
                     </button>
                   ) : (
-                    <p className="text-[11px] font-medium text-slate-500">
-                      Waiting on {item.approvalTarget === 'staff' ? 'staff' : 'client'} review.
-                    </p>
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-medium text-slate-500">
+                        Waiting on{' '}
+                        {item.approvalTarget === 'staff' ? 'staff' : 'client'}{' '}
+                        review.
+                      </p>
+                      <button
+                        type="button"
+                        disabled={
+                          todoSaving ||
+                          approvalResendBusy ===
+                            `${cl.id}__${todoEditOptionsTarget.categoryKey}__${item.id}`
+                        }
+                        onClick={() =>
+                          resendTodoApprovalEmail(
+                            cl,
+                            todoEditOptionsTarget.cycleStart,
+                            todoEditOptionsTarget.categoryKey,
+                            item,
+                          )
+                        }
+                        className="w-full px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest text-[#fd7414] bg-orange-50 hover:bg-orange-100 border border-orange-100 disabled:opacity-50"
+                      >
+                        {approvalResendBusy ===
+                        `${cl.id}__${todoEditOptionsTarget.categoryKey}__${item.id}`
+                          ? 'Resending…'
+                          : 'Resend approval email'}
+                      </button>
+                    </div>
                   )}
                 </div>
               );

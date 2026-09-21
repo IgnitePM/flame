@@ -360,13 +360,18 @@ async function processMessageIds(accessToken, ids, ctx) {
  * Build Gmail search queries targeting CRM emails + website domains.
  * Chunked to stay under Gmail query length limits.
  * @param {{ byEmail: Map, byDomain: Map }} emailIndex
- * @param {{ maxLen?: number, afterEpochSec?: number|null }} [opts]
+ * @param {{ maxLen?: number, afterEpochSec?: number|null, newerThanDays?: number|null }} [opts]
  */
 export function buildGmailQueryChunks(emailIndex, opts = {}) {
   const maxLen = Number(opts.maxLen) || 450;
   const afterEpochSec = opts.afterEpochSec != null ? Number(opts.afterEpochSec) : null;
-  const afterClause =
-    Number.isFinite(afterEpochSec) && afterEpochSec > 0 ? ` after:${Math.floor(afterEpochSec)}` : '';
+  const newerThanDays = opts.newerThanDays != null ? Number(opts.newerThanDays) : null;
+  let timeClause = '';
+  if (Number.isFinite(newerThanDays) && newerThanDays > 0) {
+    timeClause = ` newer_than:${Math.floor(newerThanDays)}d`;
+  } else if (Number.isFinite(afterEpochSec) && afterEpochSec > 0) {
+    timeClause = ` after:${Math.floor(afterEpochSec)}`;
+  }
 
   const terms = [];
   const byEmail = emailIndex?.byEmail;
@@ -390,15 +395,15 @@ export function buildGmailQueryChunks(emailIndex, opts = {}) {
   }
   if (!unique.length) return [];
 
-  // Reserve room for after: clause inside each chunk
-  const budget = Math.max(80, maxLen - afterClause.length);
+  // Reserve room for time clause inside each chunk
+  const budget = Math.max(80, maxLen - timeClause.length);
   const chunks = [];
   let buf = [];
   let len = 0;
   for (const t of unique) {
     const add = (buf.length ? 4 : 0) + t.length; // " OR "
     if (buf.length && len + add > budget) {
-      chunks.push(`(${buf.join(' OR ')})${afterClause}`.trim());
+      chunks.push(`(${buf.join(' OR ')})${timeClause}`.trim());
       buf = [t];
       len = t.length;
     } else {
@@ -406,19 +411,28 @@ export function buildGmailQueryChunks(emailIndex, opts = {}) {
       len += add;
     }
   }
-  if (buf.length) chunks.push(`(${buf.join(' OR ')})${afterClause}`.trim());
+  if (buf.length) chunks.push(`(${buf.join(' OR ')})${timeClause}`.trim());
   return chunks;
 }
 
 const FULL_SYNC_PAGE_SIZE = 40;
+/** Cap for a single scheduled catch-up pass. */
 const RECENT_SYNC_MAX_IDS = 120;
+/** Manual Sync now: one small page per HTTP request (avoids Netlify 504). */
+const HTTP_SYNC_PAGE_SIZE = 25;
+/** Catch-up window when incremental history is empty/stale or Sync now is used. */
+const CATCHUP_NEWER_THAN_DAYS = 14;
+const STALE_UPSERT_MS = 36 * 60 * 60 * 1000;
 
 /**
- * Run CRM-targeted list queries (optional after:) and process message ids.
+ * Run CRM-targeted list queries (optional after: / newer_than:) and process message ids.
+ * Returns `truncated: true` when the maxIds budget was hit before all query chunks finished.
  */
-async function runTargetedQueryPass(accessToken, chunks, ctx, { maxIds = 120 } = {}) {
+async function runTargetedQueryPass(accessToken, chunks, ctx, { maxIds = RECENT_SYNC_MAX_IDS } = {}) {
   const ids = [];
   const seen = new Set();
+  let truncated = false;
+  let chunksDone = 0;
   for (const q of chunks) {
     let pageToken = '';
     do {
@@ -436,10 +450,168 @@ async function runTargetedQueryPass(accessToken, chunks, ctx, { maxIds = 120 } =
       pageToken = list.nextPageToken || '';
       if (ids.length >= maxIds) break;
     } while (pageToken);
-    if (ids.length >= maxIds) break;
+    chunksDone += 1;
+    if (ids.length >= maxIds) {
+      truncated = chunksDone < chunks.length || Boolean(pageToken);
+      break;
+    }
   }
   const result = await processMessageIds(accessToken, ids, ctx);
-  return { ...result, listed: ids.length, queries: chunks.length };
+  return {
+    ...result,
+    listed: ids.length,
+    queries: chunks.length,
+    truncated,
+  };
+}
+
+/**
+ * One small step of a recent CRM catch-up (resumable). Used by Sync now so
+ * Netlify does not 504 on a large inbox after reconnect.
+ */
+export async function syncGmailRecentStep(uid, { restart = false } = {}) {
+  const connection = await loadConnection(uid);
+  if (!connection?.refreshToken) {
+    return { ok: false, error: 'Gmail is not connected.' };
+  }
+
+  const db = await getDigestDb();
+  const emailIndex = await buildClientEmailIndex(db);
+  const indexStats = {
+    clientEmails: emailIndex.byEmail.size,
+    clientDomains: emailIndex.byDomain.size,
+  };
+
+  if (indexStats.clientEmails === 0 && indexStats.clientDomains === 0) {
+    return {
+      ok: false,
+      error:
+        'Add client contact emails and/or websites first — sync matches those addresses and domains.',
+      indexStats,
+    };
+  }
+
+  const chunks = buildGmailQueryChunks(emailIndex, {
+    newerThanDays: CATCHUP_NEWER_THAN_DAYS,
+  });
+  if (!chunks.length) {
+    return { ok: false, error: 'Could not build Gmail search queries from CRM data.', indexStats };
+  }
+
+  let recentSync =
+    connection.recentSync && typeof connection.recentSync === 'object'
+      ? { ...connection.recentSync }
+      : null;
+  const now = Date.now();
+
+  if (restart || !recentSync || recentSync.status !== 'running') {
+    recentSync = {
+      status: 'running',
+      chunkIndex: 0,
+      pageToken: '',
+      scanned: 0,
+      upserted: 0,
+      skipped: 0,
+      totalChunks: chunks.length,
+      newerThanDays: CATCHUP_NEWER_THAN_DAYS,
+      startedAt: now,
+      updatedAt: now,
+    };
+  } else {
+    recentSync.totalChunks = chunks.length;
+    if (Number(recentSync.chunkIndex) >= chunks.length) {
+      recentSync.chunkIndex = chunks.length - 1;
+      recentSync.pageToken = '';
+    }
+  }
+
+  const accessToken = await getValidAccessToken(connection);
+  const selfEmail = String(connection.gmailEmail || '').toLowerCase();
+  const staffEmail = String(connection.staffEmail || '').toLowerCase();
+  const ctx = { emailIndex, selfEmail, staffEmail };
+
+  const chunkIndex = Math.max(0, Number(recentSync.chunkIndex) || 0);
+  const pageToken = String(recentSync.pageToken || '');
+  const q = chunks[chunkIndex];
+  const list = await gmailListMessages(accessToken, {
+    q,
+    pageToken,
+    maxResults: HTTP_SYNC_PAGE_SIZE,
+  });
+  const ids = (list.messages || []).map((m) => m.id).filter(Boolean);
+  const result = await processMessageIds(accessToken, ids, ctx);
+
+  recentSync.scanned = Number(recentSync.scanned || 0) + result.scanned;
+  recentSync.upserted = Number(recentSync.upserted || 0) + result.upserted;
+  recentSync.skipped = Number(recentSync.skipped || 0) + result.skipped;
+  recentSync.updatedAt = Date.now();
+
+  const nextPage = list.nextPageToken || '';
+  let done = false;
+  if (nextPage) {
+    recentSync.pageToken = nextPage;
+    recentSync.chunkIndex = chunkIndex;
+    recentSync.status = 'running';
+  } else if (chunkIndex + 1 < chunks.length) {
+    recentSync.chunkIndex = chunkIndex + 1;
+    recentSync.pageToken = '';
+    recentSync.status = 'running';
+  } else {
+    recentSync.status = 'done';
+    recentSync.pageToken = '';
+    recentSync.completedAt = Date.now();
+    done = true;
+    try {
+      const profile = await fetchGmailProfile(accessToken);
+      if (profile?.historyId) {
+        await saveConnection(uid, { historyId: String(profile.historyId) });
+      }
+    } catch (err) {
+      console.warn('[gmailSync] recent sync historyId:', err?.message || err);
+    }
+  }
+
+  const connPatch = {
+    recentSync,
+    lastSyncAt: Date.now(),
+    updatedAt: Date.now(),
+    needsCatchUp: !done,
+  };
+  if (result.upserted > 0 || Number(recentSync.upserted || 0) > 0) {
+    connPatch.lastUpsertAt = Date.now();
+  }
+  await saveConnection(uid, connPatch);
+
+  const progress = {
+    chunk: chunkIndex + 1,
+    totalChunks: chunks.length,
+    scanned: recentSync.scanned,
+    upserted: recentSync.upserted,
+    status: recentSync.status,
+  };
+
+  return {
+    ok: true,
+    mode: 'recent_step',
+    done,
+    continue: !done,
+    truncated: !done,
+    upserted: result.upserted,
+    skipped: result.skipped,
+    scanned: result.scanned,
+    totals: {
+      scanned: recentSync.scanned,
+      upserted: recentSync.upserted,
+      skipped: recentSync.skipped,
+    },
+    progress,
+    indexStats,
+    hint: done
+      ? `Recent sync complete — ${recentSync.upserted} matched message(s) across ${recentSync.scanned} scanned (last ${CATCHUP_NEWER_THAN_DAYS} days).`
+      : `Syncing recent mail — chunk ${progress.chunk}/${progress.totalChunks}, ${recentSync.scanned} scanned, ${recentSync.upserted} matched so far…`,
+    lastSyncAt: Date.now(),
+    gmailEmail: selfEmail,
+  };
 }
 
 /**
@@ -615,7 +787,11 @@ export async function syncGmailConnection(uid, opts = {}) {
   let scanned = 0;
   let mode = 'incremental';
   let historyId = connection.historyId ? String(connection.historyId) : null;
+  const startHistoryId = historyId;
   const needsBackfill = forceBackfill || !Number(connection.lastSyncAt || 0);
+  let historyFailed = false;
+  let truncated = false;
+  let catchUpRan = false;
 
   // Incremental history sync (skip when forcing / first backfill).
   if (historyId && !needsBackfill) {
@@ -641,65 +817,104 @@ export async function syncGmailConnection(uid, opts = {}) {
     } catch (err) {
       console.warn('[gmailSync] history fallback:', err?.status, err?.message || err);
       historyId = null;
+      historyFailed = true;
     }
   }
 
-  if (!historyId || needsBackfill) {
-    mode = 'targeted_30d';
-    // IMPORTANT: do not scan the newest N inbox messages — those are often
-    // internal and never reach client threads. Search Gmail for CRM emails/domains.
-    if (indexStats.clientEmails === 0 && indexStats.clientDomains === 0) {
-      const nowTs = Date.now();
-      await saveConnection(uid, {
-        historyId: historyId || connection.historyId || null,
-        lastSyncAt: nowTs,
-        updatedAt: nowTs,
-      });
-      return {
-        ok: true,
-        upserted: 0,
-        skipped: 0,
-        scanned: 0,
-        mode,
-        indexStats,
-        hint:
-          'No client emails or website domains in CRM yet — add a website or contact email on clients, then Sync now again.',
-        lastSyncAt: nowTs,
-        gmailEmail: selfEmail,
-      };
-    }
+  const lastUpsertAt = Number(connection.lastUpsertAt || 0);
+  const upsertStale =
+    !lastUpsertAt || Date.now() - lastUpsertAt > STALE_UPSERT_MS;
+  // Catch-up fills gaps when history cursor jumped ahead after a capped backfill,
+  // history API fails, Sync now is pressed, or we have not imported in ~36h.
+  const shouldCatchUp =
+    needsBackfill ||
+    historyFailed ||
+    Boolean(connection.needsCatchUp) ||
+    (upsertStale && !needsBackfill);
 
-    const after = Math.floor((Date.now() - 30 * 24 * 60 * 60 * 1000) / 1000);
-    const chunks = buildGmailQueryChunks(emailIndex, { afterEpochSec: after });
-    const pass = await runTargetedQueryPass(accessToken, chunks, ctx, {
-      maxIds: RECENT_SYNC_MAX_IDS,
+  if (
+    shouldCatchUp &&
+    (indexStats.clientEmails > 0 || indexStats.clientDomains > 0)
+  ) {
+    catchUpRan = true;
+    mode = forceBackfill || historyFailed || !startHistoryId
+      ? 'targeted_catchup'
+      : mode === 'incremental'
+        ? 'incremental+catchup'
+        : 'targeted_catchup';
+
+    const chunks = buildGmailQueryChunks(emailIndex, {
+      newerThanDays: CATCHUP_NEWER_THAN_DAYS,
     });
-    upserted += pass.upserted;
-    skipped += pass.skipped;
-    scanned += pass.scanned;
+    if (chunks.length) {
+      const pass = await runTargetedQueryPass(accessToken, chunks, ctx, {
+        maxIds: RECENT_SYNC_MAX_IDS,
+      });
+      upserted += pass.upserted;
+      skipped += pass.skipped;
+      scanned += pass.scanned;
+      truncated = truncated || Boolean(pass.truncated);
+    }
+  } else if (
+    (!historyId || needsBackfill) &&
+    indexStats.clientEmails === 0 &&
+    indexStats.clientDomains === 0
+  ) {
+    const nowTs = Date.now();
+    await saveConnection(uid, {
+      historyId: historyId || connection.historyId || null,
+      lastSyncAt: nowTs,
+      updatedAt: nowTs,
+    });
+    return {
+      ok: true,
+      upserted: 0,
+      skipped: 0,
+      scanned: 0,
+      mode: 'targeted_catchup',
+      indexStats,
+      hint:
+        'No client emails or website domains in CRM yet — add a website or contact email on clients, then Sync now again.',
+      lastSyncAt: nowTs,
+      gmailEmail: selfEmail,
+    };
+  }
 
+  // Only advance historyId to the live profile tip when we are confident we
+  // did not skip CRM mail (incomplete capped passes used to jump the cursor
+  // forward and permanently miss newer threads).
+  let nextHistoryId = historyId || connection.historyId || null;
+  if (!truncated && (forceBackfill || historyFailed || !startHistoryId)) {
     try {
       const profile = await fetchGmailProfile(accessToken);
-      historyId = profile?.historyId ? String(profile.historyId) : historyId;
+      if (profile?.historyId) nextHistoryId = String(profile.historyId);
     } catch (err) {
       console.warn('[gmailSync] profile historyId:', err?.message || err);
     }
+  } else if (truncated) {
+    // Keep the pre-sync cursor so the next run can catch remaining mail.
+    nextHistoryId = startHistoryId || connection.historyId || null;
   }
 
   const now = Date.now();
-  await saveConnection(uid, {
-    historyId: historyId || connection.historyId || null,
+  const connPatch = {
+    historyId: nextHistoryId,
     lastSyncAt: now,
     updatedAt: now,
-  });
+    needsCatchUp: truncated,
+  };
+  if (upserted > 0) connPatch.lastUpsertAt = now;
+  await saveConnection(uid, connPatch);
 
   let hint = '';
-  if (upserted === 0) {
+  if (truncated) {
+    hint = `Sync reviewed a capped set of recent CRM-matched messages and may still have more to import — click Sync now again (history cursor was not advanced).`;
+  } else if (upserted === 0) {
     if (indexStats.clientEmails === 0 && indexStats.clientDomains === 0) {
       hint =
         'No client emails or website domains in CRM yet — add a website or contact email, then Sync now again.';
     } else if (scanned === 0) {
-      hint = `CRM has ${indexStats.clientEmails} email(s) and ${indexStats.clientDomains} domain(s), but Gmail returned 0 messages for those in the last 30 days. Try Full history sync, or confirm the addresses on the client match the ones in Gmail.`;
+      hint = `CRM has ${indexStats.clientEmails} email(s) and ${indexStats.clientDomains} domain(s), but Gmail returned 0 matching messages in the last ${CATCHUP_NEWER_THAN_DAYS} days. Confirm client contact addresses match Gmail.`;
     } else {
       hint = `Scanned ${scanned} CRM-targeted message(s) against ${indexStats.clientEmails} email(s) / ${indexStats.clientDomains} domain(s); none new to import (may already be synced).`;
     }
@@ -711,6 +926,8 @@ export async function syncGmailConnection(uid, opts = {}) {
     skipped,
     scanned,
     mode,
+    truncated,
+    catchUpRan,
     indexStats,
     hint,
     lastSyncAt: now,

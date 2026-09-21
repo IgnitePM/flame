@@ -213,9 +213,20 @@ export async function runWorkspaceDigest(period, { force = false } = {}) {
           : `Your morning update — ${dateLabel}`;
       const text = renderPersonalDigestText(digest);
       const html = renderPersonalDigestHtml({ digest, generatedAt });
-      await sendDigestEmail({ to: email, subject, text, html });
-      if (digest.hasContent) sent.push({ email, debug: digest.debug });
-      else empty.push({ email, debug: digest.debug });
+      const mailInfo = await sendDigestEmail({ to: email, subject, text, html });
+      if (digest.hasContent) {
+        sent.push({
+          email,
+          messageId: mailInfo?.messageId || null,
+          debug: digest.debug,
+        });
+      } else {
+        empty.push({
+          email,
+          messageId: mailInfo?.messageId || null,
+          debug: digest.debug,
+        });
+      }
     } catch (err) {
       errors.push({ email, error: err?.message || String(err) });
     }
@@ -226,13 +237,16 @@ export async function runWorkspaceDigest(period, { force = false } = {}) {
     [`${cursorKey}Iso`]: new Date().toISOString(),
   });
 
+  const delivered = sent.length + empty.length;
   return {
-    sent: true,
+    sent: delivered > 0,
     period,
     personalized: true,
     recipientCount: recipients.length,
+    deliveredCount: delivered,
     withContent: sent.length,
     emptyBriefings: empty.length,
+    fromAddress: process.env.GMAIL_USER || null,
     details: sent,
     emptyDetails: empty,
     errors,
@@ -303,8 +317,10 @@ export async function runAssignmentAlerts() {
   });
 
   return {
-    sent: true,
+    sent: sent.length > 0,
     alerted: sent.length,
+    recipientCount: recipients.length,
+    fromAddress: process.env.GMAIL_USER || null,
     details: sent,
     errors,
     sinceMs,

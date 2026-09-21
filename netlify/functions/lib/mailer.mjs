@@ -35,11 +35,23 @@ export async function sendDigestEmail({ to, subject, text, html }) {
   const user = process.env.GMAIL_USER;
   const fromName = process.env.GMAIL_FROM_NAME || 'Ignite PM Workspace';
   const transporter = getTransporter();
-  return transporter.sendMail({
+  const info = await transporter.sendMail({
     from: `"${fromName}" <${user}>`,
     to: Array.isArray(to) ? to.join(', ') : to,
     subject,
     text,
     html,
   });
+  const rejected = Array.isArray(info?.rejected) ? info.rejected : [];
+  if (rejected.length) {
+    throw new Error(
+      `SMTP rejected recipient(s): ${rejected.join(', ')} (from ${user})`,
+    );
+  }
+  return {
+    messageId: info?.messageId || null,
+    accepted: info?.accepted || [],
+    response: info?.response || null,
+    from: user,
+  };
 }

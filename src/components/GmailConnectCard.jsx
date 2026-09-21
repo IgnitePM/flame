@@ -30,6 +30,7 @@ export default function GmailConnectCard({ canManage = false, onTabFocus }) {
   });
   const [busy, setBusy] = useState('');
   const [banner, setBanner] = useState('');
+  const [tokenDead, setTokenDead] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!canManage) {
@@ -118,40 +119,85 @@ export default function GmailConnectCard({ canManage = false, onTabFocus }) {
   const syncNow = async () => {
     if (busy) return;
     setBusy('sync');
-    setBanner('');
+    setBanner('Starting Gmail sync…');
     try {
-      const resp = await authedFetch('/.netlify/functions/sync-gmail-clients-http', {
-        mode: 'recent',
-      });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) {
-        const msg = String(data.error || '');
-        if (/quota|rate limit|units per minute/i.test(msg)) {
+      let totalUpserted = 0;
+      let totalScanned = 0;
+      let totalSkipped = 0;
+      let lastHint = '';
+      let restart = true;
+      const maxSteps = 40;
+
+      for (let step = 0; step < maxSteps; step += 1) {
+        const resp = await authedFetch('/.netlify/functions/sync-gmail-clients-http', {
+          mode: 'recent',
+          restart,
+        });
+        restart = false;
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          const msg = String(data.error || '');
+          if (/expired|revoked|invalid_grant|reconnect/i.test(msg)) {
+            setTokenDead(true);
+            throw new Error(
+              'Gmail access was revoked or expired. Click Reconnect Gmail below, approve access, then Sync now again.',
+            );
+          }
+          if (/quota|rate limit|units per minute/i.test(msg)) {
+            throw new Error(
+              'Gmail API quota hit — wait a minute and try Sync now again.',
+            );
+          }
+          if (resp.status === 504 || /504|timeout|timed out/i.test(msg)) {
+            throw new Error(
+              'Sync timed out on this step. Click Sync now again — it will resume where it left off.',
+            );
+          }
           throw new Error(
-            'Gmail API quota hit — wait a minute and try Sync now again (smaller recent sync).',
+            data.error ||
+              `Sync failed (HTTP ${resp.status}). Check Netlify function logs for sync-gmail-clients-http.`,
           );
         }
-        throw new Error(
-          data.error ||
-            `Sync failed (HTTP ${resp.status}). Check Netlify function logs for sync-gmail-clients-http.`,
-        );
+        setTokenDead(false);
+        totalUpserted += Number(data.upserted || 0);
+        totalScanned += Number(data.scanned || 0);
+        totalSkipped += Number(data.skipped || 0);
+        lastHint = data.hint || lastHint;
+        const progress = data.progress;
+        if (progress) {
+          setBanner(
+            `Syncing… chunk ${progress.chunk}/${progress.totalChunks} · ${progress.scanned} scanned · ${progress.upserted} matched`,
+          );
+        }
+        if (data.done || data.continue === false) {
+          break;
+        }
+        if (step === maxSteps - 1) {
+          lastHint =
+            (lastHint ? `${lastHint} ` : '') +
+            'Stopped after many steps — click Sync now again to continue.';
+        }
       }
-      const neu = Number(data.upserted || 0);
-      const scanned = Number(data.scanned || 0);
-      const skipped = Number(data.skipped || 0);
-      if (neu > 0) {
+
+      if (totalUpserted > 0) {
         setBanner(
-          `Synced — ${neu} new message${neu === 1 ? '' : 's'} added` +
-            (scanned ? ` (reviewed ${scanned}` : '') +
-            (skipped ? `, ${skipped} already in CRM or unmatched)` : scanned ? ')' : '') +
+          `Synced — ${totalUpserted} new message${totalUpserted === 1 ? '' : 's'} added` +
+            (totalScanned ? ` (reviewed ${totalScanned}` : '') +
+            (totalSkipped
+              ? `, ${totalSkipped} already in CRM or unmatched)`
+              : totalScanned
+                ? ')'
+                : '') +
             '.',
         );
       } else {
         setBanner(
-          data.hint ||
+          lastHint ||
             `No new messages` +
-              (scanned ? ` after reviewing ${scanned}` : '') +
-              (skipped ? ` (${skipped} already synced or unmatched)` : '') +
+              (totalScanned ? ` after reviewing ${totalScanned}` : '') +
+              (totalSkipped
+                ? ` (${totalSkipped} already synced or unmatched)`
+                : '') +
               '.',
         );
       }
@@ -159,6 +205,27 @@ export default function GmailConnectCard({ canManage = false, onTabFocus }) {
     } catch (err) {
       setBanner(err?.message || String(err));
     } finally {
+      setBusy('');
+    }
+  };
+
+  const reconnect = async () => {
+    if (busy) return;
+    setBusy('connect');
+    setBanner('');
+    try {
+      // Clear the dead token first so status doesn't keep saying "Connected".
+      try {
+        await authedFetch('/.netlify/functions/gmail-oauth-disconnect', {});
+      } catch {
+        /* still try OAuth start */
+      }
+      const resp = await authedFetch('/.netlify/functions/gmail-oauth-start', {});
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.authUrl) throw new Error(data.error || 'Could not start reconnect');
+      window.location.href = data.authUrl;
+    } catch (err) {
+      setBanner(err?.message || String(err));
       setBusy('');
     }
   };
@@ -174,7 +241,9 @@ export default function GmailConnectCard({ canManage = false, onTabFocus }) {
       <p className="text-sm text-slate-500 font-medium mb-6">
         Connect your Google Workspace Gmail to send client email from Ignite and sync
         matching threads into each client’s history (CRM contact emails and website domains).
-        Sync now covers recent mail only to stay within Gmail API limits.
+        Sync now re-scans the last ~14 days of CRM-matched mail in small steps
+        (so it does not time out). The Emails tab only shows what has already been
+        synced — use Sync now here if that list looks stale.
       </p>
 
       {status.loading ? (
@@ -199,22 +268,34 @@ export default function GmailConnectCard({ canManage = false, onTabFocus }) {
           <div className="flex flex-wrap gap-3">
             <button
               type="button"
-              disabled={!!busy}
+              disabled={!!busy || tokenDead}
               onClick={syncNow}
               className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-black bg-black text-white disabled:opacity-40"
             >
               <RefreshCw className={`w-4 h-4 ${busy === 'sync' ? 'animate-spin' : ''}`} />
               {busy === 'sync' ? 'Syncing…' : 'Sync now'}
             </button>
-            <button
-              type="button"
-              disabled={!!busy}
-              onClick={disconnect}
-              className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-black bg-white border border-slate-200 text-slate-700 disabled:opacity-40"
-            >
-              <Unlink className="w-4 h-4" />
-              Disconnect
-            </button>
+            {tokenDead ? (
+              <button
+                type="button"
+                disabled={!!busy}
+                onClick={reconnect}
+                className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-black bg-[#fd7414] text-white disabled:opacity-40"
+              >
+                <Link2 className={`w-4 h-4 ${busy === 'connect' ? 'animate-pulse' : ''}`} />
+                {busy === 'connect' ? 'Redirecting…' : 'Reconnect Gmail'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={!!busy}
+                onClick={disconnect}
+                className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-black bg-white border border-slate-200 text-slate-700 disabled:opacity-40"
+              >
+                <Unlink className="w-4 h-4" />
+                Disconnect
+              </button>
+            )}
           </div>
         </div>
       ) : (
