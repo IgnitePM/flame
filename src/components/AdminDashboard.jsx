@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import {
   Activity,
   ArrowRight,
+  BarChart3,
   CheckSquare,
   ChevronLeft,
   ChevronDown,
@@ -30,6 +31,8 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import PayrollView from './PayrollView.jsx';
+import TimeSpentAnalytics from './TimeSpentAnalytics.jsx';
 import SalesFunnelPanel from './sales/SalesFunnelPanel.jsx';
 import TaskApprovalModal, {
   canCurrentUserDecideStaffApproval,
@@ -105,7 +108,6 @@ import TodoEstimateHoursSlider, {
 } from './TodoEstimateHoursSlider.jsx';
 import TaskNotesSection from './TaskNotesSection.jsx';
 import MentionTextarea from './MentionTextarea.jsx';
-import PayrollView from './PayrollView.jsx';
 import SlackNotificationsCard from './SlackNotificationsCard.jsx';
 import EmailDigestCard from './EmailDigestCard.jsx';
 import FxRatesCard from './FxRatesCard.jsx';
@@ -1363,12 +1365,19 @@ const AdminDashboard = ({
       return;
     }
     if (!isRestrictedStaff) {
-      const adminOnly = ['timesheets', 'billing', 'payroll', 'tasks', 'users'];
+      const adminOnly = [
+        'timesheets',
+        'time_spent',
+        'billing',
+        'payroll',
+        'tasks',
+        'users',
+      ];
       if (!adminOnly.includes(adminTab)) setAdminTab('timesheets');
       return;
     }
     // Kiosk staff in Admin shell: timesheets only.
-    if (adminTab !== 'timesheets') setAdminTab('timesheets');
+    if (adminTab !== 'timesheets' && adminTab !== 'time_spent') setAdminTab('timesheets');
   }, [isRestrictedStaff, adminTab, setAdminTab, lockedTab]);
 
   // OAuth callback lands on /admin?gmail=connected|error — open Config tab.
@@ -2175,6 +2184,7 @@ const AdminDashboard = ({
         <div className="flex bg-slate-100 p-1 rounded-2xl w-full lg:w-auto overflow-x-auto no-scrollbar">
           {[
             { id: 'timesheets', label: 'Timesheets', icon: List },
+            { id: 'time_spent', label: 'Time spent', icon: BarChart3 },
             ...(canBilling && !isRestrictedStaff
               ? [
                   {
@@ -2212,6 +2222,18 @@ const AdminDashboard = ({
           policy={policy}
           updatePolicy={updatePolicy}
           canEditSettings={isAdmin}
+        />
+      )}
+
+      {adminTab === 'time_spent' && (
+        <TimeSpentAnalytics
+          taskLogs={taskLogs}
+          timesheets={timesheets}
+          projects={projects}
+          clients={clients}
+          adminUsers={adminUsers}
+          isRestrictedStaff={isRestrictedStaff}
+          user={user}
         />
       )}
 
