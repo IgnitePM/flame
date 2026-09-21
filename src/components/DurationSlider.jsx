@@ -2,14 +2,14 @@ import React from 'react';
 import { formatDecimalHours } from '../utils/taskLogDisplay.js';
 
 /**
- * Visual duration picker: 0–maxHours on a slider (15-minute steps).
+ * Visual duration picker: 0–maxHours on a slider (1-minute steps by default).
  * Keeps clock-in fixed; duration drives the computed end time.
  */
 export default function DurationSlider({
   valueHours = 0,
   onChange,
   maxHours = 12,
-  stepMinutes = 15,
+  stepMinutes = 1,
   startTimeMs,
   /** Added to duration when computing displayed end time (e.g. shift breaks). */
   extraEndMs = 0,

@@ -3176,7 +3176,7 @@ export default function App() {
       : '';
     if (type === 'shift') {
       const rawHours = getShiftDuration(item) / 3600000;
-      const steppedHours = Math.min(12, Math.max(0, Math.round(rawHours * 4) / 4));
+      const steppedHours = Math.min(12, Math.max(0, Math.round(rawHours * 60) / 60));
       const origIn = Number(item.clockInTime || 0);
       const origOut = Number(item.clockOutTime || 0);
       const origDuration = Number(item.duration ?? item.totalSavedDuration ?? 0);
@@ -3188,7 +3188,7 @@ export default function App() {
         ...item,
         clockInDate,
         clockOutDate,
-        editDurationHours: steppedHours || (rawHours > 0 ? 0.25 : 0),
+        editDurationHours: steppedHours || (rawHours > 0 ? 1 / 60 : 0),
         editBreakMs: breakMs,
       });
       return;
@@ -3197,12 +3197,12 @@ export default function App() {
       ? `project_${item.projectId}`
       : `retainer_${item.projectName || ''}`;
     const rawHours = getTaskDurationHours(item, getTaskDurationForBilling);
-    const steppedHours = Math.min(12, Math.max(0, Math.round(rawHours * 4) / 4));
+    const steppedHours = Math.min(12, Math.max(0, Math.round(rawHours * 60) / 60));
     setEditValues({
       ...item,
       clockInDate,
       clockOutDate,
-      editDurationHours: steppedHours || (rawHours > 0 ? 0.25 : 0),
+      editDurationHours: steppedHours || (rawHours > 0 ? 1 / 60 : 0),
       billingTarget,
       clientName: item.clientName || '',
     });
