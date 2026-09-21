@@ -133,6 +133,100 @@ async function updateAccountPassword(idToken, password) {
   return data;
 }
 
+async function updateAccountProfile(idToken, { displayName } = {}) {
+  const name = String(displayName || '').trim();
+  if (!name || !idToken) return null;
+  const resp = await fetch(`${UPDATE_URL}?key=${encodeURIComponent(apiKey())}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      idToken,
+      displayName: name,
+      returnSecureToken: false,
+    }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    console.warn(
+      '[portalInvite] displayName update:',
+      data?.error?.message || resp.status,
+    );
+    return null;
+  }
+  return data;
+}
+
+export function normalizePortalUserProfile(raw = {}) {
+  return {
+    name: String(raw.name || raw.displayName || '').trim(),
+    phone: String(raw.phone || '').trim(),
+    title: String(raw.title || '').trim(),
+  };
+}
+
+async function notifyAdminsPortalUserEvent({
+  event,
+  email,
+  clientId,
+  clientName,
+  profile,
+}) {
+  try {
+    const { resolveAdminAlertRecipients } = await import('./adminAlertRecipients.mjs');
+    const { fetchCollection } = await import('./firebaseDigestClient.mjs');
+    const db = await getDigestDb();
+    const settings = (await fetchDoc(db, 'settings/notifications')) || {};
+    const adminUsers = await fetchCollection(db, 'admins').catch(() => []);
+    const recipients = resolveAdminAlertRecipients(settings, adminUsers).filter(
+      (e) => e !== String(email || '').toLowerCase(),
+    );
+    if (!recipients.length) return { sent: 0, skipped: 'no_recipients' };
+
+    const name = String(profile?.name || '').trim();
+    const who = name ? `${name} <${email}>` : email;
+    const company = String(clientName || 'Client').trim() || 'Client';
+    const when = new Date().toLocaleString('en-CA', {
+      timeZone: 'America/Toronto',
+    });
+    const isPassword = event === 'set_password';
+    const subject = isPassword
+      ? `Portal password set — ${company}`
+      : `Portal first sign-in — ${company}`;
+    const title = isPassword
+      ? 'Client set their portal password'
+      : 'Client signed in for the first time';
+    const detail = isPassword
+      ? `${who} set a portal password for ${company}.`
+      : `${who} signed into the ${company} portal for the first time.`;
+    const extra = [
+      profile?.title ? `Title: ${profile.title}` : '',
+      profile?.phone ? `Phone: ${profile.phone}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    const href = clientId
+      ? `${appLoginUrl()}/clients/${clientId}?tab=overview`
+      : `${appLoginUrl()}/admin`;
+    const text = [title, '', detail, extra, '', `When: ${when} (America/Toronto)`, '', href]
+      .filter(Boolean)
+      .join('\n');
+    const html = `<!DOCTYPE html><html><body style="margin:0;padding:24px;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#0f172a;">
+  <p style="font-size:11px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#fd7414;">Ignite PM · Client portal</p>
+  <h1 style="font-size:20px;margin:8px 0 16px;">${title}</h1>
+  <p style="font-size:14px;line-height:1.55;">${detail}</p>
+  ${extra ? `<p style="font-size:14px;line-height:1.55;white-space:pre-wrap;">${extra}</p>` : ''}
+  <p style="font-size:13px;color:#64748b;">When: ${when} (America/Toronto)</p>
+  <p style="margin-top:24px;"><a href="${href}" style="display:inline-block;background:#0f172a;color:#fff;text-decoration:none;padding:12px 18px;border-radius:12px;font-size:12px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;">Open client</a></p>
+</body></html>`;
+
+    await sendDigestEmail({ to: recipients, subject, text, html });
+    return { sent: recipients.length };
+  } catch (err) {
+    console.warn('[portalInvite] admin notify:', err?.message || err);
+    return { sent: 0, error: err?.message || String(err) };
+  }
+}
+
 async function sendBrandedInviteEmail({
   to,
   clientName,
@@ -491,12 +585,16 @@ export async function validateSetPasswordToken(token) {
 }
 
 /**
- * Complete set-password: verify token, set Auth password, consume token.
+ * Complete set-password: verify token, set Auth password + profile, consume token.
  */
-export async function completeSetPassword({ token, password } = {}) {
+export async function completeSetPassword({ token, password, profile } = {}) {
   const pwd = String(password || '');
   if (pwd.length < 8) {
     throw new Error('Password must be at least 8 characters.');
+  }
+  const userProfile = normalizePortalUserProfile(profile);
+  if (!userProfile.name) {
+    throw new Error('Please enter your name.');
   }
   const validated = await validateSetPasswordToken(token);
   if (!validated.ok) throw new Error(validated.error);
@@ -513,6 +611,7 @@ export async function completeSetPassword({ token, password } = {}) {
 
   const signedIn = await signInWithPassword(em, tempPassword);
   await updateAccountPassword(signedIn.idToken, pwd);
+  await updateAccountProfile(signedIn.idToken, { displayName: userProfile.name });
 
   const raw = String(token || '').trim();
   try {
@@ -527,12 +626,18 @@ export async function completeSetPassword({ token, password } = {}) {
   }
 
   const invite = (await fetchDoc(db, `portalInvites/${em}`)) || {};
+  const now = Date.now();
   await mergeDoc(db, `portalInvites/${em}`, {
     status: 'accepted',
-    acceptedAt: Date.now(),
+    acceptedAt: invite.acceptedAt || now,
+    passwordSetAt: now,
+    displayName: userProfile.name,
+    phone: userProfile.phone,
+    title: userProfile.title,
+    profileUpdatedAt: now,
     setPasswordTokenId: null,
     setPasswordTokenExpiresAt: null,
-    updatedAt: Date.now(),
+    updatedAt: now,
   });
 
   // Re-normalize so the first login after set-password can array-contains match.
@@ -547,7 +652,88 @@ export async function completeSetPassword({ token, password } = {}) {
     }
   }
 
-  return { ok: true, email: em, loginUrl: appLoginUrl() };
+  const clientName =
+    invite.clientName ||
+    (invite.clientId
+      ? ((await fetchDoc(db, `clients/${invite.clientId}`)) || {}).name
+      : '') ||
+    '';
+
+  await notifyAdminsPortalUserEvent({
+    event: 'set_password',
+    email: em,
+    clientId: invite.clientId || null,
+    clientName,
+    profile: userProfile,
+  });
+
+  return { ok: true, email: em, loginUrl: appLoginUrl(), profile: userProfile };
+}
+
+/**
+ * Record first portal sign-in and email admins once.
+ */
+export async function recordPortalFirstLogin(email) {
+  const em = normEmail(email);
+  if (!em) return { ok: false, skipped: 'no_email' };
+  const db = await getDigestDb();
+  const invite = (await fetchDoc(db, `portalInvites/${em}`)) || {};
+  const now = Date.now();
+
+  if (invite.firstLoginNotifiedAt) {
+    return { ok: true, skipped: 'already_notified' };
+  }
+
+  const profile = normalizePortalUserProfile({
+    name: invite.displayName,
+    phone: invite.phone,
+    title: invite.title,
+  });
+
+  await mergeDoc(db, `portalInvites/${em}`, {
+    status: invite.status === 'revoked' ? invite.status : 'accepted',
+    acceptedAt: invite.acceptedAt || now,
+    firstLoginAt: invite.firstLoginAt || now,
+    firstLoginNotifiedAt: now,
+    updatedAt: now,
+  });
+
+  const clientName =
+    invite.clientName ||
+    (invite.clientId
+      ? ((await fetchDoc(db, `clients/${invite.clientId}`)) || {}).name
+      : '') ||
+    '';
+
+  const mail = await notifyAdminsPortalUserEvent({
+    event: 'first_login',
+    email: em,
+    clientId: invite.clientId || null,
+    clientName,
+    profile,
+  });
+
+  return { ok: true, emailed: Number(mail.sent || 0) > 0, email: em };
+}
+
+/**
+ * Portal user updates their own profile (name/phone/title).
+ */
+export async function updatePortalUserProfile(email, profileInput = {}) {
+  const em = normEmail(email);
+  if (!em) throw new Error('Sign in required.');
+  const profile = normalizePortalUserProfile(profileInput);
+  if (!profile.name) throw new Error('Name is required.');
+  const db = await getDigestDb();
+  const now = Date.now();
+  await mergeDoc(db, `portalInvites/${em}`, {
+    displayName: profile.name,
+    phone: profile.phone,
+    title: profile.title,
+    profileUpdatedAt: now,
+    updatedAt: now,
+  });
+  return { ok: true, profile };
 }
 
 export async function markPortalInviteAccepted(email) {

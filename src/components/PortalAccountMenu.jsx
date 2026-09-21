@@ -6,6 +6,7 @@ import {
   LogOut,
   MessageSquareWarning,
   Settings,
+  User,
 } from 'lucide-react';
 import { auth, sendPasswordResetEmail } from '../firebase.js';
 
@@ -15,8 +16,10 @@ import { auth, sendPasswordResetEmail } from '../firebase.js';
 export default function PortalAccountMenu({
   client,
   userEmail = '',
+  userName = '',
   onOpenFeedback,
   onOpenCompany,
+  onOpenProfile,
   onSignOut,
 }) {
   const [open, setOpen] = useState(false);
@@ -101,15 +104,32 @@ export default function PortalAccountMenu({
         >
           <div className="px-4 py-3 border-b border-slate-50 bg-slate-50/80">
             <p className="text-sm font-black text-slate-900 truncate">
-              {client?.name || 'Client'}
+              {userName || client?.name || 'Client'}
             </p>
             {userEmail ? (
               <p className="text-[11px] font-medium text-slate-500 truncate mt-0.5">
                 {userEmail}
               </p>
             ) : null}
+            {client?.name && userName ? (
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-1 truncate">
+                {client.name}
+              </p>
+            ) : null}
           </div>
           <div className="p-2 space-y-0.5">
+            <button
+              type="button"
+              role="menuitem"
+              className="w-full touch-target flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-bold text-slate-700 hover:bg-slate-50"
+              onClick={() => {
+                setOpen(false);
+                onOpenProfile?.();
+              }}
+            >
+              <User className="w-4 h-4 text-[#fd7414]" />
+              My profile
+            </button>
             <button
               type="button"
               role="menuitem"
@@ -128,7 +148,7 @@ export default function PortalAccountMenu({
               className="w-full touch-target flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-bold text-slate-700 hover:bg-slate-50"
               onClick={() => {
                 setOpen(false);
-                onOpenCompany?.();
+                onOpenProfile?.();
               }}
             >
               <Settings className="w-4 h-4 text-slate-500" />

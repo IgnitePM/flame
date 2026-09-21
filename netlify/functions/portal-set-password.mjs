@@ -39,6 +39,11 @@ export default async (req) => {
       const result = await completeSetPassword({
         token,
         password: body.password,
+        profile: {
+          name: body.name || body.displayName,
+          phone: body.phone,
+          title: body.title,
+        },
       });
       return new Response(JSON.stringify(result), {
         status: 200,

@@ -4,6 +4,7 @@ import { CheckCircle2, Lock, RotateCw } from 'lucide-react';
 /**
  * Public set-password page for portal invites.
  * Opening the link does nothing to the token; only submitting sets the password.
+ * Collects name (+ optional phone/title) so the portal can show real names.
  */
 export default function PortalSetPasswordPage() {
   const token = useMemo(() => {
@@ -15,6 +16,9 @@ export default function PortalSetPasswordPage() {
   }, []);
 
   const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [title, setTitle] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(true);
@@ -57,6 +61,10 @@ export default function PortalSetPasswordPage() {
   const submit = async (e) => {
     e.preventDefault();
     if (busy) return;
+    if (!String(name || '').trim()) {
+      setError('Please enter your name.');
+      return;
+    }
     if (password.length < 8) {
       setError('Password must be at least 8 characters.');
       return;
@@ -71,7 +79,14 @@ export default function PortalSetPasswordPage() {
       const resp = await fetch('/.netlify/functions/portal-set-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'complete', token, password }),
+        body: JSON.stringify({
+          action: 'complete',
+          token,
+          password,
+          name: String(name).trim(),
+          phone: String(phone).trim(),
+          title: String(title).trim(),
+        }),
       });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || !data.ok) {
@@ -93,7 +108,7 @@ export default function PortalSetPasswordPage() {
           <Lock className="w-7 h-7 text-[#fd7414]" />
         </div>
         <h1 className="text-2xl font-black text-slate-900 mb-1 tracking-tight">
-          Set your password
+          Set up your account
         </h1>
         <p className="text-slate-400 font-bold mb-6 uppercase tracking-widest text-[10px]">
           Ignite PM · Client portal
@@ -117,7 +132,7 @@ export default function PortalSetPasswordPage() {
             <div className="flex items-start gap-3 bg-emerald-50 border border-emerald-100 rounded-2xl p-4">
               <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
               <div>
-                <div className="text-sm font-black text-emerald-800">Password saved</div>
+                <div className="text-sm font-black text-emerald-800">Account ready</div>
                 <p className="text-xs font-medium text-emerald-700 mt-1">
                   You can sign in with {email || 'your email'} now.
                 </p>
@@ -137,6 +152,31 @@ export default function PortalSetPasswordPage() {
             <div className="text-xs font-bold text-slate-500 mb-1">
               Account: <span className="text-slate-800">{email}</span>
             </div>
+            <input
+              type="text"
+              autoComplete="name"
+              placeholder="Your full name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+              required
+            />
+            <input
+              type="text"
+              autoComplete="organization-title"
+              placeholder="Job title (optional)"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+            />
+            <input
+              type="tel"
+              autoComplete="tel"
+              placeholder="Phone (optional)"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+            />
             <input
               type="password"
               autoComplete="new-password"
@@ -160,23 +200,11 @@ export default function PortalSetPasswordPage() {
             <button
               type="submit"
               disabled={busy}
-              className="w-full bg-[#fd7414] text-white py-4 rounded-2xl font-black transition-all shadow-lg hover:bg-[#e66a12] active:scale-95 text-lg disabled:opacity-40"
+              className="w-full bg-[#fd7414] text-white py-4 rounded-2xl font-black transition-all shadow-lg hover:bg-[#e66a12] active:scale-95 text-lg disabled:opacity-50"
             >
-              Save password
+              Save and continue
             </button>
-            <p className="text-[11px] font-medium text-slate-400 text-center pt-1">
-              Opening this page does not use up your invite link.
-            </p>
           </form>
-        ) : null}
-
-        {!busy && error ? (
-          <a
-            href="/"
-            className="mt-4 text-xs font-bold text-slate-500 hover:text-[#fd7414]"
-          >
-            Back to sign in
-          </a>
         ) : null}
       </div>
     </div>

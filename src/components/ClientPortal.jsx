@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { orderTodosForDisplay } from '../utils/todoListOrder.js';
 import {
   clientHasEnabledRetainers,
@@ -31,6 +31,7 @@ import ClientPortalAnalyticsPanel from './ClientPortalAnalyticsPanel.jsx';
 import ClientPortalFeedbackModal from './ClientPortalFeedbackModal.jsx';
 import PortalClientTodoItem from './PortalClientTodoItem.jsx';
 import PortalAccountMenu from './PortalAccountMenu.jsx';
+import PortalMyProfileModal from './PortalMyProfileModal.jsx';
 import ClientPortalAnnouncements from './ClientPortalAnnouncements.jsx';
 import MobileNavDrawer, { MobileNavItem } from './mobile/MobileNavDrawer.jsx';
 import {
@@ -120,6 +121,10 @@ const ClientPortal = ({
 }) => {
   const [portalSection, setPortalSection] = useState('dashboard');
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [portalUserProfile, setPortalUserProfile] = useState(null);
+  const [portalProfileReady, setPortalProfileReady] = useState(false);
+  const profilePromptedRef = useRef(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [latestStaffMessageAt, setLatestStaffMessageAt] = useState(0);
   const [messagesQueryReady, setMessagesQueryReady] = useState(false);
@@ -132,6 +137,53 @@ const ClientPortal = ({
   )
     .trim()
     .toLowerCase();
+
+  useEffect(() => {
+    if (!portalEmail) {
+      setPortalUserProfile(null);
+      setPortalProfileReady(false);
+      return undefined;
+    }
+    setPortalProfileReady(false);
+    const unsub = onSnapshot(
+      doc(db, 'portalInvites', portalEmail),
+      (snap) => {
+        setPortalUserProfile(snap.exists() ? { id: snap.id, ...snap.data() } : null);
+        setPortalProfileReady(true);
+      },
+      () => {
+        setPortalUserProfile(null);
+        setPortalProfileReady(true);
+      },
+    );
+    return () => unsub();
+  }, [portalEmail]);
+
+  useEffect(() => {
+    if (!portalEmail || !portalProfileReady || profilePromptedRef.current) return;
+    const named = String(
+      portalUserProfile?.displayName ||
+        portalUserProfile?.name ||
+        user?.displayName ||
+        '',
+    ).trim();
+    if (named) return;
+    profilePromptedRef.current = true;
+    setProfileOpen(true);
+  }, [
+    portalEmail,
+    portalProfileReady,
+    portalUserProfile,
+    user?.displayName,
+  ]);
+
+  const portalDisplayName =
+    String(
+      portalUserProfile?.displayName ||
+        portalUserProfile?.name ||
+        user?.displayName ||
+        '',
+    ).trim() || portalEmail;
 
   const hasNewMessages =
     messagesReadReady &&
@@ -395,7 +447,9 @@ const ClientPortal = ({
           <PortalAccountMenu
             client={clientProfile}
             userEmail={portalEmail}
+            userName={portalDisplayName}
             onOpenFeedback={() => setFeedbackOpen(true)}
+            onOpenProfile={() => setProfileOpen(true)}
             onOpenCompany={() => {
               setPortalSection('company');
               setMoreOpen(false);
@@ -444,12 +498,7 @@ const ClientPortal = ({
             client={clientProfile}
             mode="portal"
             userEmail={user?.email || auth?.currentUser?.email || ''}
-            userName={
-              user?.displayName ||
-              user?.email ||
-              auth?.currentUser?.email ||
-              ''
-            }
+            userName={portalDisplayName}
           />
         ) : null}
 
@@ -1165,16 +1214,17 @@ const ClientPortal = ({
         <ClientPortalFeedbackModal
           client={clientProfile}
           userEmail={portalEmail}
-          userName={
-            user?.displayName ||
-            user?.email ||
-            auth?.currentUser?.email ||
-            ''
-          }
+          userName={portalDisplayName}
           portalSection={portalSection}
           onClose={() => setFeedbackOpen(false)}
         />
       ) : null}
+      <PortalMyProfileModal
+        open={profileOpen}
+        onClose={() => setProfileOpen(false)}
+        initialProfile={portalUserProfile || { displayName: user?.displayName }}
+        onSaved={() => setProfileOpen(false)}
+      />
     </div>
   );
 };

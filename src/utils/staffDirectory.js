@@ -9,11 +9,30 @@ export function staffHandle(email) {
 
 export function staffDisplayName(adminOrEmail) {
   if (adminOrEmail && typeof adminOrEmail === 'object') {
-    const named = String(adminOrEmail.displayName || '').trim();
+    const named = String(
+      adminOrEmail.displayName ||
+        adminOrEmail.name ||
+        adminOrEmail.profileName ||
+        '',
+    ).trim();
     if (named) return named;
-    return staffHandle(adminOrEmail.email);
+    return staffHandle(adminOrEmail.email || adminOrEmail.id);
   }
   return staffHandle(adminOrEmail);
+}
+
+/** Prefer a real name over email local-part for any person-like record. */
+export function personDisplayName(personOrEmail, fallback = '') {
+  if (personOrEmail && typeof personOrEmail === 'object') {
+    return (
+      staffDisplayName(personOrEmail) ||
+      String(fallback || '').trim() ||
+      staffHandle(personOrEmail.email || personOrEmail.id) ||
+      'User'
+    );
+  }
+  const email = normalizeStaffEmail(personOrEmail);
+  return String(fallback || '').trim() || staffHandle(email) || email || 'User';
 }
 
 export function collectStaffEmails(adminUsers = [], extra = []) {

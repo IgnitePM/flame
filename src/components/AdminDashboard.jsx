@@ -7652,7 +7652,12 @@ const AdminDashboard = ({
                   try {
                     await setDoc(
                       doc('admins', emailKey),
-                      { email: newAdminEmail.trim(), role: 'billing' },
+                      {
+                        email: newAdminEmail.trim(),
+                        role: 'billing',
+                        createdAt: Date.now(),
+                        needsFirstLoginNotify: true,
+                      },
                       { merge: true }
                     );
                     setNewAdminEmail('');
@@ -7733,9 +7738,47 @@ const AdminDashboard = ({
               >
                 <div className="flex flex-col gap-2 flex-1 pr-4">
                   <span className="font-black text-slate-700">
-                    {a.email}
+                    {a.displayName ? (
+                      <>
+                        {a.displayName}{' '}
+                        <span className="text-slate-400 font-bold text-xs">
+                          ({a.email})
+                        </span>
+                      </>
+                    ) : (
+                      a.email
+                    )}
                   </span>
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                      Name
+                      <input
+                        type="text"
+                        defaultValue={a.displayName || ''}
+                        placeholder="Display name"
+                        onBlur={async (e) => {
+                          const next = String(e.target.value || '').trim();
+                          if (next === String(a.displayName || '').trim()) return;
+                          try {
+                            await setDoc(
+                              doc('admins', String(a.email).toLowerCase()),
+                              {
+                                email: a.email,
+                                displayName: next || null,
+                              },
+                              { merge: true },
+                            );
+                          } catch (err) {
+                            window.alert(
+                              `Could not save name for ${a.email}.\n\n${
+                                err?.message || String(err)
+                              }`,
+                            );
+                          }
+                        }}
+                        className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-[#fd7414] normal-case tracking-normal min-w-[8rem]"
+                      />
+                    </label>
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
                       Role
                     </span>

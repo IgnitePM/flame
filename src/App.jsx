@@ -1002,7 +1002,25 @@ export default function App() {
     const emailKey = String(user.email).trim().toLowerCase();
     if (!emailKey.endsWith('@ignitepm.com')) return;
     if (emailKey === 'chris@ignitepm.com') return; // owner bootstrap below
-    setDoc(doc(db, 'admins', emailKey), { email: user.email, role: 'kiosk' }).catch(() => {});
+    setDoc(doc(db, 'admins', emailKey), {
+      email: user.email,
+      role: 'kiosk',
+      createdAt: Date.now(),
+      firstLoginAt: Date.now(),
+      needsFirstLoginNotify: true,
+    }).catch(() => {});
+  }, [user?.email, adminDocReady, myAdminDoc]);
+
+  // Email admins once when a newly provisioned staff account signs in.
+  const firstLoginNotifyRef = useRef('');
+  useEffect(() => {
+    if (!user?.email || !adminDocReady || !myAdminDoc) return;
+    const emailKey = String(user.email).trim().toLowerCase();
+    if (firstLoginNotifyRef.current === emailKey) return;
+    firstLoginNotifyRef.current = emailKey;
+    authedFetch('/.netlify/functions/notify-staff-first-login', {}).catch((err) => {
+      console.warn('[first-login notify]', err?.message || err);
+    });
   }, [user?.email, adminDocReady, myAdminDoc]);
 
   const canListAllAdmins = !!user?.email && (!!myAdminDoc || user.email === 'chris@ignitepm.com');
@@ -1185,7 +1203,7 @@ export default function App() {
       setView(currentUserRole === 'kiosk' ? 'employee' : 'admin');
   }, [isClientUser, isUserAdmin, currentUserRole, view]);
 
-  // Portal users: mark invite accepted on first successful login.
+  // Portal users: mark invite accepted + email admins on first successful login.
   useEffect(() => {
     if (!isClientUser || !userEmailLower) return;
     let cancelled = false;
@@ -1193,16 +1211,20 @@ export default function App() {
       try {
         const ref = doc(db, 'portalInvites', userEmailLower);
         const snap = await getDoc(ref);
-        if (cancelled || !snap.exists()) return;
-        const data = snap.data() || {};
-        if (data.status === 'accepted') return;
-        await setDoc(
-          ref,
-          { status: 'accepted', acceptedAt: Date.now(), updatedAt: Date.now() },
-          { merge: true },
-        );
+        if (cancelled) return;
+        if (snap.exists()) {
+          const data = snap.data() || {};
+          if (data.status !== 'accepted') {
+            await setDoc(
+              ref,
+              { status: 'accepted', acceptedAt: Date.now(), updatedAt: Date.now() },
+              { merge: true },
+            );
+          }
+        }
+        await authedFetch('/.netlify/functions/notify-portal-first-login', {});
       } catch (err) {
-        console.warn('[portalInvite] accept mark skipped:', err?.message || err);
+        console.warn('[portalInvite] first login notify skipped:', err?.message || err);
       }
     })();
     return () => {

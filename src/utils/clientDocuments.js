@@ -201,7 +201,17 @@ export async function ensureStaffAdminDocForStorage(db, userEmail) {
   if (snap.exists()) return;
 
   if (emailKey.endsWith('@ignitepm.com')) {
-    await setDoc(adminRef, { email: emailKey, role: 'kiosk' }, { merge: true });
+    await setDoc(
+      adminRef,
+      {
+        email: emailKey,
+        role: 'kiosk',
+        createdAt: Date.now(),
+        firstLoginAt: Date.now(),
+        needsFirstLoginNotify: true,
+      },
+      { merge: true },
+    );
     return;
   }
 
