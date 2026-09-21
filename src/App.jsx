@@ -260,6 +260,31 @@ function parseDatetimeLocalToMs(s) {
   return d.getTime();
 }
 
+/** Round hours to the nearest minute (1/60 h). */
+function roundHoursToMinute(hours) {
+  const n = Number(hours);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.round(n * 60) / 60;
+}
+
+function emptyManualTaskValues(overrides = {}) {
+  return {
+    clientName: '',
+    billingTarget: '',
+    date: '',
+    endDate: '',
+    hours: '',
+    minutes: '',
+    notes: '',
+    employeeName: '',
+    parsedExpense: 0,
+    shiftId: null,
+    userId: 'manual',
+    editDurationHours: 1,
+    ...overrides,
+  };
+}
+
 const AdminDashboardRouteView = ({
   adminDashboardProps,
   navigate,
@@ -471,7 +496,9 @@ export default function App() {
     recurrenceMode: 'none',
   });
   const [manualTaskModal, setManualTaskModal] = useState(false);
-  const [manualTaskValues, setManualTaskValues] = useState({ clientName: '', billingTarget: '', date: '', hours: '', minutes: '', notes: '', employeeName: '', parsedExpense: 0 });
+  const [manualTaskValues, setManualTaskValues] = useState(() =>
+    emptyManualTaskValues(),
+  );
   const [addonModal, setAddonModal] = useState(null); 
   const [addonValues, setAddonValues] = useState({
     hours: '',
@@ -2021,35 +2048,74 @@ export default function App() {
     if (!isClientActiveForWork(manualClient)) {
       return alert('That client is inactive or archived. Manual tasks can only be logged for active clients.');
     }
-    
+
     const isProject = manualTaskValues.billingTarget.startsWith('project_');
     const targetId = isProject ? manualTaskValues.billingTarget.replace('project_', '') : null;
-    const projName = isProject ? 'Custom Project' : manualTaskValues.billingTarget.replace('retainer_', '');
+    const projName = isProject
+      ? (projects.find((p) => p.id === targetId)?.title || 'Custom Project')
+      : manualTaskValues.billingTarget.replace('retainer_', '');
 
-    // Parse date-only values as LOCAL noon — `new Date('YYYY-MM-DD')` is
-    // interpreted as UTC midnight, which lands on the previous local day in
-    // negative-offset timezones and books the task into the wrong cycle.
     const startMs = (() => {
       const raw = String(manualTaskValues.date || '');
       if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
         const [y, m, d] = raw.split('-').map(Number);
         return new Date(y, m - 1, d, 12, 0, 0, 0).getTime();
       }
-      return new Date(raw).getTime();
+      return parseDatetimeLocalToMs(raw) || new Date(raw).getTime();
     })();
-    if (!Number.isFinite(startMs)) return alert('Invalid date');
-    const durationMs = ((Number(manualTaskValues.hours) || 0) * 3600000) + ((Number(manualTaskValues.minutes) || 0) * 60000);
-    const endMs = startMs + durationMs;
+    if (!Number.isFinite(startMs)) return alert('Invalid start time');
 
-    const shiftDoc = await addDoc(collection(db, 'timesheets'), {
-      employeeName: manualTaskValues.employeeName, clockInTime: startMs, clockOutTime: endMs, duration: durationMs, totalSavedDuration: durationMs, status: 'completed', userId: 'manual', isManual: true
-    });
+    let durationMs = 0;
+    const endFromField = parseDatetimeLocalToMs(manualTaskValues.endDate);
+    if (Number.isFinite(endFromField) && endFromField > startMs) {
+      durationMs = endFromField - startMs;
+    } else if (Number(manualTaskValues.editDurationHours) > 0) {
+      durationMs = Number(manualTaskValues.editDurationHours) * 3600000;
+    } else {
+      durationMs =
+        (Number(manualTaskValues.hours) || 0) * 3600000 +
+        (Number(manualTaskValues.minutes) || 0) * 60000;
+    }
+    if (!(durationMs > 0)) {
+      return alert('Set a duration or end time greater than the start.');
+    }
+    const endMs = startMs + durationMs;
+    const attachShiftId = String(manualTaskValues.shiftId || '').trim();
+    const taskUserId =
+      String(manualTaskValues.userId || '').trim() ||
+      (attachShiftId
+        ? timesheets.find((s) => s.id === attachShiftId)?.userId || 'manual'
+        : user?.uid || 'manual');
+
+    let shiftDocId = attachShiftId;
+    if (!shiftDocId) {
+      const shiftDoc = await addDoc(collection(db, 'timesheets'), {
+        employeeName: manualTaskValues.employeeName,
+        clockInTime: startMs,
+        clockOutTime: endMs,
+        duration: durationMs,
+        totalSavedDuration: durationMs,
+        status: 'completed',
+        userId: taskUserId,
+        isManual: true,
+      });
+      shiftDocId = shiftDoc.id;
+    }
 
     await addDoc(collection(db, 'taskLogs'), {
-      shiftId: shiftDoc.id, userId: 'manual', clientName: manualTaskValues.clientName,
+      shiftId: shiftDocId,
+      userId: taskUserId,
+      clientName: manualTaskValues.clientName,
       clientId: manualClient?.id || '',
-      projectName: projName, projectId: targetId,
-      clockInTime: startMs, clockOutTime: endMs, duration: durationMs, totalSavedDuration: durationMs, status: 'completed', notes: manualTaskValues.notes
+      projectName: projName,
+      projectId: targetId,
+      clockInTime: startMs,
+      clockOutTime: endMs,
+      duration: durationMs,
+      totalSavedDuration: durationMs,
+      status: 'completed',
+      notes: manualTaskValues.notes,
+      isManual: true,
     });
     notifyTextMentions({
       text: manualTaskValues.notes,
@@ -2080,7 +2146,43 @@ export default function App() {
     }
 
     setManualTaskModal(false);
-    setManualTaskValues({ clientName: '', billingTarget: '', date: '', hours: '', minutes: '', notes: '', employeeName: user.displayName || user.email, parsedExpense: 0 });
+    setManualTaskValues(emptyManualTaskValues());
+  };
+
+  const openAddTimeRecord = () => {
+    const now = Date.now();
+    setManualTaskValues(
+      emptyManualTaskValues({
+        date: formatMsForDatetimeLocal(now - 3600000),
+        endDate: formatMsForDatetimeLocal(now),
+        editDurationHours: 1,
+        employeeName: user?.displayName || user?.email || '',
+        userId: user?.uid || 'manual',
+      }),
+    );
+    setManualTaskModal(true);
+  };
+
+  const openAddTaskToShift = (shift) => {
+    if (!shift?.id) return;
+    const startMs = Number(shift.clockInTime || Date.now());
+    const endMs = Number(shift.clockOutTime || startMs + 3600000);
+    const hours = roundHoursToMinute(
+      Math.min(12, Math.max(1 / 60, (endMs - startMs) / 3600000)),
+    );
+    setManualTaskValues(
+      emptyManualTaskValues({
+        date: formatMsForDatetimeLocal(startMs),
+        endDate: formatMsForDatetimeLocal(
+          startMs + Math.min(hours, 1) * 3600000,
+        ),
+        editDurationHours: Math.min(hours, 1) || 1,
+        employeeName: shift.employeeName || '',
+        shiftId: shift.id,
+        userId: shift.userId || user?.uid || 'manual',
+      }),
+    );
+    setManualTaskModal(true);
   };
 
   const saveExpense = async () => {
@@ -3171,12 +3273,11 @@ export default function App() {
   const startEditing = (type, item) => {
     setEditingItem({ type, id: item.id, notes: item.notes || '' });
     const clockInDate = formatMsForDatetimeLocal(item.clockInTime);
-    const clockOutDate = item.clockOutTime
-      ? formatMsForDatetimeLocal(item.clockOutTime)
-      : '';
     if (type === 'shift') {
       const rawHours = getShiftDuration(item) / 3600000;
-      const steppedHours = Math.min(12, Math.max(0, Math.round(rawHours * 60) / 60));
+      const steppedHours =
+        roundHoursToMinute(Math.min(12, Math.max(0, rawHours))) ||
+        (rawHours > 0 ? 1 / 60 : 0);
       const origIn = Number(item.clockInTime || 0);
       const origOut = Number(item.clockOutTime || 0);
       const origDuration = Number(item.duration ?? item.totalSavedDuration ?? 0);
@@ -3184,11 +3285,19 @@ export default function App() {
         origIn && origOut && origOut > origIn && origDuration > 0
           ? Math.max(0, origOut - origIn - origDuration)
           : 0;
+      const clockOutDate =
+        item.clockOutTime
+          ? formatMsForDatetimeLocal(item.clockOutTime)
+          : origIn && steppedHours > 0
+            ? formatMsForDatetimeLocal(
+                origIn + steppedHours * 3600000 + breakMs,
+              )
+            : '';
       setEditValues({
         ...item,
         clockInDate,
         clockOutDate,
-        editDurationHours: steppedHours || (rawHours > 0 ? 1 / 60 : 0),
+        editDurationHours: steppedHours,
         editBreakMs: breakMs,
       });
       return;
@@ -3197,15 +3306,50 @@ export default function App() {
       ? `project_${item.projectId}`
       : `retainer_${item.projectName || ''}`;
     const rawHours = getTaskDurationHours(item, getTaskDurationForBilling);
-    const steppedHours = Math.min(12, Math.max(0, Math.round(rawHours * 60) / 60));
+    const steppedHours =
+      roundHoursToMinute(Math.min(12, Math.max(0, rawHours))) ||
+      (rawHours > 0 ? 1 / 60 : 0);
+    const clockOutDate =
+      item.clockOutTime
+        ? formatMsForDatetimeLocal(item.clockOutTime)
+        : Number(item.clockInTime) && steppedHours > 0
+          ? formatMsForDatetimeLocal(
+              Number(item.clockInTime) + steppedHours * 3600000,
+            )
+          : '';
     setEditValues({
       ...item,
       clockInDate,
       clockOutDate,
-      editDurationHours: steppedHours || (rawHours > 0 ? 1 / 60 : 0),
+      editDurationHours: steppedHours,
       billingTarget,
       clientName: item.clientName || '',
     });
+  };
+
+  const syncEditDurationFromEnds = (clockInDate, clockOutDate, breakMs = 0) => {
+    const inMs = parseDatetimeLocalToMs(clockInDate);
+    const outMs = parseDatetimeLocalToMs(clockOutDate);
+    if (!Number.isFinite(inMs) || !Number.isFinite(outMs) || outMs <= inMs) {
+      return 0;
+    }
+    return roundHoursToMinute(
+      Math.min(12, Math.max(0, (outMs - inMs - Number(breakMs || 0)) / 3600000)),
+    );
+  };
+
+  const syncEditClockOutFromDuration = (
+    clockInDate,
+    durationHours,
+    breakMs = 0,
+  ) => {
+    const inMs = parseDatetimeLocalToMs(clockInDate);
+    if (!Number.isFinite(inMs)) return '';
+    const hours = Number(durationHours) || 0;
+    if (hours <= 0) return '';
+    return formatMsForDatetimeLocal(
+      inMs + hours * 3600000 + Number(breakMs || 0),
+    );
   };
 
   const saveEdit = async () => {
@@ -3221,11 +3365,19 @@ export default function App() {
     }
 
     const durationHours = Number(editValues.editDurationHours || 0);
-    if (durationHours <= 0) {
-      window.alert('Please set a duration greater than zero.');
+    const clockOutMs = parseDatetimeLocalToMs(editValues.clockOutDate);
+    let durationMs = 0;
+    if (Number.isFinite(clockOutMs) && clockOutMs > clockInMs) {
+      const breakMs =
+        editingItem.type === 'shift' ? Number(editValues.editBreakMs || 0) : 0;
+      durationMs = Math.max(0, clockOutMs - clockInMs - breakMs);
+    } else if (durationHours > 0) {
+      durationMs = durationHours * 3600000;
+    }
+    if (durationMs <= 0) {
+      window.alert('Please set a duration or clock-out time after clock-in.');
       return;
     }
-    const durationMs = durationHours * 3600000;
     const breakMs = Number(editValues.editBreakMs || 0);
 
     const updates =
@@ -3647,6 +3799,8 @@ export default function App() {
     manualTaskValues,
     setManualTaskValues,
     setManualTaskModal,
+    openAddTimeRecord,
+    openAddTaskToShift,
     setExpenseModal,
     setAddonModal,
     setProjectModal,
@@ -4245,8 +4399,14 @@ export default function App() {
           <div className="bg-white rounded-[32px] w-full max-w-xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col max-h-[90vh]">
             <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
               <div>
-                <h3 className="font-black text-2xl text-slate-900">Log Manual Task</h3>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Import from Hubspot / Past Work</p>
+                <h3 className="font-black text-2xl text-slate-900">
+                  {manualTaskValues.shiftId ? 'Add task to shift' : 'Add time record'}
+                </h3>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                  {manualTaskValues.shiftId
+                    ? `Attach work to ${manualTaskValues.employeeName || 'this shift'}`
+                    : 'Log retainer or project time'}
+                </p>
               </div>
               <button onClick={() => setManualTaskModal(false)} className="p-2 bg-white rounded-full hover:bg-slate-100 border border-slate-200"><X className="w-5 h-5" /></button>
             </div>
@@ -4260,7 +4420,7 @@ export default function App() {
                   </select>
                 </div>
                 <div className="col-span-2 sm:col-span-1 space-y-1">
-                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Billing Target</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Retainer or project</label>
                   <select value={manualTaskValues.billingTarget} onChange={e => setManualTaskValues({...manualTaskValues, billingTarget: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]">
                     <option value="">Select Target...</option>
                     <optgroup label="Monthly Retainers">
@@ -4288,28 +4448,72 @@ export default function App() {
                 </div>
                 <div className="col-span-2 sm:col-span-1 space-y-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Employee Name</label>
-                  <input type="text" value={manualTaskValues.employeeName} onChange={e => setManualTaskValues({...manualTaskValues, employeeName: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]" placeholder="John Doe" />
+                  <input type="text" value={manualTaskValues.employeeName} onChange={e => setManualTaskValues({...manualTaskValues, employeeName: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]" placeholder="John Doe" disabled={!!manualTaskValues.shiftId} />
                 </div>
                 <div className="col-span-2 sm:col-span-1 space-y-1">
-                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Start Date/Time</label>
-                  <input type="datetime-local" value={manualTaskValues.date} onChange={e => setManualTaskValues({...manualTaskValues, date: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]" />
+                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Start</label>
+                  <input
+                    type="datetime-local"
+                    value={manualTaskValues.date}
+                    onChange={(e) => {
+                      const date = e.target.value;
+                      setManualTaskValues({
+                        ...manualTaskValues,
+                        date,
+                        endDate: syncEditClockOutFromDuration(
+                          date,
+                          manualTaskValues.editDurationHours,
+                          0,
+                        ),
+                      });
+                    }}
+                    className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                  />
                 </div>
-                <div className="col-span-2 space-y-1">
-                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Duration Spent</label>
-                  <div className="flex gap-4">
-                    <div className="flex-1 flex items-center bg-slate-50 border border-slate-200 rounded-2xl px-4 focus-within:ring-2 focus-within:ring-[#fd7414] transition-all">
-                      <input type="number" min="0" placeholder="0" value={manualTaskValues.hours} onChange={e => setManualTaskValues({...manualTaskValues, hours: e.target.value})} className="w-full bg-transparent p-4 font-black text-xl outline-none" />
-                      <span className="text-xs font-black text-slate-400 uppercase">Hours</span>
-                    </div>
-                    <div className="flex-1 flex items-center bg-slate-50 border border-slate-200 rounded-2xl px-4 focus-within:ring-2 focus-within:ring-[#fd7414] transition-all">
-                      <input type="number" min="0" max="59" placeholder="0" value={manualTaskValues.minutes} onChange={e => setManualTaskValues({...manualTaskValues, minutes: e.target.value})} className="w-full bg-transparent p-4 font-black text-xl outline-none" />
-                      <span className="text-xs font-black text-slate-400 uppercase">Mins</span>
-                    </div>
-                  </div>
+                <div className="col-span-2 sm:col-span-1 space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">End</label>
+                  <input
+                    type="datetime-local"
+                    value={manualTaskValues.endDate || ''}
+                    onChange={(e) => {
+                      const endDate = e.target.value;
+                      setManualTaskValues({
+                        ...manualTaskValues,
+                        endDate,
+                        editDurationHours: syncEditDurationFromEnds(
+                          manualTaskValues.date,
+                          endDate,
+                          0,
+                        ),
+                      });
+                    }}
+                    className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                  />
+                </div>
+                <div className="col-span-2 space-y-2 rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 block">
+                    Duration (or set end time above)
+                  </label>
+                  <DurationSlider
+                    valueHours={Number(manualTaskValues.editDurationHours) || 0}
+                    onChange={(hours) =>
+                      setManualTaskValues({
+                        ...manualTaskValues,
+                        editDurationHours: hours,
+                        endDate: syncEditClockOutFromDuration(
+                          manualTaskValues.date,
+                          hours,
+                          0,
+                        ),
+                      })
+                    }
+                    startTimeMs={parseDatetimeLocalToMs(manualTaskValues.date)}
+                    maxHours={12}
+                  />
                 </div>
                 
                 <div className="col-span-2 space-y-1">
-                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Notes (Paste HubSpot Notes Here)</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Notes</label>
                   <MentionTextarea
                     value={manualTaskValues.notes}
                     onChange={(next) => setManualTaskValues({...manualTaskValues, notes: next})}
@@ -4338,7 +4542,9 @@ export default function App() {
               </div>
             </div>
             <div className="p-8 border-t border-slate-100 shrink-0">
-              <button onClick={saveManualTask} className="w-full bg-black text-white p-5 rounded-2xl font-black text-lg shadow-xl active:scale-95 transition-all">Save Manual Entry</button>
+              <button onClick={saveManualTask} className="w-full bg-black text-white p-5 rounded-2xl font-black text-lg shadow-xl active:scale-95 transition-all">
+                {manualTaskValues.shiftId ? 'Add task to shift' : 'Save time record'}
+              </button>
             </div>
           </div>
         </div>
@@ -4601,18 +4807,78 @@ export default function App() {
             </div>
             
             <div className="mobile-safe-dialog-body p-4 sm:p-6 space-y-6">
-              <div className="space-y-2 text-left">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Clock In Time</label>
-                <input type="datetime-local" value={editValues.clockInDate} onChange={e => setEditValues({...editValues, clockInDate: e.target.value})} className="w-full bg-slate-50 border-slate-200 border p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2 text-left">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Clock In</label>
+                  <input
+                    type="datetime-local"
+                    value={editValues.clockInDate}
+                    onChange={(e) => {
+                      const clockInDate = e.target.value;
+                      const breakMs =
+                        editingItem.type === 'shift'
+                          ? Number(editValues.editBreakMs || 0)
+                          : 0;
+                      setEditValues({
+                        ...editValues,
+                        clockInDate,
+                        clockOutDate: syncEditClockOutFromDuration(
+                          clockInDate,
+                          editValues.editDurationHours,
+                          breakMs,
+                        ),
+                      });
+                    }}
+                    className="w-full bg-slate-50 border-slate-200 border p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                  />
+                </div>
+                <div className="space-y-2 text-left">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Clock Out</label>
+                  <input
+                    type="datetime-local"
+                    value={editValues.clockOutDate || ''}
+                    onChange={(e) => {
+                      const clockOutDate = e.target.value;
+                      const breakMs =
+                        editingItem.type === 'shift'
+                          ? Number(editValues.editBreakMs || 0)
+                          : 0;
+                      setEditValues({
+                        ...editValues,
+                        clockOutDate,
+                        editDurationHours: syncEditDurationFromEnds(
+                          editValues.clockInDate,
+                          clockOutDate,
+                          breakMs,
+                        ),
+                      });
+                    }}
+                    className="w-full bg-slate-50 border-slate-200 border p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                  />
+                </div>
               </div>
 
               <div className="space-y-2 text-left rounded-2xl border border-slate-100 bg-slate-50/80 p-5">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 block mb-1">
-                  Duration (adjust hours logged)
+                  Duration (or set clock out above)
                 </label>
                 <DurationSlider
                   valueHours={editValues.editDurationHours ?? 0}
-                  onChange={(hours) => setEditValues({ ...editValues, editDurationHours: hours })}
+                  onChange={(hours) => {
+                    const breakMs =
+                      editingItem.type === 'shift'
+                        ? Number(editValues.editBreakMs || 0)
+                        : 0;
+                    setEditValues({
+                      ...editValues,
+                      editDurationHours: hours,
+                      clockOutDate: syncEditClockOutFromDuration(
+                        editValues.clockInDate,
+                        hours,
+                        breakMs,
+                      ),
+                    });
+                  }}
                   startTimeMs={parseDatetimeLocalToMs(editValues.clockInDate)}
                   extraEndMs={editingItem.type === 'shift' ? Number(editValues.editBreakMs || 0) : 0}
                   maxHours={12}

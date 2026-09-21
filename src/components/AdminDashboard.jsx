@@ -24,6 +24,7 @@ import {
   Pencil,
   Pin,
   Play,
+  Plus,
   Search,
   Settings,
   ShoppingCart,
@@ -1079,6 +1080,8 @@ const AdminDashboard = ({
   expandedClients,
   setManualTaskValues,
   setManualTaskModal,
+  openAddTimeRecord,
+  openAddTaskToShift,
   setExpenseModal,
   setAddonModal,
   setProjectModal,
@@ -2429,7 +2432,16 @@ const AdminDashboard = ({
             </div>
           )}
 
-          <div className="flex justify-end gap-2 px-2">
+          <div className="flex flex-wrap justify-end gap-3 px-2">
+            {!isRestrictedStaff && openAddTimeRecord ? (
+              <button
+                type="button"
+                onClick={openAddTimeRecord}
+                className="inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-widest bg-[#fd7414] text-white px-4 py-2 rounded-xl hover:brightness-95"
+              >
+                <Plus className="w-4 h-4" /> Add time record
+              </button>
+            ) : null}
             <button
               onClick={exportCSV}
               className="text-xs font-black uppercase text-[#fd7414] hover:underline flex items-center gap-1"
@@ -2438,7 +2450,7 @@ const AdminDashboard = ({
             </button>
             <button
               onClick={exportPDF}
-              className="text-xs font-black uppercase text-slate-600 hover:underline flex items-center gap-1 ml-4"
+              className="text-xs font-black uppercase text-slate-600 hover:underline flex items-center gap-1"
             >
               <FileText className="w-4 h-4" /> Export PDF
             </button>
@@ -2584,9 +2596,23 @@ const AdminDashboard = ({
 
                   {isExpanded && (
                     <div className="bg-slate-50/50 p-6 pt-4 border-t border-slate-100 animate-in slide-in-from-top-4 duration-300">
-                      <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                        <List className="w-3 h-3" /> Recorded Tasks{' '}
-                        {clientFilter && '(Filtered)'}
+                      <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center justify-between gap-2 flex-wrap">
+                        <span className="inline-flex items-center gap-2">
+                          <List className="w-3 h-3" /> Recorded Tasks{' '}
+                          {clientFilter && '(Filtered)'}
+                        </span>
+                        {!isRestrictedStaff && openAddTaskToShift ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openAddTaskToShift(shift);
+                            }}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-[10px] font-black uppercase tracking-widest text-[#fd7414] hover:border-[#fd7414]/40"
+                          >
+                            <Plus className="w-3.5 h-3.5" /> Add task
+                          </button>
+                        ) : null}
                       </div>
                       {visibleTasks.length === 0 ? (
                         <p className="text-xs italic text-slate-400 pb-2">
