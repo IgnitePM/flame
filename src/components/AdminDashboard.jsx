@@ -270,6 +270,7 @@ function ClientCustomProjectsPanelInner({
   const [projectSubtaskComposer, setProjectSubtaskComposer] = useState(null);
   const [projectSubtaskText, setProjectSubtaskText] = useState('');
   const [projectSubtaskDue, setProjectSubtaskDue] = useState('');
+  const [projectSubtaskEstimate, setProjectSubtaskEstimate] = useState('');
   const [projectSubtaskAssignees, setProjectSubtaskAssignees] = useState([]);
   const [pasteListProjectId, setPasteListProjectId] = useState(null);
   const [pasteListText, setPasteListText] = useState('');
@@ -968,6 +969,11 @@ function ClientCustomProjectsPanelInner({
                                                       {safeDisplayForReact(sub.text) ||
                                                         '(sub-task)'}
                                                     </span>
+                                                    {Number(sub.estimatedHours) > 0 ? (
+                                                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 tabular-nums">
+                                                        Est. {Number(sub.estimatedHours).toFixed(2)}h
+                                                      </span>
+                                                    ) : null}
                                                     <span className="text-[10px] font-bold text-slate-400">
                                                       {sub.dueDate
                                                         ? `Due ${new Date(sub.dueDate).toLocaleDateString()}`
@@ -1103,6 +1109,7 @@ function ClientCustomProjectsPanelInner({
                                                     });
                                                     setProjectSubtaskText('');
                                                     setProjectSubtaskDue('');
+                                                    setProjectSubtaskEstimate('');
                                                     setProjectSubtaskAssignees([]);
                                                   }}
                                                   className="text-[10px] font-black uppercase tracking-widest text-[#fd7414] hover:underline disabled:opacity-40"
@@ -1136,6 +1143,22 @@ function ClientCustomProjectsPanelInner({
                                                     }
                                                     className="border border-slate-200 rounded-lg px-2 py-2 text-sm"
                                                   />
+                                                  <label className="flex flex-col gap-1">
+                                                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
+                                                      Est. hours
+                                                    </span>
+                                                    <input
+                                                      type="number"
+                                                      min={0}
+                                                      step={0.25}
+                                                      value={projectSubtaskEstimate}
+                                                      onChange={(e) =>
+                                                        setProjectSubtaskEstimate(e.target.value)
+                                                      }
+                                                      placeholder="0"
+                                                      className="w-24 border border-slate-200 rounded-lg px-2 py-2 text-sm"
+                                                    />
+                                                  </label>
                                                   {renderAssigneeMultiSelect({
                                                     openKey: `proj_sub_add__${p.id}__${item.id}`,
                                                     value: projectSubtaskAssignees,
@@ -1179,10 +1202,18 @@ function ClientCustomProjectsPanelInner({
                                                             : me
                                                               ? [me]
                                                               : [];
+                                                        const estRaw = String(
+                                                          projectSubtaskEstimate || '',
+                                                        ).trim();
+                                                        const estimatedHours =
+                                                          estRaw === '' || Number(estRaw) === 0
+                                                            ? null
+                                                            : normalizeTodoEstimatedHours(estRaw);
                                                         const sub = newSubtaskTemplate({
                                                           text,
                                                           dueDate: capped,
                                                           assigneeEmails: assignees,
+                                                          estimatedHours,
                                                         });
                                                         const next = addSubtaskToItems(
                                                           prev.items || [],
@@ -1198,6 +1229,7 @@ function ClientCustomProjectsPanelInner({
                                                         setProjectSubtaskComposer(null);
                                                         setProjectSubtaskText('');
                                                         setProjectSubtaskDue('');
+                                                        setProjectSubtaskEstimate('');
                                                         setProjectSubtaskAssignees([]);
                                                       } finally {
                                                         setProjectTodoSaving(false);
@@ -1213,6 +1245,7 @@ function ClientCustomProjectsPanelInner({
                                                       setProjectSubtaskComposer(null);
                                                       setProjectSubtaskText('');
                                                       setProjectSubtaskDue('');
+                                                      setProjectSubtaskEstimate('');
                                                       setProjectSubtaskAssignees([]);
                                                     }}
                                                     className="px-3 py-2 rounded-lg border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-500"
@@ -1453,7 +1486,7 @@ function ClientCustomProjectsPanelInner({
                       Paste list
                     </h3>
                     <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-1">
-                      {pasteTitle} · Task | Assignee | Due
+                      {pasteTitle} · Task | Assignee | Due | Est. hours
                     </p>
                   </div>
                   <button
@@ -1479,13 +1512,13 @@ function ClientCustomProjectsPanelInner({
                         refreshPasteListPreview(next, pasteListProjectId);
                       }}
                       className="w-full bg-white border border-slate-200 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[140px] sm:min-h-[180px] font-mono text-sm"
-                      placeholder={`Task\tAssignee\tDue\nShip invoice\talice@ex.com\t2026-04-01\n\tGather line items\t\t2026-03-20`}
+                      placeholder={`Task\tAssignee\tDue\tEst\nShip invoice\talice@ex.com\t2026-04-01\t4\n\tGather line items\t\t2026-03-20\t1.5`}
                     />
                     <p className="text-[11px] text-slate-400 font-bold">
                       Columns: Task (required), optional Assignee email, optional Due
-                      (YYYY-MM-DD). Indent the task with Tab or 2+ spaces for a
-                      sub-task under the previous parent. Blank assignee defaults to
-                      you.
+                      (YYYY-MM-DD), optional Est. hours. Indent the task with Tab or 2+
+                      spaces for a sub-task under the previous parent. Blank assignee
+                      defaults to you.
                     </p>
                   </div>
 
@@ -1509,6 +1542,7 @@ function ClientCustomProjectsPanelInner({
                               <th className="px-3 py-2">Task</th>
                               <th className="px-3 py-2">Assignee</th>
                               <th className="px-3 py-2">Due</th>
+                              <th className="px-3 py-2">Est.</th>
                               <th className="px-3 py-2 w-16" />
                             </tr>
                           </thead>
@@ -1541,6 +1575,11 @@ function ClientCustomProjectsPanelInner({
                                 </td>
                                 <td className="px-3 py-2 align-top text-xs text-slate-500">
                                   {row.dueDisplay || '—'}
+                                </td>
+                                <td className="px-3 py-2 align-top text-xs text-slate-500 tabular-nums">
+                                  {row.estimatedHours != null
+                                    ? `${Number(row.estimatedHours).toFixed(2)}h`
+                                    : '—'}
                                 </td>
                                 <td className="px-3 py-2 align-top">
                                   <button
@@ -2331,11 +2370,12 @@ const AdminDashboard = ({
     setTodoEditOptionsTitle(String(subtask ? subtask.text : item.text || ''));
     setTodoEditOptionsDue(asDateInput(subtask ? subtask.dueDate : item.dueDate));
     setTodoEditOptionsEstimate(
-      subtask
-        ? ''
-        : item?.estimatedHours != null && item.estimatedHours !== ''
-          ? String(item.estimatedHours)
-          : '',
+      (() => {
+        const src = subtask || item;
+        return src?.estimatedHours != null && src.estimatedHours !== ''
+          ? String(src.estimatedHours)
+          : '';
+      })(),
     );
     const recurrenceSource = subtask || item;
     const t = recurrenceSource?.recurrence?.type;
@@ -2524,6 +2564,11 @@ const AdminDashboard = ({
       }
       const clamped = clampSubtaskDueToParent(item, dueDate);
       const recurrence = buildRecurrenceFromMode(todoEditOptionsRecurrence, clamped);
+      const estimateRaw = String(todoEditOptionsEstimate || '').trim();
+      const estimatedHours =
+        estimateRaw === '' || Number(estimateRaw) === 0
+          ? null
+          : normalizeTodoEstimatedHours(estimateRaw);
       const nextItem = mapItemSubtasks(item, (s) =>
         s.id === subtaskId
           ? {
@@ -2533,6 +2578,7 @@ const AdminDashboard = ({
               recurring: !!recurrence,
               recurringId: recurrence ? s.recurringId || s.id : null,
               recurrence,
+              estimatedHours,
             }
           : s,
       );
@@ -8735,7 +8781,7 @@ const AdminDashboard = ({
             <div className="flex items-center justify-between">
               <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">
                 {todoEditOptionsTarget.subtaskId
-                  ? 'Edit sub-task due date'
+                  ? 'Edit sub-task'
                   : 'Edit to-do options'}
               </h4>
               <button
@@ -8748,8 +8794,8 @@ const AdminDashboard = ({
             </div>
             <p className="text-[11px] font-bold text-slate-400">
               {todoEditOptionsTarget.subtaskId
-                ? 'Sub-task due cannot be after the primary task due date.'
-                : 'Set due date and recurrence, then click Save to apply.'}
+                ? 'Sub-task due cannot be after the primary task due date. Estimated hours are optional.'
+                : 'Set due date, estimate, and recurrence, then click Save to apply.'}
             </p>
             <div>
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
@@ -8807,8 +8853,7 @@ const AdminDashboard = ({
                 </p>
               )}
             </div>
-            {!todoEditOptionsTarget.subtaskId ? (
-              <div>
+            <div>
                 {(() => {
                   const cl = clients.find((x) => x.id === todoEditOptionsTarget.clientId);
                   const catName =
@@ -8824,13 +8869,17 @@ const AdminDashboard = ({
                       onChange={(hrs) =>
                         setTodoEditOptionsEstimate(hrs <= 0 ? '' : String(hrs))
                       }
-                      categoryHours={catHours > 0 ? catHours : null}
+                      categoryHours={
+                        !todoEditOptionsTarget.subtaskId && catHours > 0
+                          ? catHours
+                          : null
+                      }
                       disabled={todoSaving}
+                      compact={!!todoEditOptionsTarget.subtaskId}
                     />
                   );
                 })()}
               </div>
-            ) : null}
             {!todoEditOptionsTarget.subtaskId && (() => {
               const cl = clients.find((x) => x.id === todoEditOptionsTarget.clientId);
               if (!cl || !getTodoStateForCycle) return null;

@@ -76,6 +76,22 @@ describe('parseTodoSpreadsheetPaste', () => {
     assert.equal(rows[0].text, 'New one');
     assert.equal(rows[0].assigneeEmail, 'me@ex.com');
   });
+
+  it('parses optional Est hours on parents and subtasks', () => {
+    const tsv = [
+      'Task\tAssignee\tDue\tEst',
+      'Ship invoice\talice@ex.com\t2026-04-01\t4',
+      '\tGather line items\tbob@ex.com\t2026-03-20\t1.5',
+    ].join('\n');
+    const rows = parseTodoSpreadsheetPaste(tsv, {
+      assignableEmails: ['alice@ex.com', 'bob@ex.com'],
+    });
+    assert.equal(rows[0].estimatedHours, 4);
+    assert.equal(rows[1].estimatedHours, 1.5);
+    const items = buildTodoItemsFromPasteRows(rows);
+    assert.equal(items[0].estimatedHours, 4);
+    assert.equal(items[0].subtasks[0].estimatedHours, 1.5);
+  });
 });
 
 describe('removePastePreviewRow + buildTodoItemsFromPasteRows', () => {

@@ -713,6 +713,11 @@ export default function KioskClientTodoItem({
                           Due {new Date(sub.dueDate).toLocaleDateString()}
                         </div>
                       )}
+                      {Number(sub.estimatedHours) > 0 ? (
+                        <div className="mt-0.5 text-[10px] font-black uppercase tracking-widest text-slate-500 tabular-nums">
+                          Est. {Number(sub.estimatedHours).toFixed(2)}h
+                        </div>
+                      ) : null}
                     </div>
                     {canManageTodos && (
                       <div className="hidden sm:flex shrink-0 self-start items-center gap-1">

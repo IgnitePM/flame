@@ -232,6 +232,7 @@ const EmployeeKiosk = ({
   const [clientTodoDeletePrompt, setClientTodoDeletePrompt] = React.useState(null);
   const [clientTodoEditTitle, setClientTodoEditTitle] = React.useState('');
   const [clientTodoEditDue, setClientTodoEditDue] = React.useState('');
+  const [clientTodoEditEstimate, setClientTodoEditEstimate] = React.useState('');
   const [clientTodoEditRecurrence, setClientTodoEditRecurrence] =
     React.useState('none');
   const [clientTodoAssigneeOpenKey, setClientTodoAssigneeOpenKey] =
@@ -423,6 +424,12 @@ const EmployeeKiosk = ({
     });
     setClientTodoEditTitle(String(subtask ? subtask.text : item.text || ''));
     setClientTodoEditDue(asDateInput(subtask ? subtask.dueDate : item.dueDate));
+    const estimateSrc = subtask || item;
+    setClientTodoEditEstimate(
+      estimateSrc?.estimatedHours != null && estimateSrc.estimatedHours !== ''
+        ? String(estimateSrc.estimatedHours)
+        : '',
+    );
     const recurrenceSource = subtask || item;
     const t = recurrenceSource?.recurrence?.type;
     let editMode = 'none';
@@ -480,6 +487,11 @@ const EmployeeKiosk = ({
       }
       const clamped = clampSubtaskDueToParent(item, dueDate);
       const recurrence = buildRecurrenceFromMode(clientTodoEditRecurrence, clamped);
+      const estimateRaw = String(clientTodoEditEstimate || '').trim();
+      const estimatedHours =
+        estimateRaw === '' || Number(estimateRaw) === 0
+          ? null
+          : normalizeTodoEstimatedHours(estimateRaw);
       const nextItem = mapItemSubtasks(item, (s) =>
         s.id === subtaskId
           ? {
@@ -489,6 +501,7 @@ const EmployeeKiosk = ({
               recurring: !!recurrence,
               recurringId: recurrence ? s.recurringId || s.id : null,
               recurrence,
+              estimatedHours,
             }
           : s,
       );
@@ -499,6 +512,11 @@ const EmployeeKiosk = ({
         return;
       }
       const recurrence = buildRecurrenceFromMode(clientTodoEditRecurrence, dueDate);
+      const estimateRaw = String(clientTodoEditEstimate || '').trim();
+      const estimatedHours =
+        estimateRaw === '' || Number(estimateRaw) === 0
+          ? null
+          : normalizeTodoEstimatedHours(estimateRaw);
       let nextItem = {
         ...item,
         text: title,
@@ -506,6 +524,7 @@ const EmployeeKiosk = ({
         recurring: !!recurrence,
         recurringId: recurrence ? item.recurringId || item.id : null,
         recurrence,
+        estimatedHours,
       };
       nextItem = clampAllSubtaskDueDatesToParent(nextItem);
       nextList = list.map((i) => (i.id === itemId ? nextItem : i));
@@ -4021,6 +4040,20 @@ const EmployeeKiosk = ({
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]"
               />
             </div>
+            <div>
+              <TodoEstimateHoursSlider
+                value={
+                  clientTodoEditEstimate === ''
+                    ? 0
+                    : Number(clientTodoEditEstimate) || 0
+                }
+                onChange={(hrs) =>
+                  setClientTodoEditEstimate(hrs <= 0 ? '' : String(hrs))
+                }
+                disabled={todoSaving}
+                compact={!!clientTodoEditTarget.subtaskId}
+              />
+            </div>
             {!clientTodoEditTarget.subtaskId && (
               <div>
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
@@ -4162,6 +4195,7 @@ const EmployeeKiosk = ({
                 onClick={() => {
                   setClientTodoEditTitle('');
                   setClientTodoEditDue('');
+                  setClientTodoEditEstimate('');
                   setClientTodoEditRecurrence('none');
                 }}
                 className="px-3 py-2 rounded-xl text-xs font-black text-slate-500 bg-slate-100 hover:bg-slate-200 uppercase tracking-widest"

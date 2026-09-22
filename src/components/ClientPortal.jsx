@@ -915,6 +915,10 @@ const ClientPortal = ({
                   if (item?.requestStatus === 'rejected') continue;
                   if (item?.requestStatus === 'pending') continue;
                   sum += Number(item?.estimatedHours || 0);
+                  for (const sub of item?.subtasks || []) {
+                    if (sub?.done) continue;
+                    sum += Number(sub?.estimatedHours || 0);
+                  }
                 }
                 return sum;
               }, 0);

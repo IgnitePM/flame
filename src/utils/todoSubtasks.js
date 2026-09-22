@@ -119,6 +119,7 @@ export function newSubtaskTemplate(overrides = {}) {
     doneAt: null,
     assigneeEmails: [],
     dueDate: null,
+    estimatedHours: null,
     ...overrides,
   };
 }

@@ -13,6 +13,7 @@ import {
  * @property {string|null} assigneeEmail
  * @property {number|null} dueDateMs
  * @property {string} dueDisplay
+ * @property {number|null} estimatedHours
  * @property {PasteRowRole} role
  */
 
@@ -158,11 +159,28 @@ export function readTaskCellNesting(taskCell) {
 }
 
 /**
- * Split a pasted line and resolve task / assignee / due with nesting.
+ * @param {string} raw
+ * @returns {number|null}
+ */
+export function parsePasteEstimatedHours(raw) {
+  const s = String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/,/g, '')
+    .replace(/h(ours?)?$/, '')
+    .trim();
+  if (!s) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round(n * 4) / 4; // quarter-hour steps
+}
+
+/**
+ * Split a pasted line and resolve task / assignee / due / estimate with nesting.
  * Leading empty TSV cells (from a leading Tab) count as nesting depth.
  *
  * @param {string} line
- * @returns {{ depth: number, text: string, assignee: string, due: string }}
+ * @returns {{ depth: number, text: string, assignee: string, due: string, estimate: string }}
  */
 export function parsePasteLineFields(line) {
   const cells = splitPasteLine(line);
@@ -181,6 +199,7 @@ export function parsePasteLineFields(line) {
       text: nested.text,
       assignee: rest[0] ?? '',
       due: rest[1] ?? '',
+      estimate: rest[2] ?? '',
     };
   }
   const nested = readTaskCellNesting(cells[0] ?? '');
@@ -189,6 +208,7 @@ export function parsePasteLineFields(line) {
     text: nested.text,
     assignee: cells[1] ?? '',
     due: cells[2] ?? '',
+    estimate: cells[3] ?? '',
   };
 }
 
@@ -254,7 +274,7 @@ export function parseTodoSpreadsheetPaste(text, options = {}) {
     const line = lines[li];
     if (!String(line || '').trim()) continue;
 
-    const { depth, text, assignee: assigneeRaw, due: dueRaw } =
+    const { depth, text, assignee: assigneeRaw, due: dueRaw, estimate: estimateRaw } =
       parsePasteLineFields(line);
 
     if (!sawData && looksLikeHeaderCell(text || '')) {
@@ -266,6 +286,7 @@ export function parseTodoSpreadsheetPaste(text, options = {}) {
     sawData = true;
 
     const dueDateMs = parsePasteDueToMs(dueRaw);
+    const estimatedHours = parsePasteEstimatedHours(estimateRaw);
     const assigneeEmail = resolveAssigneeEmail(
       assigneeRaw,
       assignableEmails,
@@ -293,6 +314,7 @@ export function parseTodoSpreadsheetPaste(text, options = {}) {
       assigneeEmail,
       dueDateMs,
       dueDisplay: formatDueDisplay(dueDateMs),
+      estimatedHours,
       role,
     });
   }
@@ -348,6 +370,7 @@ export function buildTodoItemsFromPasteRows(rows, options = {}) {
         text: String(row.text).trim(),
         dueDate: due,
         assigneeEmails: row.assigneeEmail ? [row.assigneeEmail] : [],
+        estimatedHours: row.estimatedHours != null ? Number(row.estimatedHours) : null,
       });
       current.subtasks = [...(current.subtasks || []), sub];
       continue;
@@ -363,6 +386,7 @@ export function buildTodoItemsFromPasteRows(rows, options = {}) {
       recurringId: null,
       dueDate: row.dueDateMs != null ? Number(row.dueDateMs) : null,
       assigneeEmails: row.assigneeEmail ? [row.assigneeEmail] : [],
+      estimatedHours: row.estimatedHours != null ? Number(row.estimatedHours) : null,
       subtasks: [],
     };
     items.push(current);
