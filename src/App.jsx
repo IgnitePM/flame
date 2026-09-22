@@ -1984,13 +1984,28 @@ export default function App() {
   );
 
   // If the server (or another tab) auto-stopped this user's shift, show the same notice.
+  // Use localStorage (not sessionStorage) so closing the browser doesn't resurface
+  // the same idle clock-out on every subsequent visit for 12 hours.
   useEffect(() => {
     if (!user?.uid) return;
     let dismissed = new Set();
     try {
-      dismissed = new Set(
-        JSON.parse(sessionStorage.getItem('ignite_idle_notice_seen') || '[]'),
+      const fromLocal = JSON.parse(
+        localStorage.getItem('ignite_idle_notice_seen') || '[]',
       );
+      const fromSession = JSON.parse(
+        sessionStorage.getItem('ignite_idle_notice_seen') || '[]',
+      );
+      dismissed = new Set([
+        ...(Array.isArray(fromLocal) ? fromLocal : []),
+        ...(Array.isArray(fromSession) ? fromSession : []),
+      ]);
+      if (dismissed.size) {
+        localStorage.setItem(
+          'ignite_idle_notice_seen',
+          JSON.stringify([...dismissed].slice(-40)),
+        );
+      }
     } catch {
       dismissed = new Set();
     }
@@ -2011,7 +2026,7 @@ export default function App() {
     seenIdleNoticeShiftIdsRef.current.add(latest.id);
     dismissed.add(latest.id);
     try {
-      sessionStorage.setItem(
+      localStorage.setItem(
         'ignite_idle_notice_seen',
         JSON.stringify([...dismissed].slice(-40)),
       );
@@ -4297,12 +4312,12 @@ export default function App() {
               if (idleClockOutNotice?.shiftId) {
                 try {
                   const prev = JSON.parse(
-                    sessionStorage.getItem('ignite_idle_notice_seen') || '[]',
+                    localStorage.getItem('ignite_idle_notice_seen') || '[]',
                   );
                   const next = Array.from(
                     new Set([...(Array.isArray(prev) ? prev : []), idleClockOutNotice.shiftId]),
                   ).slice(-40);
-                  sessionStorage.setItem('ignite_idle_notice_seen', JSON.stringify(next));
+                  localStorage.setItem('ignite_idle_notice_seen', JSON.stringify(next));
                 } catch {
                   /* ignore */
                 }

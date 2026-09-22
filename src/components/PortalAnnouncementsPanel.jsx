@@ -80,10 +80,13 @@ export default function PortalAnnouncementsPanel({ clients = [], userEmail = '' 
       },
       (err) => {
         console.warn('[PortalAnnouncementsPanel]', err);
+        const code = err?.code || '';
         setLoadError(
-          err?.code === 'failed-precondition'
+          code === 'failed-precondition'
             ? 'Announcements index is still building — try again shortly.'
-            : err?.message || 'Could not load announcements.',
+            : code === 'permission-denied'
+              ? 'Missing or insufficient permissions — the portalAnnouncements Firestore rules need to be deployed.'
+              : err?.message || 'Could not load announcements.',
         );
         setRows([]);
       },
@@ -329,37 +332,49 @@ export default function PortalAnnouncementsPanel({ clients = [], userEmail = '' 
           ) : null}
         </div>
 
-        <label className="inline-flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={form.active}
-            onChange={(e) => setForm((p) => ({ ...p, active: e.target.checked }))}
-            className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414]"
-          />
-          <span className="text-xs font-bold text-slate-600">Active (visible in portal)</span>
-        </label>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pt-1">
+          <label className="inline-flex items-center gap-2 cursor-pointer shrink-0">
+            <input
+              type="checkbox"
+              checked={form.active}
+              onChange={(e) => setForm((p) => ({ ...p, active: e.target.checked }))}
+              className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414]"
+            />
+            <span className="text-xs font-bold text-slate-600">Active (visible in portal)</span>
+          </label>
+
+          <button
+            type="submit"
+            disabled={busy}
+            className="inline-flex items-center justify-center gap-2 bg-[#fd7414] hover:bg-[#e8680f] disabled:opacity-50 text-white px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-colors sm:ml-4"
+          >
+            {editingId ? (
+              <>
+                <Pencil className="w-3.5 h-3.5" />
+                Save changes
+              </>
+            ) : (
+              <>
+                <Plus className="w-3.5 h-3.5" />
+                Publish
+              </>
+            )}
+          </button>
+        </div>
 
         {status ? (
-          <p className="text-xs font-bold text-slate-600">{status}</p>
+          <p
+            className={`text-xs font-bold ${
+              /permission|insufficient|denied|could not|required|must |select /i.test(
+                status,
+              )
+                ? 'text-amber-700'
+                : 'text-slate-600'
+            }`}
+          >
+            {status}
+          </p>
         ) : null}
-
-        <button
-          type="submit"
-          disabled={busy}
-          className="inline-flex items-center gap-2 bg-[#fd7414] hover:bg-[#e8680f] disabled:opacity-50 text-white px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-colors"
-        >
-          {editingId ? (
-            <>
-              <Pencil className="w-3.5 h-3.5" />
-              Save changes
-            </>
-          ) : (
-            <>
-              <Plus className="w-3.5 h-3.5" />
-              Publish
-            </>
-          )}
-        </button>
       </form>
 
       {loadError ? (

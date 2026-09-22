@@ -432,8 +432,9 @@ service cloud.firestore {
     }
 
     // Company-wide (or targeted) announcements shown on client portal Home.
+    // Staff manage; any signed-in user (incl. portal contacts) may read.
     match /portalAnnouncements/{announcementId} {
-      allow read: if isAnyStaff() || isSignedIn();
+      allow read: if isSignedIn();
       allow create, update: if isAnyStaff();
       allow delete: if isAdmin();
     }
