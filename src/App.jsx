@@ -1409,12 +1409,42 @@ export default function App() {
     idleShutdownRef.current = { activeTask, activeShift, activeTaskNotes };
   }, [activeTask, activeShift, activeTaskNotes]);
 
-  // Active Billing Targets
-  const clientActiveProjects = projects.filter(p => !p.archived && p.clientName === selectedClient && (p.status === 'active' || p.status === 'approved'));
-  const clientActiveProjectsManual = projects.filter(p => !p.archived && p.clientName === manualTaskValues.clientName && (p.status === 'active' || p.status === 'approved'));
-  const clientActiveProjectsExp = expenseModal ? projects.filter(p => !p.archived && p.clientName === expenseModal.name && (p.status === 'active' || p.status === 'approved')) : [];
+  // Active Billing Targets — match by clientId when available (clientName can drift).
+  // Admin-created / started projects are `active`; portal-approved ones are `approved`.
+  const selectedClientObj = clients.find((c) => c.name === selectedClient);
+  const projectMatchesClient = (p, clientObj, clientName) => {
+    if (!p || p.archived) return false;
+    if (clientObj?.id && p.clientId) return p.clientId === clientObj.id;
+    return Boolean(clientName) && p.clientName === clientName;
+  };
+  const isKioskBillingProject = (p) => {
+    const status = p?.status;
+    if (status === 'active' || status === 'approved') return true;
+    // Existing admin-created projects often stay `requested` until Start Project —
+    // still offer them in Kiosk when they have a title (portal requests usually don't).
+    if (status === 'requested' && String(p?.title || '').trim()) return true;
+    return false;
+  };
+  const clientActiveProjects = projects.filter(
+    (p) => projectMatchesClient(p, selectedClientObj, selectedClient) && isKioskBillingProject(p),
+  );
+  const manualClientObj = clients.find((c) => c.name === manualTaskValues.clientName);
+  const clientActiveProjectsManual = projects.filter(
+    (p) =>
+      projectMatchesClient(p, manualClientObj, manualTaskValues.clientName) &&
+      isKioskBillingProject(p),
+  );
+  const expenseClientObj = expenseModal
+    ? clients.find((c) => c.id === expenseModal.id || c.name === expenseModal.name)
+    : null;
+  const clientActiveProjectsExp = expenseModal
+    ? projects.filter(
+        (p) =>
+          projectMatchesClient(p, expenseClientObj, expenseModal.name) &&
+          isKioskBillingProject(p),
+      )
+    : [];
 
-  const selectedClientObj = clients.find(c => c.name === selectedClient);
   useEffect(() => {
     if (!selectedClient || !clients?.length) return;
     const c = clients.find((x) => x.name === selectedClient);
@@ -2535,6 +2565,7 @@ export default function App() {
       if (!projectValues.title || !clientId) return;
 
       const adminDue = parseProjectDeadlineMs(projectValues.deadline);
+      // Admin-created projects are ready to bill against immediately (show in Kiosk).
       await addDoc(collection(db, 'projects'), {
         clientId,
         clientName,
@@ -2545,7 +2576,8 @@ export default function App() {
         estimatedBudget: Number(projectValues.estimatedBudget) || 0,
         estimatedHours: Number(projectValues.estimatedHours) || 0,
         dueDate: adminDue || null,
-        status: 'requested',
+        status: 'active',
+        startedAt: Date.now(),
         invoiced: false,
         createdAt: Date.now(),
       });

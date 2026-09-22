@@ -84,6 +84,11 @@ import {
   parentDueCapMs,
   removeSubtaskFromItems,
 } from '../utils/todoSubtasks.js';
+import {
+  buildTodoItemsFromPasteRows,
+  parseTodoSpreadsheetPaste,
+  removePastePreviewRow,
+} from '../utils/parseTodoSpreadsheetPaste.js';
 import { recurringAnchorKey } from '../utils/recurringTodoMaterialize.js';
 import { safeDisplayForReact } from '../utils/safeReactText.js';
 import {
@@ -163,6 +168,15 @@ function parseClientSubTabFromSearch(search) {
 function safeProjectStatus(p) {
   const s = p?.status;
   return typeof s === 'string' ? s : '';
+}
+
+/** User-facing status label for custom projects. */
+function projectStatusLabel(status) {
+  const s = typeof status === 'string' ? status : '';
+  if (s === 'closed') return 'Completed';
+  if (s === 'estimate_sent') return 'Estimate sent';
+  if (!s) return '—';
+  return s.replace(/_/g, ' ');
 }
 
 function safeTaskDurationMs(getTaskDuration, task) {
@@ -253,6 +267,45 @@ function ClientCustomProjectsPanelInner({
   const [projectTodoSaving, setProjectTodoSaving] = useState(false);
   const [projectAssigneePickerOpenKey, setProjectAssigneePickerOpenKey] =
     useState(null);
+  const [projectSubtaskComposer, setProjectSubtaskComposer] = useState(null);
+  const [projectSubtaskText, setProjectSubtaskText] = useState('');
+  const [projectSubtaskDue, setProjectSubtaskDue] = useState('');
+  const [projectSubtaskAssignees, setProjectSubtaskAssignees] = useState([]);
+  const [pasteListProjectId, setPasteListProjectId] = useState(null);
+  const [pasteListText, setPasteListText] = useState('');
+  const [pasteListRows, setPasteListRows] = useState([]);
+  const [pasteListSaving, setPasteListSaving] = useState(false);
+
+  const refreshPasteListPreview = (rawText, projectId) => {
+    const todoState =
+      getTodoStateForCycle && c && mStart ? getTodoStateForCycle(c, mStart) : {};
+    const catKey = todoCategoryKey
+      ? todoCategoryKey(`project_${projectId}`)
+      : `project_${projectId}`;
+    const existingItems = todoState?.[catKey]?.items || [];
+    const me = String(user?.email || '')
+      .trim()
+      .toLowerCase();
+    const rows = parseTodoSpreadsheetPaste(rawText, {
+      assignableEmails,
+      defaultAssigneeEmail: me,
+      existingParentTexts: existingItems.map((i) => i?.text),
+    });
+    setPasteListRows(rows);
+  };
+
+  const openPasteListModal = (projectId) => {
+    setPasteListProjectId(projectId);
+    setPasteListText('');
+    setPasteListRows([]);
+  };
+
+  const closePasteListModal = () => {
+    setPasteListProjectId(null);
+    setPasteListText('');
+    setPasteListRows([]);
+    setPasteListSaving(false);
+  };
 
   const renderAssigneeMultiSelect = ({ openKey, value, onChange, disabled }) => {
     const cleaned = Array.isArray(value)
@@ -354,9 +407,9 @@ function ClientCustomProjectsPanelInner({
     );
   }
   return (
-    <div className="bg-slate-50/50 p-6 border-t border-slate-100 animate-in slide-in-from-top-4 duration-300 space-y-6 min-h-[120px]">
-      <div>
-        <div className="flex justify-between items-center mb-3">
+    <div className="w-full min-w-0 bg-slate-50/50 p-4 sm:p-6 border-t border-slate-100 animate-in slide-in-from-top-4 duration-300 space-y-6 min-h-[120px]">
+      <div className="w-full min-w-0">
+        <div className="flex justify-between items-center mb-3 gap-3">
           <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
             Custom Projects
           </h5>
@@ -392,15 +445,23 @@ function ClientCustomProjectsPanelInner({
         {(clientProjects || []).length === 0 ? (
           <p className="text-xs italic text-slate-400">No custom projects yet.</p>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-4 w-full min-w-0">
             {(clientProjects || [])
               .filter(
-                (p) =>
-                  p != null &&
-                  p.id != null &&
-                  String(p.id).length > 0 &&
-                  !(safeProjectStatus(p) === 'closed' && p.invoiced),
+                (p) => p != null && p.id != null && String(p.id).length > 0,
               )
+              .slice()
+              .sort((a, b) => {
+                const rank = (p) => {
+                  const s = safeProjectStatus(p);
+                  if (s === 'active' || s === 'approved') return 0;
+                  if (s === 'closed') return 2;
+                  return 1;
+                };
+                const d = rank(a) - rank(b);
+                if (d !== 0) return d;
+                return Number(b.createdAt || 0) - Number(a.createdAt || 0);
+              })
               .map((p) => {
                 const pTasks = (taskLogs || []).filter((t) => t?.projectId === p.id);
                 const totalHours =
@@ -421,11 +482,14 @@ function ClientCustomProjectsPanelInner({
                 return (
                   <div
                     key={String(p.id)}
-                    className="p-4 rounded-2xl border border-slate-100 bg-white flex flex-col sm:flex-row justify-between gap-4"
+                    className={`w-full min-w-0 p-4 sm:p-5 rounded-2xl border border-slate-100 bg-white flex flex-col gap-4 ${
+                      statusStr === 'closed' ? 'opacity-90' : ''
+                    }`}
                   >
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-black text-sm text-slate-800">
+                    <div className="flex flex-col lg:flex-row gap-4 w-full min-w-0">
+                      <div className="min-w-0 flex-1 space-y-2">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <span className="font-black text-base sm:text-lg text-slate-800">
                           {titleStr}
                         </span>
                         <span
@@ -434,10 +498,12 @@ function ClientCustomProjectsPanelInner({
                               ? 'bg-orange-100 text-orange-600'
                               : statusStr === 'active'
                                 ? 'bg-emerald-100 text-emerald-600'
-                                : 'bg-slate-200 text-slate-500'
+                                : statusStr === 'closed'
+                                  ? 'bg-slate-800 text-white'
+                                  : 'bg-slate-200 text-slate-500'
                           }`}
                         >
-                          {statusStr || '—'}
+                          {projectStatusLabel(statusStr)}
                         </span>
                         {p.invoiced && (
                           <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
@@ -488,9 +554,148 @@ function ClientCustomProjectsPanelInner({
                           onRemove={removeProjectAttachment}
                         />
                       ) : null}
+                      </div>
+                    <div className="flex flex-row flex-wrap lg:flex-col gap-2 shrink-0 lg:w-44">
+                      <button
+                        type="button"
+                        disabled={readOnly}
+                        onClick={() => {
+                          if (readOnly) return;
+                          setManualTaskValues({
+                            clientName: c.name,
+                            billingTarget: `project_${p.id}`,
+                            date: '',
+                            hours: '',
+                            minutes: '',
+                            notes: '',
+                            employeeName:
+                              user?.displayName || user?.email || '',
+                            parsedExpense: 0,
+                          });
+                          setManualTaskModal(true);
+                        }}
+                        className={`px-3 py-1.5 rounded-xl lg:w-full text-center text-[10px] font-black uppercase tracking-widest transition-colors ${
+                          readOnly
+                            ? 'opacity-40 cursor-not-allowed bg-slate-100 text-slate-400'
+                            : 'bg-slate-800 text-white hover:bg-black'
+                        }`}
+                        title={readOnly ? 'Admin only' : `Log task for ${p.title}`}
+                      >
+                        Log Task
+                      </button>
+                      {!readOnly && (
+                        <>
+                          {(statusStr === 'requested' || statusStr === 'approved') && (
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await updateDoc(fd('projects', p.id), {
+                                    status: 'active',
+                                    startedAt: Date.now(),
+                                    notificationState: {
+                                      ...(p.notificationState || {}),
+                                      adminApproved: false,
+                                    },
+                                  });
+                                  await logAudit?.({
+                                    type: 'project_started',
+                                    entityType: 'project',
+                                    entityId: p.id,
+                                    clientId: c.id,
+                                  });
+                                } catch (err) {
+                                  window.alert(
+                                    `Could not start project: ${err?.message || String(err)}`,
+                                  );
+                                }
+                              }}
+                              className="px-3 py-1.5 rounded-xl lg:w-full text-center bg-black text-white text-[10px] font-black uppercase tracking-widest hover:bg-slate-900"
+                            >
+                              Start Project
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              setProjectEditError('');
+                              setProjectEditModal({ project: p, client: c });
+                              setProjectEditValues({
+                                estimatedBudget: String(p.estimatedBudget ?? ''),
+                                estimatedHours: String(p.estimatedHours ?? ''),
+                                deadline: p.dueDate
+                                  ? (() => {
+                                      const d = new Date(p.dueDate);
+                                      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                                    })()
+                                  : '',
+                              });
+                            }}
+                            className="px-3 py-1.5 rounded-xl lg:w-full text-center bg-white border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-600 hover:bg-slate-100"
+                          >
+                            Edit Estimates
+                          </button>
+                          {statusStr !== 'closed' && (
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await updateDoc(fd('projects', p.id), {
+                                    status: 'closed',
+                                    closedAt: Date.now(),
+                                  });
+                                  await logAudit?.({
+                                    type: 'project_closed',
+                                    entityType: 'project',
+                                    entityId: p.id,
+                                    clientId: c.id,
+                                  });
+                                } catch (err) {
+                                  window.alert(
+                                    `Could not close project: ${err?.message || String(err)}`,
+                                  );
+                                }
+                              }}
+                              className="px-3 py-1.5 rounded-xl lg:w-full text-center bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest hover:bg-black"
+                            >
+                              Mark Complete
+                            </button>
+                          )}
+                          {statusStr === 'closed' && !p.invoiced && (
+                            <button
+                              onClick={() =>
+                                updateDoc(fd('projects', p.id), {
+                                  invoiced: true,
+                                }).then(() =>
+                                  logAudit?.({
+                                    type: 'project_marked_invoiced',
+                                    entityType: 'project',
+                                    entityId: p.id,
+                                    clientId: c.id,
+                                  }),
+                                )
+                              }
+                              className="px-3 py-1.5 rounded-xl lg:w-full text-center bg-blue-500 text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-600"
+                            >
+                              Mark Invoiced
+                            </button>
+                          )}
+                          <button
+                            onClick={() =>
+                              setDeleteConfirm({
+                                collection: 'projects',
+                                id: p.id,
+                                title: `custom project "${titleStr}" for ${c.name}`,
+                              })
+                            }
+                            className="px-3 py-1.5 rounded-xl lg:w-full text-center bg-white border border-red-100 text-[10px] font-black uppercase tracking-widest text-red-400 hover:bg-red-50"
+                          >
+                            Delete Project
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    </div>
 
                       {/* Project to-do checklist (cycle-based like client Tasks) */}
-                      <div className="mt-3 pt-3 border-t border-slate-100">
+                      <div className="w-full min-w-0 pt-3 border-t border-slate-100">
                         {(() => {
                           const catKey = todoCategoryKey
                             ? todoCategoryKey(`project_${p.id}`)
@@ -519,9 +724,24 @@ function ClientCustomProjectsPanelInner({
                                 <h6 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
                                   To-dos
                                 </h6>
-                                <span className="text-[10px] font-black text-slate-400">
-                                  {done}/{total} done
-                                </span>
+                                <div className="flex items-center gap-2">
+                                  {!readOnly &&
+                                    updateClientTodo &&
+                                    !isCycleLocked(c, mStart) && (
+                                      <button
+                                        type="button"
+                                        disabled={projectTodoSaving || pasteListSaving}
+                                        onClick={() => openPasteListModal(p.id)}
+                                        className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[9px] font-black uppercase tracking-widest text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                                        title="Paste a spreadsheet list of tasks"
+                                      >
+                                        Paste list
+                                      </button>
+                                    )}
+                                  <span className="text-[10px] font-black text-slate-400">
+                                    {done}/{total} done
+                                  </span>
+                                </div>
                               </div>
 
                               {total === 0 ? (
@@ -529,17 +749,22 @@ function ClientCustomProjectsPanelInner({
                                   No to-dos yet.
                                 </p>
                               ) : (
-                                <div className="space-y-3 mb-3">
+                                <div className="space-y-3 mb-3 w-full min-w-0">
                                   {items.map((item) => {
                                     const itemAssignees = Array.isArray(item?.assigneeEmails)
                                       ? item.assigneeEmails
                                           .map((e) => String(e || '').trim().toLowerCase())
                                           .filter(Boolean)
                                       : [];
+                                    const subs = getSubtasks(item);
+                                    const composerMatch =
+                                      !!projectSubtaskComposer &&
+                                      String(projectSubtaskComposer.projectId) === String(p.id) &&
+                                      String(projectSubtaskComposer.parentId) === String(item.id);
                                     return (
                                       <div
                                         key={item.id}
-                                        className={`rounded-xl border border-slate-100 bg-slate-50/50 p-2 space-y-2 ${
+                                        className={`rounded-xl border border-slate-100 bg-slate-50/50 p-3 space-y-2 w-full min-w-0 ${
                                           item.done ? 'opacity-70' : ''
                                         }`}
                                       >
@@ -594,6 +819,12 @@ function ClientCustomProjectsPanelInner({
                                           >
                                             {item.text || '(no text)'}
                                           </span>
+                                          {subs.length > 0 ? (
+                                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 shrink-0">
+                                              {subs.filter((s) => !s.done).length}/{subs.length}{' '}
+                                              sub-tasks
+                                            </span>
+                                          ) : null}
                                         </label>
                                         <div className="text-[10px] font-bold text-slate-400 pl-6">
                                           {item.dueDate
@@ -664,6 +895,335 @@ function ClientCustomProjectsPanelInner({
                                             />
                                           </div>
                                         ) : null}
+                                        <div className="pl-4 sm:pl-6 w-full min-w-0 space-y-2">
+                                          {subs.length > 0 ? (
+                                            <ul className="ml-1 border-l border-slate-200 pl-3 space-y-2 w-full min-w-0">
+                                              {subs.map((sub) => {
+                                                const subAs = Array.isArray(sub?.assigneeEmails)
+                                                  ? sub.assigneeEmails
+                                                      .map((e) =>
+                                                        String(e || '').trim().toLowerCase(),
+                                                      )
+                                                      .filter(Boolean)
+                                                  : [];
+                                                return (
+                                                  <li
+                                                    key={sub.id}
+                                                    className={`flex flex-wrap items-center gap-2 rounded-lg px-2 py-2 bg-white border border-slate-100 w-full min-w-0 ${
+                                                      sub.done ? 'opacity-70' : ''
+                                                    }`}
+                                                  >
+                                                    <input
+                                                      type="checkbox"
+                                                      checked={!!sub.done}
+                                                      disabled={
+                                                        projectTodoSaving ||
+                                                        isCycleLocked(c, mStart) ||
+                                                        readOnly
+                                                      }
+                                                      onChange={async () => {
+                                                        if (!updateClientTodo) return;
+                                                        setProjectTodoSaving(true);
+                                                        try {
+                                                          const prev =
+                                                            todoStateForCycle?.[catKey] || {
+                                                              closed: false,
+                                                              items: [],
+                                                            };
+                                                          const next = (prev.items || []).map(
+                                                            (i) =>
+                                                              i.id === item.id
+                                                                ? mapItemSubtasks(i, (s) =>
+                                                                    s.id === sub.id
+                                                                      ? {
+                                                                          ...s,
+                                                                          done: !s.done,
+                                                                          doneAt: !s.done
+                                                                            ? Date.now()
+                                                                            : null,
+                                                                        }
+                                                                      : s,
+                                                                  )
+                                                                : i,
+                                                          );
+                                                          await updateClientTodo(
+                                                            c,
+                                                            mStart,
+                                                            catKey,
+                                                            { ...prev, items: next },
+                                                          );
+                                                        } finally {
+                                                          setProjectTodoSaving(false);
+                                                        }
+                                                      }}
+                                                      className="rounded border-slate-300 text-[#fd7414] w-4 h-4 shrink-0"
+                                                    />
+                                                    <span
+                                                      className={`flex-1 min-w-0 text-sm font-bold break-words ${
+                                                        sub.done
+                                                          ? 'line-through text-slate-400'
+                                                          : 'text-slate-700'
+                                                      }`}
+                                                    >
+                                                      {safeDisplayForReact(sub.text) ||
+                                                        '(sub-task)'}
+                                                    </span>
+                                                    <span className="text-[10px] font-bold text-slate-400">
+                                                      {sub.dueDate
+                                                        ? `Due ${new Date(sub.dueDate).toLocaleDateString()}`
+                                                        : 'No due'}
+                                                    </span>
+                                                    {!readOnly ? (
+                                                      <>
+                                                        {renderAssigneeMultiSelect({
+                                                          openKey: `proj_sub__${p.id}__${item.id}__${sub.id}`,
+                                                          value: subAs,
+                                                          disabled:
+                                                            projectTodoSaving ||
+                                                            isCycleLocked(c, mStart),
+                                                          onChange: async (nextAssignees) => {
+                                                            if (!updateClientTodo) return;
+                                                            setProjectTodoSaving(true);
+                                                            try {
+                                                              const prev =
+                                                                todoStateForCycle?.[catKey] || {
+                                                                  closed: false,
+                                                                  items: [],
+                                                                };
+                                                              const next = (
+                                                                prev.items || []
+                                                              ).map((i) =>
+                                                                i.id === item.id
+                                                                  ? mapItemSubtasks(i, (s) =>
+                                                                      s.id === sub.id
+                                                                        ? {
+                                                                            ...s,
+                                                                            assigneeEmails:
+                                                                              nextAssignees,
+                                                                          }
+                                                                        : s,
+                                                                    )
+                                                                  : i,
+                                                              );
+                                                              await updateClientTodo(
+                                                                c,
+                                                                mStart,
+                                                                catKey,
+                                                                { ...prev, items: next },
+                                                              );
+                                                            } finally {
+                                                              setProjectTodoSaving(false);
+                                                              setProjectAssigneePickerOpenKey(
+                                                                null,
+                                                              );
+                                                            }
+                                                          },
+                                                        })}
+                                                        {typeof onOpenTodoItemOptions ===
+                                                          'function' &&
+                                                          !isCycleLocked(c, mStart) && (
+                                                            <button
+                                                              type="button"
+                                                              disabled={projectTodoSaving}
+                                                              onClick={() =>
+                                                                onOpenTodoItemOptions(
+                                                                  c,
+                                                                  mStart,
+                                                                  catKey,
+                                                                  item,
+                                                                  sub,
+                                                                )
+                                                              }
+                                                              className="px-2 py-1.5 rounded-lg border border-slate-200 bg-white text-[9px] font-black uppercase tracking-widest text-slate-600"
+                                                            >
+                                                              Options
+                                                            </button>
+                                                          )}
+                                                        <button
+                                                          type="button"
+                                                          disabled={
+                                                            projectTodoSaving ||
+                                                            isCycleLocked(c, mStart)
+                                                          }
+                                                          onClick={async () => {
+                                                            if (
+                                                              !window.confirm(
+                                                                'Remove this sub-task?',
+                                                              )
+                                                            )
+                                                              return;
+                                                            setProjectTodoSaving(true);
+                                                            try {
+                                                              const prev =
+                                                                todoStateForCycle?.[catKey] || {
+                                                                  closed: false,
+                                                                  items: [],
+                                                                };
+                                                              const next =
+                                                                removeSubtaskFromItems(
+                                                                  prev.items || [],
+                                                                  item.id,
+                                                                  sub.id,
+                                                                );
+                                                              await updateClientTodo(
+                                                                c,
+                                                                mStart,
+                                                                catKey,
+                                                                { ...prev, items: next },
+                                                              );
+                                                            } finally {
+                                                              setProjectTodoSaving(false);
+                                                            }
+                                                          }}
+                                                          className="p-1 text-slate-300 hover:text-red-500"
+                                                          title="Delete sub-task"
+                                                        >
+                                                          <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                      </>
+                                                    ) : null}
+                                                  </li>
+                                                );
+                                              })}
+                                            </ul>
+                                          ) : null}
+                                          {!readOnly && !item.done ? (
+                                            <div className="w-full">
+                                              {!composerMatch ? (
+                                                <button
+                                                  type="button"
+                                                  disabled={
+                                                    projectTodoSaving ||
+                                                    isCycleLocked(c, mStart)
+                                                  }
+                                                  onClick={() => {
+                                                    setProjectSubtaskComposer({
+                                                      projectId: p.id,
+                                                      parentId: item.id,
+                                                    });
+                                                    setProjectSubtaskText('');
+                                                    setProjectSubtaskDue('');
+                                                    setProjectSubtaskAssignees([]);
+                                                  }}
+                                                  className="text-[10px] font-black uppercase tracking-widest text-[#fd7414] hover:underline disabled:opacity-40"
+                                                >
+                                                  + Add sub-task
+                                                </button>
+                                              ) : (
+                                                <div className="flex flex-col sm:flex-row flex-wrap gap-2 items-start sm:items-end bg-white rounded-xl p-3 border border-slate-200 w-full">
+                                                  <input
+                                                    type="text"
+                                                    value={projectSubtaskText}
+                                                    onChange={(e) =>
+                                                      setProjectSubtaskText(e.target.value)
+                                                    }
+                                                    placeholder="Sub-task description"
+                                                    className="flex-1 min-w-[140px] border border-slate-200 rounded-lg px-2 py-2 text-sm w-full"
+                                                  />
+                                                  <input
+                                                    type="date"
+                                                    value={projectSubtaskDue}
+                                                    max={
+                                                      item.dueDate
+                                                        ? (() => {
+                                                            const d = new Date(item.dueDate);
+                                                            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                                                          })()
+                                                        : undefined
+                                                    }
+                                                    onChange={(e) =>
+                                                      setProjectSubtaskDue(e.target.value)
+                                                    }
+                                                    className="border border-slate-200 rounded-lg px-2 py-2 text-sm"
+                                                  />
+                                                  {renderAssigneeMultiSelect({
+                                                    openKey: `proj_sub_add__${p.id}__${item.id}`,
+                                                    value: projectSubtaskAssignees,
+                                                    disabled: projectTodoSaving,
+                                                    onChange: setProjectSubtaskAssignees,
+                                                  })}
+                                                  <button
+                                                    type="button"
+                                                    disabled={
+                                                      projectTodoSaving ||
+                                                      !String(projectSubtaskText || '').trim()
+                                                    }
+                                                    onClick={async () => {
+                                                      if (!updateClientTodo) return;
+                                                      const text = String(
+                                                        projectSubtaskText || '',
+                                                      ).trim();
+                                                      if (!text) return;
+                                                      setProjectTodoSaving(true);
+                                                      try {
+                                                        const prev =
+                                                          todoStateForCycle?.[catKey] || {
+                                                            closed: false,
+                                                            items: [],
+                                                          };
+                                                        const dueMs = projectSubtaskDue
+                                                          ? new Date(
+                                                              `${projectSubtaskDue}T12:00:00`,
+                                                            ).getTime()
+                                                          : null;
+                                                        const capped = clampSubtaskDueToParent(
+                                                          item,
+                                                          dueMs,
+                                                        );
+                                                        const me = String(user?.email || '')
+                                                          .trim()
+                                                          .toLowerCase();
+                                                        const assignees =
+                                                          projectSubtaskAssignees.length > 0
+                                                            ? projectSubtaskAssignees
+                                                            : me
+                                                              ? [me]
+                                                              : [];
+                                                        const sub = newSubtaskTemplate({
+                                                          text,
+                                                          dueDate: capped,
+                                                          assigneeEmails: assignees,
+                                                        });
+                                                        const next = addSubtaskToItems(
+                                                          prev.items || [],
+                                                          item.id,
+                                                          sub,
+                                                        );
+                                                        await updateClientTodo(
+                                                          c,
+                                                          mStart,
+                                                          catKey,
+                                                          { ...prev, items: next },
+                                                        );
+                                                        setProjectSubtaskComposer(null);
+                                                        setProjectSubtaskText('');
+                                                        setProjectSubtaskDue('');
+                                                        setProjectSubtaskAssignees([]);
+                                                      } finally {
+                                                        setProjectTodoSaving(false);
+                                                      }
+                                                    }}
+                                                    className="px-3 py-2 rounded-lg bg-[#fd7414] text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-40"
+                                                  >
+                                                    Save sub-task
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                      setProjectSubtaskComposer(null);
+                                                      setProjectSubtaskText('');
+                                                      setProjectSubtaskDue('');
+                                                      setProjectSubtaskAssignees([]);
+                                                    }}
+                                                    className="px-3 py-2 rounded-lg border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-500"
+                                                  >
+                                                    Cancel
+                                                  </button>
+                                                </div>
+                                              )}
+                                            </div>
+                                          ) : null}
+                                        </div>
                                       </div>
                                     );
                                   })}
@@ -742,6 +1302,7 @@ function ClientCustomProjectsPanelInner({
                                             recurringId: null,
                                             dueDate: null,
                                           assigneeEmails: chosenAssignees,
+                                          subtasks: [],
                                           };
                                           await updateClientTodo(c, mStart, catKey, {
                                             ...prev,
@@ -831,6 +1392,7 @@ function ClientCustomProjectsPanelInner({
                                               recurringId: null,
                                               dueDate: null,
                                             assigneeEmails: chosenAssignees,
+                                            subtasks: [],
                                             };
                                             await updateClientTodo(c, mStart, catKey, {
                                               ...prev,
@@ -865,166 +1427,200 @@ function ClientCustomProjectsPanelInner({
                           );
                         })()}
                       </div>
-                    </div>
-                    <div className="flex flex-col gap-2 items-end">
-                      <button
-                        type="button"
-                        disabled={readOnly}
-                        onClick={() => {
-                          if (readOnly) return;
-                          setManualTaskValues({
-                            clientName: c.name,
-                            billingTarget: `project_${p.id}`,
-                            date: '',
-                            hours: '',
-                            minutes: '',
-                            notes: '',
-                            employeeName:
-                              user?.displayName || user?.email || '',
-                            parsedExpense: 0,
-                          });
-                          setManualTaskModal(true);
-                        }}
-                        className={`px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors ${
-                          readOnly
-                            ? 'opacity-40 cursor-not-allowed bg-slate-100 text-slate-400'
-                            : 'bg-slate-800 text-white hover:bg-black'
-                        }`}
-                        title={readOnly ? 'Admin only' : `Log task for ${p.title}`}
-                      >
-                        Log Task
-                      </button>
-                      {!readOnly && (
-                        <>
-                          {(statusStr === 'requested' || statusStr === 'approved') && (
-                            <button
-                              onClick={async () => {
-                                if (isCycleLocked(c, mStart)) {
-                                  window.alert(
-                                    'This billing cycle is locked. Unlock to start projects.',
-                                  );
-                                  return;
-                                }
-                                try {
-                                  await updateDoc(fd('projects', p.id), {
-                                    status: 'active',
-                                    startedAt: Date.now(),
-                                    notificationState: {
-                                      ...(p.notificationState || {}),
-                                      adminApproved: false,
-                                    },
-                                  });
-                                  await logAudit?.({
-                                    type: 'project_started',
-                                    entityType: 'project',
-                                    entityId: p.id,
-                                    clientId: c.id,
-                                  });
-                                } catch (err) {
-                                  window.alert(
-                                    `Could not start project: ${err?.message || String(err)}`,
-                                  );
-                                }
-                              }}
-                              className="px-3 py-1 rounded-xl bg-black text-white text-[10px] font-black uppercase tracking-widest hover:bg-slate-900"
-                            >
-                              Start Project
-                            </button>
-                          )}
-                          <button
-                            onClick={() => {
-                              setProjectEditError('');
-                              setProjectEditModal({ project: p, client: c });
-                              setProjectEditValues({
-                                estimatedBudget: String(p.estimatedBudget ?? ''),
-                                estimatedHours: String(p.estimatedHours ?? ''),
-                                deadline: p.dueDate
-                                  ? (() => {
-                                      const d = new Date(p.dueDate);
-                                      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-                                    })()
-                                  : '',
-                              });
-                            }}
-                            className="px-3 py-1 rounded-xl bg-white border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-600 hover:bg-slate-100"
-                          >
-                            Edit Estimates
-                          </button>
-                          {statusStr !== 'closed' && (
-                            <button
-                              onClick={async () => {
-                                if (isCycleLocked(c, mStart)) {
-                                  window.alert(
-                                    'This billing cycle is locked. Unlock to close projects.',
-                                  );
-                                  return;
-                                }
-                                try {
-                                  await updateDoc(fd('projects', p.id), {
-                                    status: 'closed',
-                                    closedAt: Date.now(),
-                                  });
-                                  await logAudit?.({
-                                    type: 'project_closed',
-                                    entityType: 'project',
-                                    entityId: p.id,
-                                    clientId: c.id,
-                                  });
-                                } catch (err) {
-                                  window.alert(
-                                    `Could not close project: ${err?.message || String(err)}`,
-                                  );
-                                }
-                              }}
-                              className="px-3 py-1 rounded-xl bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest hover:bg-black"
-                            >
-                              Mark Complete
-                            </button>
-                          )}
-                          {statusStr === 'closed' && !p.invoiced && (
-                            <button
-                              onClick={() =>
-                                isCycleLocked(c, mStart)
-                                  ? window.alert(
-                                      'This billing cycle is locked. Unlock to mark invoiced.',
-                                    )
-                                  : updateDoc(fd('projects', p.id), {
-                                      invoiced: true,
-                                    }).then(() =>
-                                      logAudit?.({
-                                        type: 'project_marked_invoiced',
-                                        entityType: 'project',
-                                        entityId: p.id,
-                                        clientId: c.id,
-                                      }),
-                                    )
-                              }
-                              className="px-3 py-1 rounded-xl bg-blue-500 text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-600"
-                            >
-                              Mark Invoiced
-                            </button>
-                          )}
-                          <button
-                            onClick={() =>
-                              setDeleteConfirm({
-                                collection: 'projects',
-                                id: p.id,
-                                title: `custom project "${titleStr}" for ${c.name}`,
-                              })
-                            }
-                            className="px-3 py-1 rounded-xl bg-white border border-red-100 text-[10px] font-black uppercase tracking-widest text-red-400 hover:bg-red-50"
-                          >
-                            Delete Project
-                          </button>
-                        </>
-                      )}
-                    </div>
                   </div>
                 );
               })}
           </div>
         )}
       </div>
+
+      {pasteListProjectId != null &&
+        (() => {
+          const pasteProject = (clientProjects || []).find(
+            (proj) => String(proj?.id) === String(pasteListProjectId),
+          );
+          const pasteTitle = safeDisplayForReact(
+            pasteProject?.title || pasteProject?.name || 'Project',
+          );
+          const parentCount = pasteListRows.filter((r) => r.role === 'parent').length;
+          const subCount = pasteListRows.filter((r) => r.role === 'subtask').length;
+          return (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[200] animate-in fade-in">
+              <div className="bg-white rounded-t-3xl sm:rounded-[32px] w-full max-w-3xl shadow-2xl max-h-[92vh] flex flex-col">
+                <div className="shrink-0 p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                  <div>
+                    <h3 className="font-black text-xl sm:text-2xl text-slate-900">
+                      Paste list
+                    </h3>
+                    <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                      {pasteTitle} · Task | Assignee | Due
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closePasteListModal}
+                    className="touch-target p-2 bg-white rounded-full hover:bg-slate-100 border border-slate-200"
+                    title="Close"
+                  >
+                    <X className="w-5 h-5 text-slate-500" />
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                      Spreadsheet paste (TSV / CSV)
+                    </label>
+                    <textarea
+                      value={pasteListText}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setPasteListText(next);
+                        refreshPasteListPreview(next, pasteListProjectId);
+                      }}
+                      className="w-full bg-white border border-slate-200 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-[#fd7414] min-h-[140px] sm:min-h-[180px] font-mono text-sm"
+                      placeholder={`Task\tAssignee\tDue\nShip invoice\talice@ex.com\t2026-04-01\n\tGather line items\t\t2026-03-20`}
+                    />
+                    <p className="text-[11px] text-slate-400 font-bold">
+                      Columns: Task (required), optional Assignee email, optional Due
+                      (YYYY-MM-DD). Indent the task with Tab or 2+ spaces for a
+                      sub-task under the previous parent. Blank assignee defaults to
+                      you.
+                    </p>
+                  </div>
+
+                  {pasteListRows.length > 0 && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <h4 className="text-[12px] font-black text-slate-900">
+                          Preview ({parentCount} task
+                          {parentCount === 1 ? '' : 's'}
+                          {subCount
+                            ? `, ${subCount} sub-task${subCount === 1 ? '' : 's'}`
+                            : ''}
+                          )
+                        </h4>
+                      </div>
+                      <div className="max-h-[320px] overflow-auto rounded-2xl border border-slate-200">
+                        <table className="w-full text-left text-sm">
+                          <thead className="bg-slate-50 sticky top-0">
+                            <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                              <th className="px-3 py-2">Type</th>
+                              <th className="px-3 py-2">Task</th>
+                              <th className="px-3 py-2">Assignee</th>
+                              <th className="px-3 py-2">Due</th>
+                              <th className="px-3 py-2 w-16" />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {pasteListRows.map((row) => (
+                              <tr
+                                key={row.previewId}
+                                className="border-t border-slate-100 hover:bg-slate-50/80"
+                              >
+                                <td className="px-3 py-2 align-top">
+                                  <span
+                                    className={`inline-block text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-lg ${
+                                      row.role === 'subtask'
+                                        ? 'bg-slate-200 text-slate-600'
+                                        : 'bg-[#fd7414]/15 text-[#fd7414]'
+                                    }`}
+                                  >
+                                    {row.role === 'subtask' ? 'Sub' : 'Parent'}
+                                  </span>
+                                </td>
+                                <td
+                                  className={`px-3 py-2 align-top font-bold text-slate-800 ${
+                                    row.role === 'subtask' ? 'pl-6' : ''
+                                  }`}
+                                >
+                                  {row.text}
+                                </td>
+                                <td className="px-3 py-2 align-top text-xs text-slate-500">
+                                  {row.assigneeEmail || '—'}
+                                </td>
+                                <td className="px-3 py-2 align-top text-xs text-slate-500">
+                                  {row.dueDisplay || '—'}
+                                </td>
+                                <td className="px-3 py-2 align-top">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setPasteListRows((prev) =>
+                                        removePastePreviewRow(prev, row.previewId),
+                                      )
+                                    }
+                                    className="p-1 text-slate-300 hover:text-red-500"
+                                    title="Remove row"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="shrink-0 flex justify-end gap-3 p-4 sm:p-6 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={closePasteListModal}
+                    className="px-5 py-3 rounded-2xl font-black text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={
+                      pasteListSaving ||
+                      pasteListRows.length === 0 ||
+                      !updateClientTodo ||
+                      isCycleLocked(c, mStart)
+                    }
+                    onClick={async () => {
+                      if (!updateClientTodo || !pasteListProjectId) return;
+                      if (isCycleLocked(c, mStart)) return;
+                      const catKey = todoCategoryKey
+                        ? todoCategoryKey(`project_${pasteListProjectId}`)
+                        : `project_${pasteListProjectId}`;
+                      const todoState =
+                        getTodoStateForCycle && c && mStart
+                          ? getTodoStateForCycle(c, mStart)
+                          : {};
+                      const prev = todoState?.[catKey] || {
+                        closed: false,
+                        items: [],
+                      };
+                      const existing = prev.items || [];
+                      const newItems = buildTodoItemsFromPasteRows(pasteListRows);
+                      if (!newItems.length) return;
+                      setPasteListSaving(true);
+                      try {
+                        await updateClientTodo(c, mStart, catKey, {
+                          ...prev,
+                          closed: false,
+                          items: [...existing, ...newItems],
+                        });
+                        closePasteListModal();
+                      } finally {
+                        setPasteListSaving(false);
+                      }
+                    }}
+                    className="bg-[#fd7414] text-white px-8 py-3 rounded-2xl font-black shadow-lg active:scale-95 transition-all disabled:opacity-50"
+                  >
+                    {pasteListSaving
+                      ? 'Adding…'
+                      : `Add ${parentCount} task${parentCount === 1 ? '' : 's'}`}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
     </div>
   );
 }
@@ -4280,7 +4876,7 @@ const AdminDashboard = ({
                       </button>
                       <button
                         type="button"
-                        disabled={isRestrictedStaff || isCycleLocked(c, mStart)}
+                        disabled={isRestrictedStaff}
                         onClick={() => {
                           setProjectModal({ ...c, lockClient: true });
                           setProjectValues({
@@ -7180,10 +7776,12 @@ const AdminDashboard = ({
                                   ? 'bg-orange-100 text-orange-600'
                                   : p.status === 'active'
                                   ? 'bg-emerald-100 text-emerald-600'
+                                  : p.status === 'closed'
+                                  ? 'bg-slate-800 text-white'
                                   : 'bg-slate-200 text-slate-500'
                               }`}
                             >
-                              {p.status}
+                              {p.status === 'closed' ? 'Completed' : p.status}
                             </span>
                             {p.notificationState?.adminNeedsReview && (
                               <span className="bg-orange-100 text-orange-700 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">

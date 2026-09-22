@@ -382,11 +382,20 @@ const ClientPortal = ({
   const pendingRequests = cProjects.filter((p) =>
     ['requested', 'estimate_sent', 'approved'].includes(p.status),
   );
-  const visibleProjects = cProjects.filter(
-    (p) =>
-      !['requested', 'estimate_sent'].includes(p.status) &&
-      String(p.title || '').trim() !== '',
-  );
+  const projectDisplayTitle = (p) =>
+    String(p?.title || '').trim() ||
+    String(p?.category || '').trim() ||
+    'Custom project';
+  // Include completed (closed) projects across retainer cycles — they stay on the client.
+  const visibleProjects = cProjects
+    .filter((p) => !['requested', 'estimate_sent'].includes(p.status))
+    .slice()
+    .sort((a, b) => {
+      const rank = (p) => (p.status === 'closed' ? 2 : p.status === 'active' ? 0 : 1);
+      const d = rank(a) - rank(b);
+      if (d !== 0) return d;
+      return Number(b.createdAt || 0) - Number(a.createdAt || 0);
+    });
 
   const stats = getGlobalRetainerStats(clientProfile, mStart, mEnd, {
     taskLogs,
@@ -858,18 +867,18 @@ const ClientPortal = ({
                   >
                     <div className="flex justify-between items-start mb-2">
                       <h4 className="font-black text-slate-800 text-lg">
-                        {String(p.title || '')}
+                        {projectDisplayTitle(p)}
                       </h4>
                       <span
                         className={`text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full ${
                           p.status === 'active'
                             ? 'bg-emerald-100 text-emerald-600'
                             : p.status === 'closed'
-                            ? 'bg-slate-200 text-slate-500'
+                            ? 'bg-slate-800 text-white'
                             : 'bg-orange-100 text-orange-600'
                         }`}
                       >
-                        {p.status}
+                        {p.status === 'closed' ? 'Completed' : p.status}
                       </span>
                     </div>
                     <p className="text-xs text-slate-500 font-medium mb-4 italic line-clamp-2">
