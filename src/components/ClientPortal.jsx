@@ -555,8 +555,7 @@ const ClientPortal = ({
               Book a Strategy and Review meeting
             </h3>
             <p className="text-slate-300 text-sm font-medium mt-2 max-w-xl">
-              Pick a time on Ignite’s calendar. Opens Google’s booking page in a new tab
-              (Google does not allow embedding this scheduler inside other sites).
+              Pick a time on Ignite’s calendar. Opens Google’s booking page in a new tab.
             </p>
           </div>
           <a
