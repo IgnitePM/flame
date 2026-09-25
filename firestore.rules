@@ -67,7 +67,11 @@ service cloud.firestore {
         (isIgniteStaff() && adminId == emailLower() &&
          request.resource.data.role == 'kiosk') ||
         (emailLower() == 'chris@ignitepm.com' && adminId == 'chris@ignitepm.com');
-      allow update: if isAdmin() ||
+      // Admins may not change their own role (only the owner can), so a stray
+      // client write can never demote the signed-in admin.
+      allow update: if (isAdmin() &&
+          (adminId != emailLower() ||
+           request.resource.data.get('role', '') == resource.data.get('role', ''))) ||
         (emailLower() == 'chris@ignitepm.com' && adminId == 'chris@ignitepm.com');
       allow delete: if isAdmin();
     }

@@ -370,7 +370,12 @@ export default function App() {
   const [taskTypes, setTaskTypes] = useState([]);
   /** Own admins/{emailLower} doc — collection queries fail for kiosk/billing (Firestore rules). */
   const [myAdminDoc, setMyAdminDoc] = useState(null);
-  const [adminDocReady, setAdminDocReady] = useState(false);
+  /** Email key ('' when signed out) whose admins doc snapshot has loaded. */
+  const [adminDocLoadedFor, setAdminDocLoadedFor] = useState(null);
+  /** Email key whose admins doc the server confirmed does not exist. */
+  const [adminDocMissingFor, setAdminDocMissingFor] = useState(null);
+  const adminDocReady =
+    adminDocLoadedFor === String(user?.email || '').trim().toLowerCase();
   /** Portal users: wait for the clientEmails query (and optional sync) before Access Denied. */
   const [portalClientsReady, setPortalClientsReady] = useState(false);
   const [adminUsersFromCollection, setAdminUsersFromCollection] = useState([]);
@@ -976,20 +981,25 @@ export default function App() {
   useEffect(() => {
     if (!user?.email) {
       setMyAdminDoc(null);
-      setAdminDocReady(true);
+      setAdminDocMissingFor(null);
+      setAdminDocLoadedFor('');
       return;
     }
-    setAdminDocReady(false);
-    const emailKey = user.email.toLowerCase();
+    const emailKey = String(user.email).trim().toLowerCase();
     const unsub = onSnapshot(
       doc(db, 'admins', emailKey),
       (snap) => {
         setMyAdminDoc(snap.exists() ? { id: snap.id, ...snap.data() } : null);
-        setAdminDocReady(true);
+        setAdminDocMissingFor(
+          !snap.exists() && !snap.metadata.fromCache ? emailKey : null,
+        );
+        setAdminDocLoadedFor(emailKey);
       },
-      () => {
+      (err) => {
         setMyAdminDoc(null);
-        setAdminDocReady(true);
+        // Rules deny reading admins/* until the caller has their own doc.
+        setAdminDocMissingFor(err?.code === 'permission-denied' ? emailKey : null);
+        setAdminDocLoadedFor(emailKey);
       },
     );
     return () => unsub();
@@ -997,9 +1007,13 @@ export default function App() {
 
   // New @ignitepm.com employees self-provision a kiosk-role admins doc so
   // security rules recognize them as staff before an admin assigns a role.
+  // Only when the server confirmed the doc is missing: this is a full-doc
+  // overwrite, and admins pass the update rule, so a stale/cached "missing"
+  // would demote an existing admin to kiosk.
   useEffect(() => {
     if (!user?.email || !adminDocReady || myAdminDoc) return;
     const emailKey = String(user.email).trim().toLowerCase();
+    if (adminDocMissingFor !== emailKey) return;
     if (!emailKey.endsWith('@ignitepm.com')) return;
     if (emailKey === 'chris@ignitepm.com') return; // owner bootstrap below
     setDoc(doc(db, 'admins', emailKey), {
@@ -1009,7 +1023,7 @@ export default function App() {
       firstLoginAt: Date.now(),
       needsFirstLoginNotify: true,
     }).catch(() => {});
-  }, [user?.email, adminDocReady, myAdminDoc]);
+  }, [user?.email, adminDocReady, myAdminDoc, adminDocMissingFor]);
 
   // Email admins once when a newly provisioned staff account signs in.
   const firstLoginNotifyRef = useRef('');
@@ -1132,10 +1146,12 @@ export default function App() {
       { merge: true },
     ).catch(() => {});
 
+    const existingIds = new Set(adminUsersFromCollection.map((a) => a.id));
     adminUsersFromCollection.forEach((a) => {
       if (!a.email) return;
       const id = a.email.toLowerCase();
       if (a.id === id) return;
+      if (existingIds.has(id)) return;
       // Mirror record to email-keyed doc id for security rules
       setDoc(doc(db, 'admins', id), { email: a.email, role: a.role || 'billing' }, { merge: true }).catch(() => {});
     });
