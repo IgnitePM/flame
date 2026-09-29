@@ -630,14 +630,15 @@ export default function KioskClientTodoItem({
         )}
       </div>
       {subs.length > 0 && (
-        <ul className="ml-4 sm:ml-6 border-l border-slate-200 pl-3 space-y-1.5 pb-1 w-full min-w-0 max-w-full">
+        <div className="min-w-0 w-full max-w-full overflow-x-hidden pl-3 sm:pl-4">
+          <ul className="border-l border-slate-200 pl-3 space-y-1.5 pb-1 min-w-0">
           {subs.map((sub) => {
             const subAssignees = normalizeAssignees(sub.assigneeEmails);
             const subAssigneeOpenKey = `${itemAssigneeOpenKey}__sub__${sub.id}`;
             return (
               <li
                 key={sub.id}
-                className={`relative rounded-md transition-all duration-150 ${
+                className={`relative rounded-md min-w-0 max-w-full transition-all duration-150 ${
                   dropHint === 'subtask' ? 'kiosk-todo-drop-subtask' : ''
                 } ${getUrgencyClass(sub)}`}
                 onDragOver={canDragReorder ? handleSubtaskDragOver : undefined}
@@ -656,8 +657,8 @@ export default function KioskClientTodoItem({
                   )
                 }
               >
-                <div className="flex flex-col gap-1.5 px-2 py-1.5 min-w-0 w-full">
-                  <div className="flex items-start gap-2 min-w-0 w-full">
+                <div className="flex flex-col gap-1.5 px-2 py-1.5 min-w-0 w-full max-w-full">
+                  <div className="flex flex-wrap items-start gap-2 min-w-0 w-full">
                     {canDragReorder ? (
                       <TodoDragHandle
                         disabled={todoSaving}
@@ -704,7 +705,7 @@ export default function KioskClientTodoItem({
                       }}
                       className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4 shrink-0 mt-0.5"
                     />
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0 flex-1 basis-[min(100%,10rem)]">
                       <div className={`text-sm break-words ${sub.done ? 'line-through opacity-70' : ''}`}>
                         {safeDisplayForReact(sub.text) || '(step)'}
                       </div>
@@ -720,7 +721,7 @@ export default function KioskClientTodoItem({
                       ) : null}
                     </div>
                     {canManageTodos && (
-                      <div className="hidden sm:flex shrink-0 self-start items-center gap-1">
+                      <div className="flex shrink-0 flex-wrap items-center gap-1 max-w-full ml-auto">
                         <AssigneePicker
                           openKey={subAssigneeOpenKey}
                           assigneeOpenKey={assigneeOpenKey}
@@ -743,37 +744,16 @@ export default function KioskClientTodoItem({
                       </div>
                     )}
                   </div>
-                  {canManageTodos && (
-                    <div className="flex sm:hidden justify-end gap-1 pl-8">
-                      <AssigneePicker
-                        openKey={subAssigneeOpenKey}
-                        assigneeOpenKey={assigneeOpenKey}
-                        assignees={subAssignees}
-                        assignableEmails={assignableEmails}
-                        onChange={(next) => onSubtaskAssigneesChange?.(sub.id, next)}
-                        onOpenChange={onAssigneeOpenChange}
-                        inheritLabel="Inherit"
-                        align="right"
-                        disabled={pickerDisabled}
-                      />
-                      <button
-                        type="button"
-                        disabled={pickerDisabled}
-                        onClick={() => onOpenOptions?.(item, sub)}
-                        className="kiosk-light-control shrink-0 px-2 py-1 rounded-lg bg-white border border-slate-200 text-[9px] font-black uppercase tracking-widest text-black"
-                      >
-                        Options
-                      </button>
-                    </div>
-                  )}
                 </div>
               </li>
             );
           })}
-        </ul>
+          </ul>
+        </div>
       )}
       {canAddSubtasks && !item.done && (
-        <div className="ml-4 sm:ml-6 pl-3 pb-2 w-full min-w-0">
+        <div className="pl-3 sm:pl-4 min-w-0 w-full max-w-full overflow-x-hidden">
+          <div className="border-l border-transparent pl-3 pb-2 min-w-0">
           {!subtaskComposerOpen ? (
             <button
               type="button"
@@ -784,13 +764,13 @@ export default function KioskClientTodoItem({
               + Add step
             </button>
           ) : (
-            <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white/90 p-3 sm:flex-row sm:flex-wrap sm:items-end">
+            <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white/90 p-3 sm:flex-row sm:flex-wrap sm:items-end min-w-0 max-w-full">
               <input
                 type="text"
                 value={subtaskText}
                 onChange={(e) => setSubtaskText(e.target.value)}
                 placeholder="Step description"
-                className="min-w-[140px] flex-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]/40"
+                className="min-w-0 w-full sm:min-w-[140px] flex-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-[#fd7414]/40"
                 onKeyDown={(e) => {
                   if (e.key !== 'Enter') return;
                   e.preventDefault();
@@ -831,6 +811,7 @@ export default function KioskClientTodoItem({
               )}
             </div>
           )}
+          </div>
         </div>
       )}
       {canAttachFiles && attachClientDriveFile && !item.done && (

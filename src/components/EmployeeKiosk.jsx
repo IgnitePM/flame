@@ -1936,7 +1936,7 @@ const EmployeeKiosk = ({
                                   : 'No tasks for this category in the current cycle.'}
                               </p>
                             ) : (
-                              <ul className="space-y-3 mb-3 overflow-visible">
+                              <ul className="space-y-3 mb-3 min-w-0 max-w-full overflow-x-hidden">
                                 {categoryKioskTodoRowsForPanel.map((row) => {
                                   const rowCtx = resolveCategoryTodoRowContext(row);
                                   if (!rowCtx) return null;
@@ -2367,7 +2367,7 @@ const EmployeeKiosk = ({
                                   : 'No tasks for this category in the current cycle.'}
                               </p>
                             ) : (
-                              <ul className="space-y-3 mb-3 overflow-visible">
+                              <ul className="space-y-3 mb-3 min-w-0 max-w-full overflow-x-hidden">
                                 {categoryKioskTodoRowsForPanel.map((row) => {
                                   const rowCtx = resolveCategoryTodoRowContext(row);
                                   if (!rowCtx) return null;
