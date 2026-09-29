@@ -7,6 +7,7 @@ import { getTaskComments } from '../utils/taskComments.js';
 import { TextWithLinks } from '../utils/textWithLinks.jsx';
 import { staffHandle } from '../utils/staffDirectory.js';
 import { safeDisplayForReact } from '../utils/safeReactText.js';
+import { formatTodoExpenseEstimate } from './TodoExpenseEstimateFields.jsx';
 import { authedFetch } from '../utils/authedFetch.js';
 
 /**
@@ -94,6 +95,11 @@ export default function PortalClientTodoItem({
           {Number(item.estimatedHours) > 0 ? (
             <span className="text-[10px] font-bold text-slate-500">
               Est. {Number(item.estimatedHours).toFixed(2)}h
+            </span>
+          ) : null}
+          {formatTodoExpenseEstimate(item) ? (
+            <span className="text-[10px] font-bold text-slate-500">
+              {formatTodoExpenseEstimate(item)}
             </span>
           ) : null}
           {item.requestStatus === 'pending' ? (

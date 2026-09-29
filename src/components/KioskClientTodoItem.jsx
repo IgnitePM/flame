@@ -11,6 +11,7 @@ import {
   writeTodoDragPayload,
 } from '../utils/todoDragDrop.js';
 import { safeDisplayForReact } from '../utils/safeReactText.js';
+import { formatTodoExpenseEstimate } from './TodoExpenseEstimateFields.jsx';
 import {
   addSubtaskToItems,
   canMarkParentTodoDone,
@@ -616,6 +617,11 @@ export default function KioskClientTodoItem({
                 )}
               </div>
             )}
+            {formatTodoExpenseEstimate(item) ? (
+              <div className="mt-1 text-[10px] font-bold text-slate-500 normal-case tracking-normal">
+                {formatTodoExpenseEstimate(item)}
+              </div>
+            ) : null}
           </div>
           {canManageTodos && (
             <div className="hidden sm:flex shrink-0 self-start">

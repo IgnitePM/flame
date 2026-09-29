@@ -945,9 +945,14 @@ const ClientPortal = ({
                 </div>
               ) : null;
             })()}
+            <PortalTaskRequestForm
+              client={clientProfile}
+              categories={getEnabledRetainerCategoryNames(clientProfile)}
+              todoCategoryKey={todoCategoryKey}
+            />
             {!hasTodosForCycle ? (
               <p className="text-slate-400 italic text-sm">
-                No tasks listed for this cycle yet — request one below.
+                No tasks listed for this cycle yet.
               </p>
             ) : (
               <div className="space-y-6">
@@ -989,12 +994,6 @@ const ClientPortal = ({
                 })}
               </div>
             )}
-
-            <PortalTaskRequestForm
-              client={clientProfile}
-              categories={getEnabledRetainerCategoryNames(clientProfile)}
-              todoCategoryKey={todoCategoryKey}
-            />
           </div>
         )}
 

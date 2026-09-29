@@ -121,6 +121,12 @@ import ProjectAttachments from './ProjectAttachments.jsx';
 import TodoEstimateHoursSlider, {
   normalizeTodoEstimatedHours,
 } from './TodoEstimateHoursSlider.jsx';
+import TodoExpenseEstimateFields, {
+  DEFAULT_EXPENSE_MARKUP_PERCENT,
+  formatTodoExpenseEstimate,
+  normalizeTodoExpenseAmount,
+  normalizeTodoMarkupPercent,
+} from './TodoExpenseEstimateFields.jsx';
 import TaskNotesSection from './TaskNotesSection.jsx';
 import MentionTextarea from './MentionTextarea.jsx';
 import SlackNotificationsCard from './SlackNotificationsCard.jsx';
@@ -720,8 +726,8 @@ function ClientCustomProjectsPanelInner({
                                   : 'bg-emerald-500';
 
                           return (
-                            <>
-                              <div className="flex items-center justify-between gap-3 mb-2">
+                            <div className="flex flex-col">
+                              <div className="order-1 flex items-center justify-between gap-3 mb-2">
                                 <h6 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
                                   To-dos
                                 </h6>
@@ -746,11 +752,11 @@ function ClientCustomProjectsPanelInner({
                               </div>
 
                               {total === 0 ? (
-                                <p className="text-xs italic text-slate-400 mb-3">
+                                <p className="order-3 text-xs italic text-slate-400 mb-3">
                                   No to-dos yet.
                                 </p>
                               ) : (
-                                <div className="space-y-3 mb-3 w-full min-w-0">
+                                <div className="order-3 space-y-3 mb-3 w-full min-w-0">
                                   {items.map((item) => {
                                     const itemAssignees = Array.isArray(item?.assigneeEmails)
                                       ? item.assigneeEmails
@@ -819,6 +825,11 @@ function ClientCustomProjectsPanelInner({
                                             }`}
                                           >
                                             {item.text || '(no text)'}
+                                            {formatTodoExpenseEstimate(item) ? (
+                                              <span className="block text-[10px] font-bold text-slate-500 normal-case tracking-normal mt-0.5">
+                                                {formatTodoExpenseEstimate(item)}
+                                              </span>
+                                            ) : null}
                                           </span>
                                           {subs.length > 0 ? (
                                             <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 shrink-0">
@@ -1263,7 +1274,7 @@ function ClientCustomProjectsPanelInner({
                                 </div>
                               )}
 
-                              <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden mb-3">
+                              <div className="order-4 w-full bg-slate-100 rounded-full h-2 overflow-hidden mb-3">
                                 <div
                                   className={`h-2 rounded-full ${barClass}`}
                                   style={{ width: `${pct}%` }}
@@ -1271,7 +1282,7 @@ function ClientCustomProjectsPanelInner({
                               </div>
 
                               {!readOnly && (
-                                <div className="space-y-2">
+                                <div className="order-2 space-y-2 mb-3">
                                   <input
                                     type="text"
                                     value={projectTodoDraft?.[p.id] || ''}
@@ -1456,7 +1467,7 @@ function ClientCustomProjectsPanelInner({
                                   </p>
                                 </div>
                               )}
-                            </>
+                            </div>
                           );
                         })()}
                       </div>
@@ -1976,6 +1987,8 @@ const AdminDashboard = ({
   const [todoAddRecurrenceDraft, setTodoAddRecurrenceDraft] = useState({});
   /** Draft estimated hours (string) keyed by category when adding a new to-do. */
   const [todoAddEstimateDraft, setTodoAddEstimateDraft] = useState({});
+  const [todoAddExpenseDraft, setTodoAddExpenseDraft] = useState({});
+  const [todoAddMarkupDraft, setTodoAddMarkupDraft] = useState({});
   /** Which retainer category's add-to-do "Options" modal is open (due date + recurrence + estimate). */
   const [todoAddOptionsModalCatKey, setTodoAddOptionsModalCatKey] = useState(null);
   /** Existing to-do row: which item's due/recurrence is being edited in the Options modal. */
@@ -1985,6 +1998,10 @@ const AdminDashboard = ({
   const [todoEditOptionsDue, setTodoEditOptionsDue] = useState('');
   const [todoEditOptionsRecurrence, setTodoEditOptionsRecurrence] = useState('none');
   const [todoEditOptionsEstimate, setTodoEditOptionsEstimate] = useState('');
+  const [todoEditOptionsExpense, setTodoEditOptionsExpense] = useState('');
+  const [todoEditOptionsMarkup, setTodoEditOptionsMarkup] = useState(
+    String(DEFAULT_EXPENSE_MARKUP_PERCENT),
+  );
   const [taskApprovalModal, setTaskApprovalModal] = useState(null);
   /** Global Tasks tab: inline add sub-task (one parent at a time). */
   const [globalSubtaskComposer, setGlobalSubtaskComposer] = useState(null);
@@ -2353,10 +2370,22 @@ const AdminDashboard = ({
     setTodoAddDueDraft((prev) => ({ ...prev, [categoryKey]: '' }));
     setTodoAddRecurrenceDraft((prev) => ({ ...prev, [categoryKey]: 'none' }));
     setTodoAddEstimateDraft((prev) => ({ ...prev, [categoryKey]: '' }));
+    setTodoAddExpenseDraft((prev) => ({ ...prev, [categoryKey]: '' }));
+    setTodoAddMarkupDraft((prev) => ({
+      ...prev,
+      [categoryKey]: String(DEFAULT_EXPENSE_MARKUP_PERCENT),
+    }));
   };
 
   const getDraftEstimatedHours = (categoryKey) =>
     normalizeTodoEstimatedHours(todoAddEstimateDraft?.[categoryKey]);
+
+  const getDraftExpenseFields = (categoryKey) => ({
+    estimatedExpense: normalizeTodoExpenseAmount(todoAddExpenseDraft?.[categoryKey]),
+    expenseMarkupPercent: normalizeTodoMarkupPercent(
+      todoAddMarkupDraft?.[categoryKey] ?? DEFAULT_EXPENSE_MARKUP_PERCENT,
+    ),
+  });
 
   const openTodoEditOptionsModal = (c, cycleStart, categoryKey, item, subtask = null) => {
     setTodoAddOptionsModalCatKey(null);
@@ -2375,6 +2404,22 @@ const AdminDashboard = ({
         return src?.estimatedHours != null && src.estimatedHours !== ''
           ? String(src.estimatedHours)
           : '';
+      })(),
+    );
+    setTodoEditOptionsExpense(
+      (() => {
+        const src = subtask || item;
+        return src?.estimatedExpense != null && src.estimatedExpense !== ''
+          ? String(src.estimatedExpense)
+          : '';
+      })(),
+    );
+    setTodoEditOptionsMarkup(
+      (() => {
+        const src = subtask || item;
+        return src?.expenseMarkupPercent != null && src.expenseMarkupPercent !== ''
+          ? String(src.expenseMarkupPercent)
+          : String(DEFAULT_EXPENSE_MARKUP_PERCENT);
       })(),
     );
     const recurrenceSource = subtask || item;
@@ -2579,6 +2624,8 @@ const AdminDashboard = ({
               recurringId: recurrence ? s.recurringId || s.id : null,
               recurrence,
               estimatedHours,
+              estimatedExpense: normalizeTodoExpenseAmount(todoEditOptionsExpense),
+              expenseMarkupPercent: normalizeTodoMarkupPercent(todoEditOptionsMarkup),
             }
           : s,
       );
@@ -2602,6 +2649,8 @@ const AdminDashboard = ({
         recurringId: recurrence ? item.recurringId || item.id : null,
         recurrence,
         estimatedHours,
+        estimatedExpense: normalizeTodoExpenseAmount(todoEditOptionsExpense),
+        expenseMarkupPercent: normalizeTodoMarkupPercent(todoEditOptionsMarkup),
       };
       nextItem = clampAllSubtaskDueDatesToParent(nextItem);
       nextList = list.map((i) => (i.id === itemId ? nextItem : i));
@@ -6733,7 +6782,7 @@ const AdminDashboard = ({
                                               );
                                               const allDone = items.length > 0 && items.every((i) => i.done);
                                               return (
-                                                <div style={{ order: 10 }}>
+                                                <div style={{ order: 10 }} className="flex flex-col">
                                                   <h6 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2 flex-wrap">
                                                     To-do
                                                     {catTodo.closed && (
@@ -6772,9 +6821,9 @@ const AdminDashboard = ({
                                                   ) : (
                                                     <>
                                                       {items.length === 0 ? (
-                                                        <p className="text-xs italic text-slate-400 mb-2">No to-do items yet.</p>
+                                                        <p className="order-2 text-xs italic text-slate-400 mb-2">No to-do items yet.</p>
                                                       ) : (
-                                                        <ul className="space-y-2 mb-2">
+                                                        <ul className="order-2 space-y-2 mb-2">
                                                           {displayItems.map((item) => {
                                                             const urgency = getTodoUrgencyStyles(item);
                                                             const assignees = normalizeTodoAssignees(item);
@@ -7296,7 +7345,7 @@ const AdminDashboard = ({
                                                           )})}
                                                         </ul>
                                                       )}
-                                                      <div className="space-y-2">
+                                                      <div className="order-1 space-y-2 mb-3">
                                                         <div className="flex flex-wrap gap-2 items-center">
                                                           <input
                                                             type="text"
@@ -7333,6 +7382,7 @@ const AdminDashboard = ({
                                                                     assigneeEmails: getDraftAssigneeEmails(catKey),
                                                                     recurrence,
                                                                     estimatedHours: getDraftEstimatedHours(catKey),
+                                                                    ...getDraftExpenseFields(catKey),
                                                                   };
                                                                   await updateClientTodo(c, cycleStart, catKey, {
                                                                     ...catTodo,
@@ -7398,6 +7448,7 @@ const AdminDashboard = ({
                                                                   assigneeEmails: getDraftAssigneeEmails(catKey),
                                                                   recurrence,
                                                                   estimatedHours: getDraftEstimatedHours(catKey),
+                                                                  ...getDraftExpenseFields(catKey),
                                                                 };
                                                                 await updateClientTodo(c, cycleStart, catKey, {
                                                                   ...catTodo,
@@ -8880,6 +8931,13 @@ const AdminDashboard = ({
                   );
                 })()}
               </div>
+            <TodoExpenseEstimateFields
+              amount={todoEditOptionsExpense}
+              markup={todoEditOptionsMarkup}
+              onAmountChange={setTodoEditOptionsExpense}
+              onMarkupChange={setTodoEditOptionsMarkup}
+              disabled={todoSaving}
+            />
             {!todoEditOptionsTarget.subtaskId && (() => {
               const cl = clients.find((x) => x.id === todoEditOptionsTarget.clientId);
               if (!cl || !getTodoStateForCycle) return null;
@@ -9120,6 +9178,25 @@ const AdminDashboard = ({
                 );
               })()}
             </div>
+            <TodoExpenseEstimateFields
+              amount={todoAddExpenseDraft[todoAddOptionsModalCatKey] || ''}
+              markup={
+                todoAddMarkupDraft[todoAddOptionsModalCatKey] ??
+                String(DEFAULT_EXPENSE_MARKUP_PERCENT)
+              }
+              onAmountChange={(value) =>
+                setTodoAddExpenseDraft((prev) => ({
+                  ...prev,
+                  [todoAddOptionsModalCatKey]: value,
+                }))
+              }
+              onMarkupChange={(value) =>
+                setTodoAddMarkupDraft((prev) => ({
+                  ...prev,
+                  [todoAddOptionsModalCatKey]: value,
+                }))
+              }
+            />
             <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"

@@ -31,6 +31,11 @@ import ClientProfileSummary from './ClientProfileSummary.jsx';
 import TodoEstimateHoursSlider, {
   normalizeTodoEstimatedHours,
 } from './TodoEstimateHoursSlider.jsx';
+import TodoExpenseEstimateFields, {
+  DEFAULT_EXPENSE_MARKUP_PERCENT,
+  normalizeTodoExpenseAmount,
+  normalizeTodoMarkupPercent,
+} from './TodoExpenseEstimateFields.jsx';
 import { buildGlobalTodoRows } from '../utils/todoGlobalRows.js';
 import { isClientActiveForWork } from '../utils/clientActiveForWork.js';
 import { computePerplexityExpenseAmounts } from '../utils/perplexityCredits.js';
@@ -203,6 +208,10 @@ const EmployeeKiosk = ({
   const [kioskTaskUrgencyFilter, setKioskTaskUrgencyFilter] = React.useState('all');
   const [kioskTaskSortMode, setKioskTaskSortMode] = React.useState('due');
   const [todoRecurrenceMode, setTodoRecurrenceMode] = React.useState('none');
+  const [todoExpenseAmount, setTodoExpenseAmount] = React.useState('');
+  const [todoExpenseMarkup, setTodoExpenseMarkup] = React.useState(
+    String(DEFAULT_EXPENSE_MARKUP_PERCENT),
+  );
   const [todoOptionsOpen, setTodoOptionsOpen] = React.useState(false);
   const [kioskExpenseAmount, setKioskExpenseAmount] = React.useState('');
   const [kioskExpenseCredits, setKioskExpenseCredits] = React.useState('');
@@ -233,6 +242,10 @@ const EmployeeKiosk = ({
   const [clientTodoEditTitle, setClientTodoEditTitle] = React.useState('');
   const [clientTodoEditDue, setClientTodoEditDue] = React.useState('');
   const [clientTodoEditEstimate, setClientTodoEditEstimate] = React.useState('');
+  const [clientTodoEditExpense, setClientTodoEditExpense] = React.useState('');
+  const [clientTodoEditMarkup, setClientTodoEditMarkup] = React.useState(
+    String(DEFAULT_EXPENSE_MARKUP_PERCENT),
+  );
   const [clientTodoEditRecurrence, setClientTodoEditRecurrence] =
     React.useState('none');
   const [clientTodoAssigneeOpenKey, setClientTodoAssigneeOpenKey] =
@@ -352,6 +365,8 @@ const EmployeeKiosk = ({
       assigneeEmails: assignees,
       recurrence,
       estimatedHours: normalizeTodoEstimatedHours(todoEstimateHours),
+      estimatedExpense: normalizeTodoExpenseAmount(todoExpenseAmount),
+      expenseMarkupPercent: normalizeTodoMarkupPercent(todoExpenseMarkup),
     };
   };
 
@@ -359,6 +374,8 @@ const EmployeeKiosk = ({
     setTodoDueDate('');
     setTodoRecurrenceMode('none');
     setTodoEstimateHours('');
+    setTodoExpenseAmount('');
+    setTodoExpenseMarkup(String(DEFAULT_EXPENSE_MARKUP_PERCENT));
     setTodoOptionsOpen(false);
     setTodoAddAssignees([]);
   };
@@ -430,6 +447,16 @@ const EmployeeKiosk = ({
         ? String(estimateSrc.estimatedHours)
         : '',
     );
+    setClientTodoEditExpense(
+      estimateSrc?.estimatedExpense != null && estimateSrc.estimatedExpense !== ''
+        ? String(estimateSrc.estimatedExpense)
+        : '',
+    );
+    setClientTodoEditMarkup(
+      estimateSrc?.expenseMarkupPercent != null && estimateSrc.expenseMarkupPercent !== ''
+        ? String(estimateSrc.expenseMarkupPercent)
+        : String(DEFAULT_EXPENSE_MARKUP_PERCENT),
+    );
     const recurrenceSource = subtask || item;
     const t = recurrenceSource?.recurrence?.type;
     let editMode = 'none';
@@ -492,6 +519,7 @@ const EmployeeKiosk = ({
         estimateRaw === '' || Number(estimateRaw) === 0
           ? null
           : normalizeTodoEstimatedHours(estimateRaw);
+      const estimatedExpense = normalizeTodoExpenseAmount(clientTodoEditExpense);
       const nextItem = mapItemSubtasks(item, (s) =>
         s.id === subtaskId
           ? {
@@ -502,6 +530,8 @@ const EmployeeKiosk = ({
               recurringId: recurrence ? s.recurringId || s.id : null,
               recurrence,
               estimatedHours,
+              estimatedExpense,
+              expenseMarkupPercent: normalizeTodoMarkupPercent(clientTodoEditMarkup),
             }
           : s,
       );
@@ -525,6 +555,8 @@ const EmployeeKiosk = ({
         recurringId: recurrence ? item.recurringId || item.id : null,
         recurrence,
         estimatedHours,
+        estimatedExpense: normalizeTodoExpenseAmount(clientTodoEditExpense),
+        expenseMarkupPercent: normalizeTodoMarkupPercent(clientTodoEditMarkup),
       };
       nextItem = clampAllSubtaskDueDatesToParent(nextItem);
       nextList = list.map((i) => (i.id === itemId ? nextItem : i));
@@ -1929,6 +1961,7 @@ const EmployeeKiosk = ({
                                 Drag-reorder is available for admins while viewing filtered tasks.
                               </p>
                             )}
+                            <div className="flex flex-col gap-3">
                             {categoryKioskTodoRowsForPanel.length === 0 ? (
                               <p className="text-xs italic text-slate-400 mb-2">
                                 {categoryTodoMineOnly
@@ -2040,7 +2073,7 @@ const EmployeeKiosk = ({
                                 })}
                               </ul>
                             )}
-                            <div className="flex flex-wrap gap-2 items-center">
+                            <div className="order-first flex flex-wrap gap-2 items-center">
                               <input
                                 type="text"
                                 value={todoNewText}
@@ -2121,6 +2154,7 @@ const EmployeeKiosk = ({
                               >
                                 Add
                               </button>
+                            </div>
                             </div>
                           </div>
                         )}
@@ -2360,6 +2394,7 @@ const EmployeeKiosk = ({
                                 Drag-reorder is available for admins while viewing filtered tasks.
                               </p>
                             )}
+                            <div className="flex flex-col gap-3">
                             {categoryKioskTodoRowsForPanel.length === 0 ? (
                               <p className="text-xs italic text-slate-400 mb-2">
                                 {categoryTodoMineOnly
@@ -2471,7 +2506,7 @@ const EmployeeKiosk = ({
                                 })}
                               </ul>
                             )}
-                            <div className="flex flex-wrap gap-2 items-center">
+                            <div className="order-first flex flex-wrap gap-2 items-center">
                               <input
                                 type="text"
                                 value={todoNewText}
@@ -2552,6 +2587,7 @@ const EmployeeKiosk = ({
                               >
                                 Add
                               </button>
+                            </div>
                             </div>
                           </div>
                         )}
@@ -2901,6 +2937,12 @@ const EmployeeKiosk = ({
                   }
                 />
               </div>
+              <TodoExpenseEstimateFields
+                amount={todoExpenseAmount}
+                markup={todoExpenseMarkup}
+                onAmountChange={setTodoExpenseAmount}
+                onMarkupChange={setTodoExpenseMarkup}
+              />
               <div className="flex justify-end gap-2 pt-1">
                 <button
                   type="button"
@@ -2908,6 +2950,8 @@ const EmployeeKiosk = ({
                     setTodoDueDate('');
                     setTodoRecurrenceMode('none');
                     setTodoEstimateHours('');
+                    setTodoExpenseAmount('');
+                    setTodoExpenseMarkup(String(DEFAULT_EXPENSE_MARKUP_PERCENT));
                   }}
                   className="px-3 py-2 rounded-xl text-xs font-black text-slate-500 bg-slate-100 hover:bg-slate-200 uppercase tracking-widest"
                 >
@@ -4054,6 +4098,13 @@ const EmployeeKiosk = ({
                 compact={!!clientTodoEditTarget.subtaskId}
               />
             </div>
+            <TodoExpenseEstimateFields
+              amount={clientTodoEditExpense}
+              markup={clientTodoEditMarkup}
+              onAmountChange={setClientTodoEditExpense}
+              onMarkupChange={setClientTodoEditMarkup}
+              disabled={todoSaving}
+            />
             {!clientTodoEditTarget.subtaskId && (
               <div>
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
