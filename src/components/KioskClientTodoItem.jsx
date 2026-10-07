@@ -29,6 +29,7 @@ import {
   TodoApprovalBadge,
 } from './TaskApprovalModal.jsx';
 import { isTodoPendingApproval } from '../utils/todoApproval.js';
+import AssigneeChoiceList from './AssigneeChoiceList.jsx';
 
 function parseDateInputToMs(value) {
   if (!value) return null;
@@ -100,6 +101,7 @@ function AssigneePicker({
   assigneeOpenKey,
   assignees,
   assignableEmails,
+  client = null,
   onChange,
   onOpenChange,
   inheritLabel = 'Assign',
@@ -163,28 +165,14 @@ function AssigneePicker({
                   Currently inherits primary task assignees.
                 </p>
               )}
-              <div className="max-h-[180px] space-y-1 overflow-y-auto">
-                {assignableEmails.map((email) => {
-                  const checked = assignees.includes(email);
-                  return (
-                    <label
-                      key={email}
-                      className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-bold hover:bg-slate-50"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => {
-                          const next = checked
-                            ? assignees.filter((e) => e !== email)
-                            : [...assignees, email].sort();
-                          onChange?.(next);
-                        }}
-                      />
-                      <span className="truncate">{email}</span>
-                    </label>
-                  );
-                })}
+              <div className="max-h-[280px] space-y-1 overflow-y-auto">
+                <AssigneeChoiceList
+                  staffEmails={assignableEmails}
+                  client={client}
+                  selected={assignees}
+                  onChange={onChange}
+                  tone="light"
+                />
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button
@@ -457,6 +445,7 @@ export default function KioskClientTodoItem({
         assigneeOpenKey={assigneeOpenKey}
         assignees={primaryAssignees}
         assignableEmails={assignableEmails}
+        client={client}
         onChange={onAssigneesChange}
         onOpenChange={onAssigneeOpenChange}
         disabled={pickerDisabled}
@@ -733,6 +722,7 @@ export default function KioskClientTodoItem({
                           assigneeOpenKey={assigneeOpenKey}
                           assignees={subAssignees}
                           assignableEmails={assignableEmails}
+                          client={client}
                           onChange={(next) => onSubtaskAssigneesChange?.(sub.id, next)}
                           onOpenChange={onAssigneeOpenChange}
                           inheritLabel="Inherit"

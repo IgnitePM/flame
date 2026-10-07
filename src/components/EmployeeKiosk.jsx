@@ -23,6 +23,7 @@ import {
 } from '../utils/todoSubtasks.js';
 import { recurringAnchorKey } from '../utils/recurringTodoMaterialize.js';
 import KioskClientTodoItem from './KioskClientTodoItem.jsx';
+import AssigneeChoiceList from './AssigneeChoiceList.jsx';
 import KioskNotificationsPanel from './KioskNotificationsPanel.jsx';
 import KioskCalendarPanel from './KioskCalendarPanel.jsx';
 import TaskNotesSection from './TaskNotesSection.jsx';
@@ -941,6 +942,7 @@ const EmployeeKiosk = ({
     onChange,
     disabled,
     compact = false,
+    client = null,
   }) => {
     const cleaned = Array.isArray(value)
       ? value.map((e) => String(e || '').trim().toLowerCase()).filter(Boolean)
@@ -974,28 +976,14 @@ const EmployeeKiosk = ({
             <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-slate-400">
               Assign to
             </div>
-            <div className="max-h-[180px] space-y-1 overflow-y-auto">
-              {assignableEmails.map((email) => {
-                const checked = cleaned.includes(email);
-                return (
-                  <label
-                    key={email}
-                    className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-bold hover:bg-slate-50"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => {
-                        const next = checked
-                          ? cleaned.filter((e) => e !== email)
-                          : [...cleaned, email].sort();
-                        onChange(next);
-                      }}
-                    />
-                    <span className="truncate">{email}</span>
-                  </label>
-                );
-              })}
+            <div className="max-h-[280px] space-y-1 overflow-y-auto">
+              <AssigneeChoiceList
+                staffEmails={assignableEmails}
+                client={client}
+                selected={cleaned}
+                onChange={onChange}
+                tone="light"
+              />
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <button
@@ -2111,6 +2099,7 @@ const EmployeeKiosk = ({
                                 renderClientTodoAssigneePicker({
                                   openKey: 'todo_add_assignees',
                                   value: todoAddAssignees,
+                                  client: selectedClientObj,
                                   disabled:
                                     todoSaving ||
                                     isCycleLocked(selectedClientObj, cycleStart),
@@ -2544,6 +2533,7 @@ const EmployeeKiosk = ({
                                 renderClientTodoAssigneePicker({
                                   openKey: 'todo_add_assignees',
                                   value: todoAddAssignees,
+                                  client: selectedClientObj,
                                   disabled:
                                     todoSaving ||
                                     isCycleLocked(selectedClientObj, cycleStart),
@@ -3346,6 +3336,7 @@ const EmployeeKiosk = ({
                           renderClientTodoAssigneePicker({
                           openKey: `sidebar__${row.clientId}__${row.cycleStart}__${row.categoryKey}__${row.item.id}`,
                           value: row.item.assigneeEmails,
+                          client,
                           disabled: todoSaving || isCycleLocked(client, row.cycleStart),
                           compact: true,
                           onChange: (next) =>

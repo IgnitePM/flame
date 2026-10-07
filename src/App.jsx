@@ -109,6 +109,7 @@ import {
 } from './utils/perplexityCredits.js';
 import { getFxToCad, fetchLiveFxToCad } from './utils/fxToCad.js';
 import { buildTeamAccessMergeForTodoAssignees } from './utils/teamClientAccess.js';
+import { portalUserEmailsForClient } from './utils/clientAssignees.js';
 import { isClientActiveForWork } from './utils/clientActiveForWork.js';
 import {
   normalizePortalEmail,
@@ -129,6 +130,7 @@ import GlobalMessagesHub from './components/GlobalMessagesHub.jsx';
 import PortalAnnouncementsPanel from './components/PortalAnnouncementsPanel.jsx';
 import PortalSetPasswordPage from './components/PortalSetPasswordPage.jsx';
 import IdleFailsafeGuard from './components/IdleFailsafeGuard.jsx';
+import QuickBooksCustomerField from './components/QuickBooksCustomerField.jsx';
 import {
   filterClientsForTeamMember,
   teamMemberCanViewClient,
@@ -2751,6 +2753,7 @@ export default function App() {
     }
     const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(freshClient, cycles);
     await updateDoc(doc(db, 'clients', freshClient.id), { todoCycles: cycles, ...teamAccessPatch });
+    const staffSet = new Set(staffEmails || []);
     const notifyDocs = collectTodoChangeNotifications({
       prevItems: prevCategory.items || [],
       nextItems: nextCategoryData?.items || [],
@@ -2762,6 +2765,9 @@ export default function App() {
       clientId: freshClient.id,
       clientName: freshClient.name,
       categoryKey,
+      skipRecipientEmails: portalUserEmailsForClient(freshClient).filter(
+        (email) => !staffSet.has(email),
+      ),
     });
     createInboxNotifications(notifyDocs).catch(() => {});
   };
@@ -2888,6 +2894,10 @@ export default function App() {
       email: user?.email,
       displayName: user?.displayName,
     });
+    const staffSet = new Set(staffEmails || []);
+    const skipRecipientEmails = portalUserEmailsForClient(freshClient).filter(
+      (email) => !staffSet.has(email),
+    );
     const batchDocs = Object.entries(categoryKeyToData || {}).flatMap(
       ([categoryKey, nextCategoryData]) =>
         collectTodoChangeNotifications({
@@ -2898,6 +2908,7 @@ export default function App() {
           clientId: freshClient.id,
           clientName: freshClient.name,
           categoryKey,
+          skipRecipientEmails,
         }),
     );
     createInboxNotifications(batchDocs).catch(() => {});
@@ -5675,6 +5686,18 @@ export default function App() {
                       10-digit Google Ads customer ID (no dashes). Used for portal Analytics → Ads after Ads is connected in Config.
                     </p>
                   </div>
+                  <QuickBooksCustomerField
+                    customerId={editingClient.quickbooksCustomerId || ''}
+                    customerName={editingClient.quickbooksCustomerName || ''}
+                    suggestedQuery={editingClient.name || ''}
+                    onChange={(next) =>
+                      setEditingClient({
+                        ...editingClient,
+                        quickbooksCustomerId: next.quickbooksCustomerId,
+                        quickbooksCustomerName: next.quickbooksCustomerName,
+                      })
+                    }
+                  />
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">About</label>
                     <textarea
@@ -6534,6 +6557,15 @@ export default function App() {
                     googleAdsCustomerId: String(editingClient.googleAdsCustomerId || '')
                       .replace(/[^\d]/g, '')
                       .trim() || null,
+                    quickbooksCustomerId:
+                      String(editingClient.quickbooksCustomerId || '')
+                        .replace(/[^\d]/g, '')
+                        .trim() || null,
+                    quickbooksCustomerName:
+                      String(editingClient.quickbooksCustomerId || '').replace(/[^\d]/g, '')
+                        ? String(editingClient.quickbooksCustomerName || '').trim().slice(0, 160) ||
+                          null
+                        : null,
                     ...normalizeCompanyProfileFields(editingClient),
                     ...normalizeClientConnectionFields(editingClient),
                     retainerCategoryEnabled: normalizeRetainerCategoryEnabled(

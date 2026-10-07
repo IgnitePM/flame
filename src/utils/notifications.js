@@ -121,8 +121,12 @@ export function collectTodoChangeNotifications({
   clientId,
   clientName,
   categoryKey,
+  skipRecipientEmails = [],
 }) {
   const actor = normalizeStaffEmail(actorEmail);
+  const skip = new Set(
+    (skipRecipientEmails || []).map((email) => normalizeStaffEmail(email)).filter(Boolean),
+  );
   const prev = itemMap(prevItems);
   const docs = [];
 
@@ -131,7 +135,9 @@ export function collectTodoChangeNotifications({
     const before = prev.get(nextItem.id);
     const nextAssignees = assigneesOf(nextItem);
     const prevAssignees = new Set(assigneesOf(before));
-    const added = nextAssignees.filter((email) => !prevAssignees.has(email) && email !== actor);
+    const added = nextAssignees.filter(
+      (email) => !prevAssignees.has(email) && email !== actor && !skip.has(email),
+    );
     for (const email of added) {
       const doc = buildNotificationDoc({
         recipientEmail: email,

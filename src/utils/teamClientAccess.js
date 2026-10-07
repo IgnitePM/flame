@@ -1,3 +1,5 @@
+import { portalUserEmailsForClient } from './clientAssignees.js';
+
 /** @param {unknown} e */
 export function normalizeEmail(e) {
   return String(e || '').trim().toLowerCase();
@@ -32,9 +34,13 @@ export function extractItemAssigneeEmails(item) {
 export function teamMemberCanViewClient(client, userEmail) {
   const me = normalizeEmail(userEmail);
   if (!me) return false;
-  // Assigned on any client to-do always grants workspace/kiosk visibility.
-  const todoAssignees = collectAssigneeEmailsFromTodoCycles(client?.todoCycles);
-  if (todoAssignees.includes(me)) return true;
+  // Assigned staff can see the client in Workspace / kiosk. Portal users on
+  // this profile are assignees only — they do not gain kiosk access.
+  const portalUsers = new Set(portalUserEmailsForClient(client));
+  if (!portalUsers.has(me)) {
+    const todoAssignees = collectAssigneeEmailsFromTodoCycles(client?.todoCycles);
+    if (todoAssignees.includes(me)) return true;
+  }
 
   const raw = client?.teamMemberAccessEmails;
   if (raw == null) return true;
@@ -90,7 +96,10 @@ export function collectAssigneeEmailsFromTodoCycles(todoCycles) {
  * @returns {Partial<{ teamMemberAccessEmails: string[] }>} Firestore merge fields, or {}
  */
 export function buildTeamAccessMergeForTodoAssignees(client, nextTodoCycles) {
-  const assignees = collectAssigneeEmailsFromTodoCycles(nextTodoCycles);
+  const portalUsers = new Set(portalUserEmailsForClient(client));
+  const assignees = collectAssigneeEmailsFromTodoCycles(nextTodoCycles).filter(
+    (email) => !portalUsers.has(email),
+  );
   if (!assignees.length) return {};
   const raw = client?.teamMemberAccessEmails;
   if (raw == null) return {};

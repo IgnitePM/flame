@@ -33,6 +33,7 @@ import PortalClientTodoItem from './PortalClientTodoItem.jsx';
 import PortalAccountMenu from './PortalAccountMenu.jsx';
 import PortalMyProfileModal from './PortalMyProfileModal.jsx';
 import ClientPortalAnnouncements from './ClientPortalAnnouncements.jsx';
+import PortalQuickBooksPanel from './PortalQuickBooksPanel.jsx';
 import MobileNavDrawer, { MobileNavItem } from './mobile/MobileNavDrawer.jsx';
 import {
   ChevronLeft,
@@ -46,6 +47,7 @@ import {
   ClipboardCheck,
   LayoutDashboard,
   FolderOpen,
+  Receipt,
   Building2,
   Calendar,
   ExternalLink,
@@ -412,6 +414,7 @@ const ClientPortal = ({
     { id: 'files', label: 'Files', icon: FolderOpen },
   ];
   const moreTabs = [
+    { id: 'billing', label: 'Billing', icon: Receipt },
     { id: 'company', label: 'Company', icon: Building2 },
     {
       id: 'analytics',
@@ -525,6 +528,10 @@ const ClientPortal = ({
 
         {portalSection === 'files' ? (
           <ClientPortalFilesPanel client={clientProfile} />
+        ) : null}
+
+        {portalSection === 'billing' ? (
+          <PortalQuickBooksPanel client={clientProfile} />
         ) : null}
 
         {portalSection === 'company' ? (

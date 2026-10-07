@@ -8,7 +8,32 @@ import { TextWithLinks } from '../utils/textWithLinks.jsx';
 import { staffHandle } from '../utils/staffDirectory.js';
 import { safeDisplayForReact } from '../utils/safeReactText.js';
 import { formatTodoExpenseEstimate } from './TodoExpenseEstimateFields.jsx';
+import { getSubtasks } from '../utils/todoSubtasks.js';
 import { authedFetch } from '../utils/authedFetch.js';
+
+function assigneeEmailsOf(item) {
+  return Array.isArray(item?.assigneeEmails)
+    ? item.assigneeEmails
+        .map((email) => String(email || '').trim().toLowerCase())
+        .filter(Boolean)
+    : [];
+}
+
+function PortalAssigneeChips({ item, viewerEmail }) {
+  const emails = assigneeEmailsOf(item);
+  if (!emails.length) return null;
+  const me = String(viewerEmail || '').trim().toLowerCase();
+  return emails.map((email) => (
+    <span
+      key={email}
+      className={`text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded ${
+        email === me ? 'bg-[#fd7414] text-white' : 'bg-slate-100 text-slate-600'
+      }`}
+    >
+      {email === me ? 'Assigned to you' : email.split('@')[0]}
+    </span>
+  ));
+}
 
 /**
  * Client-portal task card: separated like kiosk rows, with notes + read-only attachments.
@@ -108,12 +133,28 @@ export default function PortalClientTodoItem({
             </span>
           ) : null}
           <TodoApprovalBadge item={item} />
+          <PortalAssigneeChips item={item} viewerEmail={user?.email} />
           {isTodoAwaitingClientApproval(item) ? (
             <span className="text-[9px] font-black uppercase tracking-widest text-violet-700">
               See Approvals tab
             </span>
           ) : null}
         </div>
+        {getSubtasks(item).length > 0 ? (
+          <ul className="space-y-1 border-l border-slate-100 pl-3">
+            {getSubtasks(item).map((sub) => (
+              <li
+                key={sub.id}
+                className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600"
+              >
+                <span className={sub.done ? 'text-slate-400 line-through' : ''}>
+                  {sub.text || '(Sub-task)'}
+                </span>
+                <PortalAssigneeChips item={sub} viewerEmail={user?.email} />
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </div>
 
       <TodoItemAttachments item={item} client={client} compact />

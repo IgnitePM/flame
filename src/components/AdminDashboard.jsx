@@ -136,6 +136,9 @@ import GmailConnectCard from './GmailConnectCard.jsx';
 import DriveConnectCard from './DriveConnectCard.jsx';
 import Ga4ConnectCard from './Ga4ConnectCard.jsx';
 import GoogleAdsConnectCard from './GoogleAdsConnectCard.jsx';
+import QuickBooksConnectCard from './QuickBooksConnectCard.jsx';
+import AssigneeChoiceList from './AssigneeChoiceList.jsx';
+import { portalUserEmailsForClient } from '../utils/clientAssignees.js';
 import SeRankingLocalConnectCard from './SeRankingLocalConnectCard.jsx';
 import ClientEmailComposeModal, {
   replySubject,
@@ -294,7 +297,9 @@ function ClientCustomProjectsPanelInner({
       .trim()
       .toLowerCase();
     const rows = parseTodoSpreadsheetPaste(rawText, {
-      assignableEmails,
+      assignableEmails: [
+        ...new Set([...(assignableEmails || []), ...portalUserEmailsForClient(c)]),
+      ],
       defaultAssigneeEmail: me,
       existingParentTexts: existingItems.map((i) => i?.text),
     });
@@ -348,33 +353,14 @@ function ClientCustomProjectsPanelInner({
             <div className="mb-2 text-[10px] font-black uppercase tracking-widest text-zinc-400">
               Assign to
             </div>
-            <div className="max-h-[240px] space-y-1 overflow-y-auto pr-1">
-              {(assignableEmails || []).map((email) => {
-                const checked = cleaned.includes(email);
-                return (
-                  <label
-                    key={email}
-                    className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-2 hover:bg-white/10"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => {
-                        const next = checked
-                          ? cleaned.filter((e) => e !== email)
-                          : Array.from(new Set([...cleaned, email]));
-                        const sorted = [...next].sort((a, b) =>
-                          String(a).localeCompare(String(b)),
-                        );
-                        onChange(sorted);
-                      }}
-                    />
-                    <span className="truncate text-xs font-bold text-zinc-100">
-                      {email}
-                    </span>
-                  </label>
-                );
-              })}
+            <div className="max-h-[280px] overflow-y-auto pr-1">
+              <AssigneeChoiceList
+                staffEmails={assignableEmails}
+                client={c}
+                selected={cleaned}
+                onChange={onChange}
+                tone="dark"
+              />
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <button
@@ -2045,12 +2031,12 @@ const AdminDashboard = ({
     if (adminTab !== 'timesheets' && adminTab !== 'time_spent') setAdminTab('timesheets');
   }, [isRestrictedStaff, adminTab, setAdminTab, lockedTab]);
 
-  // OAuth callback lands on /admin?gmail=connected|error — open Config tab.
+  // OAuth callbacks land on /admin?gmail= or ?qbo= — open Config tab.
   useEffect(() => {
     if (lockedTab || isRestrictedStaff) return;
     try {
       const params = new URLSearchParams(window.location.search || '');
-      if (!params.get('gmail')) return;
+      if (!params.get('gmail') && !params.get('qbo')) return;
       if (adminTab !== 'tasks') setAdminTab('tasks');
     } catch {
       /* ignore */
@@ -2814,6 +2800,7 @@ const AdminDashboard = ({
     disabled,
     className = '',
     tone = 'dark',
+    client = null,
   }) => {
     const isLight = tone === 'light';
     const cleaned = Array.isArray(value)
@@ -2863,39 +2850,14 @@ const AdminDashboard = ({
             >
               Assign to
             </div>
-            <div className="max-h-[240px] space-y-1 overflow-y-auto pr-1">
-              {assignableEmails.map((email) => {
-                const checked = cleaned.includes(email);
-                return (
-                  <label
-                    key={email}
-                    className={`flex cursor-pointer items-center gap-2 rounded-xl px-2 py-2 ${
-                      isLight ? 'hover:bg-slate-50' : 'hover:bg-white/10'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => {
-                        const next = checked
-                          ? cleaned.filter((e) => e !== email)
-                          : Array.from(new Set([...cleaned, email]));
-                        const sorted = [...next].sort((a, b) =>
-                          String(a).localeCompare(String(b)),
-                        );
-                        onChange(sorted);
-                      }}
-                    />
-                    <span
-                      className={`truncate text-xs font-bold ${
-                        isLight ? 'text-slate-800' : 'text-zinc-100'
-                      }`}
-                    >
-                      {email}
-                    </span>
-                  </label>
-                );
-              })}
+            <div className="max-h-[280px] overflow-y-auto pr-1">
+              <AssigneeChoiceList
+                staffEmails={assignableEmails}
+                client={client}
+                selected={cleaned}
+                onChange={onChange}
+                tone={isLight ? 'light' : 'dark'}
+              />
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <button
@@ -3810,6 +3772,17 @@ const AdminDashboard = ({
                     {email}
                   </option>
                 ))}
+                {taskClientFilter !== 'all'
+                  ? portalUserEmailsForClient(
+                      clients.find((c) => c.id === taskClientFilter),
+                    )
+                      .filter((email) => !assignableEmails.includes(email))
+                      .map((email) => (
+                        <option key={`client-${email}`} value={email}>
+                          {email}
+                        </option>
+                      ))
+                  : null}
               </select>
             </div>
             </div>
@@ -3978,6 +3951,7 @@ const AdminDashboard = ({
                         <>
                           {renderAssigneeMultiSelect({
                             openKey: `global_task__${row.clientId}__${row.categoryKey}__${row.item.id}`,
+                            client: rowClient,
                             value: assigneeValue,
                             disabled: todoSaving || !updateClientTodo,
                             onChange: async (nextAssignees) => {
@@ -4191,6 +4165,7 @@ const AdminDashboard = ({
                                 <div className="flex flex-wrap gap-2 shrink-0">
                                   {renderAssigneeMultiSelect({
                                     openKey: `global_sub__${row.clientId}__${row.categoryKey}__${row.item.id}__${sub.id}`,
+                                    client: rowClient,
                                     value: subAssigneeVal,
                                     disabled: todoSaving || !updateClientTodo,
                                     onChange: async (nextAssignees) => {
@@ -4311,6 +4286,7 @@ const AdminDashboard = ({
                             />
                             {renderAssigneeMultiSelect({
                               openKey: `global_sub_add__${row.clientId}__${row.categoryKey}__${row.item.id}`,
+                              client: rowClient,
                               value: globalSubtaskAssignees,
                               disabled: todoSaving,
                               onChange: (next) => setGlobalSubtaskAssignees(next),
@@ -6331,6 +6307,7 @@ const AdminDashboard = ({
                                             </label>
                                             {renderAssigneeMultiSelect({
                                               openKey: `ai_todo__${t.id}`,
+                                              client: c,
                                               value: t.assigneeEmails || [],
                                               tone: 'light',
                                               onChange: (emails) =>
@@ -6977,6 +6954,7 @@ const AdminDashboard = ({
                                                               )}
                                                               {renderAssigneeMultiSelect({
                                                                 openKey: `todo_item__${c.id}__${cycleStart}__${catKey}__${item.id}`,
+                                                                client: c,
                                                                 value: assignees,
                                                                 disabled: todoSaving || isCycleLocked(c, cycleStart),
                                                                 onChange: async (nextAssignees) => {
@@ -7176,6 +7154,7 @@ const AdminDashboard = ({
                                                                         </span>
                                                                         {renderAssigneeMultiSelect({
                                                                           openKey: `client_sub__${c.id}__${cycleStart}__${catKey}__${item.id}__${sub.id}`,
+                                                                          client: c,
                                                                           value: subAs,
                                                                           disabled: todoSaving || isCycleLocked(c, cycleStart),
                                                                           onChange: async (nextAssignees) => {
@@ -7279,6 +7258,7 @@ const AdminDashboard = ({
                                                                     />
                                                                     {renderAssigneeMultiSelect({
                                                                       openKey: `client_sub_add__${c.id}__${cycleStart}__${catKey}__${item.id}`,
+                                                                      client: c,
                                                                       value: clientSubtaskAssignees,
                                                                       disabled: todoSaving,
                                                                       onChange: (next) => setClientSubtaskAssignees(next),
@@ -7402,6 +7382,7 @@ const AdminDashboard = ({
                                                           />
                                                           {renderAssigneeMultiSelect({
                                                             openKey: `todo_add__${c.id}__${cycleStart}__${catKey}`,
+                                                            client: c,
                                                             value: getDraftAssigneeEmails(catKey),
                                                             disabled: todoSaving || isCycleLocked(c, cycleStart),
                                                             onChange: (nextAssignees) =>
@@ -8260,6 +8241,11 @@ const AdminDashboard = ({
           <SeRankingLocalConnectCard canManage={canBilling} />
 
           <GoogleAdsConnectCard
+            canManage={canBilling}
+            onTabFocus={() => setAdminTab?.('tasks')}
+          />
+
+          <QuickBooksConnectCard
             canManage={canBilling}
             onTabFocus={() => setAdminTab?.('tasks')}
           />
