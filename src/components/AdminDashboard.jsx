@@ -22,6 +22,7 @@ import {
   List,
   Lock,
   LogOut,
+  Mail,
   Pencil,
   Pin,
   Play,
@@ -117,7 +118,13 @@ import RetainerCategoryStats from './RetainerCategoryStats.jsx';
 import TaskLogSessionDetail from './TaskLogSessionDetail.jsx';
 import TaskLogTimesheetRow from './TaskLogTimesheetRow.jsx';
 import TodoItemAttachments from './TodoItemAttachments.jsx';
+import TodoItemEmailAttachments from './TodoItemEmailAttachments.jsx';
 import ProjectAttachments from './ProjectAttachments.jsx';
+import {
+  addEmailAttachmentToItem,
+  buildEmailAttachmentRecord,
+  removeEmailAttachmentFromItem,
+} from '../utils/todoEmailAttachments.js';
 import TodoEstimateHoursSlider, {
   normalizeTodoEstimatedHours,
 } from './TodoEstimateHoursSlider.jsx';
@@ -890,6 +897,80 @@ function ClientCustomProjectsPanelInner({
                                               onAttachDriveFile={attachClientDriveFile}
                                               onRemove={removeClientDocument}
                                               compact
+                                            />
+                                          </div>
+                                        ) : null}
+                                        {updateClientTodo ? (
+                                          <div className="pl-6">
+                                            <TodoItemEmailAttachments
+                                              item={item}
+                                              client={c}
+                                              compact
+                                              disabled={
+                                                readOnly ||
+                                                projectTodoSaving ||
+                                                isCycleLocked(c, mStart)
+                                              }
+                                              onAttach={
+                                                readOnly
+                                                  ? undefined
+                                                  : async (record) => {
+                                                      const prev =
+                                                        todoStateForCycle?.[catKey] || {
+                                                          closed: false,
+                                                          items: [],
+                                                        };
+                                                      const nextItems = (
+                                                        prev.items || []
+                                                      ).map((i) =>
+                                                        i.id === item.id
+                                                          ? addEmailAttachmentToItem(
+                                                              i,
+                                                              record,
+                                                            )
+                                                          : i,
+                                                      );
+                                                      await updateClientTodo(
+                                                        c,
+                                                        mStart,
+                                                        catKey,
+                                                        {
+                                                          ...prev,
+                                                          items: nextItems,
+                                                        },
+                                                      );
+                                                    }
+                                              }
+                                              onRemove={
+                                                readOnly
+                                                  ? undefined
+                                                  : async (attachmentId) => {
+                                                      const prev =
+                                                        todoStateForCycle?.[catKey] || {
+                                                          closed: false,
+                                                          items: [],
+                                                        };
+                                                      const nextItems = (
+                                                        prev.items || []
+                                                      ).map((i) =>
+                                                        i.id === item.id
+                                                          ? removeEmailAttachmentFromItem(
+                                                              i,
+                                                              attachmentId,
+                                                            )
+                                                          : i,
+                                                      );
+                                                      await updateClientTodo(
+                                                        c,
+                                                        mStart,
+                                                        catKey,
+                                                        {
+                                                          ...prev,
+                                                          items: nextItems,
+                                                        },
+                                                      );
+                                                    }
+                                              }
                                             />
                                           </div>
                                         ) : null}
@@ -1940,6 +2021,7 @@ const AdminDashboard = ({
   const [aiTodoModalOpen, setAiTodoModalOpen] = useState(false);
   const [aiTodoSource, setAiTodoSource] = useState('transcript'); // transcript | email
   const [aiTodoTranscript, setAiTodoTranscript] = useState('');
+  const [aiTodoSourceMessage, setAiTodoSourceMessage] = useState(null);
   const [aiTodoCandidates, setAiTodoCandidates] = useState([]);
   const [aiTodoSelected, setAiTodoSelected] = useState({});
   const [aiTodoLoading, setAiTodoLoading] = useState(false);
@@ -4081,6 +4163,53 @@ const AdminDashboard = ({
                             compact
                           />
                         ) : null}
+                        {updateClientTodo ? (
+                          <TodoItemEmailAttachments
+                            item={row.item}
+                            client={rowClient}
+                            compact
+                            disabled={
+                              todoSaving ||
+                              isCycleLocked(rowClient, row.cycleStart)
+                            }
+                            onAttach={async (record) => {
+                              const catTodo = row.catTodo || {
+                                closed: false,
+                                items: [],
+                              };
+                              const nextItems = (catTodo.items || [row.item]).map(
+                                (i) =>
+                                  i.id === row.item.id
+                                    ? addEmailAttachmentToItem(i, record)
+                                    : i,
+                              );
+                              await updateClientTodo(
+                                rowClient,
+                                row.cycleStart,
+                                row.categoryKey,
+                                { ...catTodo, items: nextItems },
+                              );
+                            }}
+                            onRemove={async (attachmentId) => {
+                              const catTodo = row.catTodo || {
+                                closed: false,
+                                items: [],
+                              };
+                              const nextItems = (catTodo.items || [row.item]).map(
+                                (i) =>
+                                  i.id === row.item.id
+                                    ? removeEmailAttachmentFromItem(i, attachmentId)
+                                    : i,
+                              );
+                              await updateClientTodo(
+                                rowClient,
+                                row.cycleStart,
+                                row.categoryKey,
+                                { ...catTodo, items: nextItems },
+                              );
+                            }}
+                          />
+                        ) : null}
                         <TaskNotesSection
                           item={row.item}
                           allItems={row.catTodo?.items || [row.item]}
@@ -5662,7 +5791,7 @@ const AdminDashboard = ({
                               setEmailComposeDraft(null);
                               setEmailComposeClient(client);
                             }}
-                            onExtractTasks={({ text }) => {
+                            onExtractTasks={({ text, message }) => {
                               if (!clientHasEnabledRetainers(c)) {
                                 window.alert(
                                   'Enable at least one retainer category before extracting tasks. Unclassified tasks have no retainer balance.',
@@ -5671,6 +5800,7 @@ const AdminDashboard = ({
                               }
                               setAiTodoSource('email');
                               setAiTodoTranscript(String(text || '').trim());
+                              setAiTodoSourceMessage(message || null);
                               setAiTodoCandidates([]);
                               setAiTodoSelected({});
                               setAiTodoModalOpen(true);
@@ -6033,6 +6163,7 @@ const AdminDashboard = ({
                             }
                             setAiTodoSource('transcript');
                             setAiTodoTranscript('');
+                            setAiTodoSourceMessage(null);
                             setAiTodoCandidates([]);
                             setAiTodoSelected({});
                             setAiTodoModalOpen(true);
@@ -6077,7 +6208,10 @@ const AdminDashboard = ({
                               </p>
                             </div>
                             <button
-                              onClick={() => setAiTodoModalOpen(false)}
+                              onClick={() => {
+                                setAiTodoModalOpen(false);
+                                setAiTodoSourceMessage(null);
+                              }}
                               className="touch-target p-2 bg-white rounded-full hover:bg-slate-100 border border-slate-200"
                               title="Close"
                             >
@@ -6086,6 +6220,15 @@ const AdminDashboard = ({
                           </div>
 
                           <div className="mobile-safe-dialog-body p-4 sm:p-6 space-y-5">
+                            {aiTodoSourceMessage ? (
+                              <div className="inline-flex items-center gap-2 max-w-full rounded-xl border border-sky-100 bg-sky-50 px-3 py-2 text-xs font-bold text-sky-900">
+                                <Mail className="h-3.5 w-3.5 shrink-0 text-sky-600" />
+                                <span className="truncate">
+                                  Will attach:{' '}
+                                  {aiTodoSourceMessage.subject || '(no subject)'}
+                                </span>
+                              </div>
+                            ) : null}
                             <div className="space-y-2">
                               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
                                 {aiTodoSource === 'email'
@@ -6104,7 +6247,8 @@ const AdminDashboard = ({
                               />
                               <p className="text-[11px] text-slate-400 font-bold">
                                 Note: very large text may be trimmed by the server cap before AI
-                                extraction.
+                                extraction. Related steps are grouped as primary tasks with
+                                sub-tasks when possible.
                               </p>
                             </div>
 
@@ -6153,6 +6297,28 @@ const AdminDashboard = ({
                                       const est = normalizeTodoEstimatedHours(
                                         t.estimatedHours ?? t.estimated_hours,
                                       );
+                                      const rawSubs = Array.isArray(t.subtasks)
+                                        ? t.subtasks
+                                        : Array.isArray(t.subTasks)
+                                          ? t.subTasks
+                                          : [];
+                                      const subtasks = rawSubs
+                                        .map((s, sIdx) => {
+                                          const subEst = normalizeTodoEstimatedHours(
+                                            s?.estimatedHours ?? s?.estimated_hours,
+                                          );
+                                          const text = String(
+                                            s?.text || s?.todo || s?.task || '',
+                                          ).trim();
+                                          if (!text) return null;
+                                          return {
+                                            id: `ai_sub_${Date.now()}_${idx}_${sIdx}`,
+                                            text,
+                                            estimatedHoursInput:
+                                              subEst == null ? '' : String(subEst),
+                                          };
+                                        })
+                                        .filter(Boolean);
                                       return {
                                         id: String(t.id || `ai_${Date.now()}_${idx}`),
                                         text: String(t.text || '').trim(),
@@ -6165,6 +6331,7 @@ const AdminDashboard = ({
                                         dueDateInput: '',
                                         estimatedHoursInput:
                                           est == null ? '' : String(est),
+                                        subtasks,
                                       };
                                     }).filter((t) => t.text);
 
@@ -6251,6 +6418,24 @@ const AdminDashboard = ({
                                         <div className="text-sm font-black text-slate-900">
                                           {t.text}
                                         </div>
+                                        {Array.isArray(t.subtasks) && t.subtasks.length > 0 ? (
+                                          <ul className="ml-1 border-l border-slate-200 pl-3 space-y-1">
+                                            {t.subtasks.map((sub) => (
+                                              <li
+                                                key={sub.id}
+                                                className="text-xs font-bold text-slate-600 flex items-start gap-2"
+                                              >
+                                                <span className="text-slate-300 shrink-0">↳</span>
+                                                <span className="min-w-0 flex-1">{sub.text}</span>
+                                                {sub.estimatedHoursInput ? (
+                                                  <span className="shrink-0 text-[10px] font-black text-slate-400">
+                                                    {sub.estimatedHoursInput}h
+                                                  </span>
+                                                ) : null}
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        ) : null}
                                         <div className="space-y-1">
                                           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
                                             Retainer category
@@ -6360,7 +6545,10 @@ const AdminDashboard = ({
                             <div className="flex justify-end gap-3 pt-2">
                               <button
                                 type="button"
-                                onClick={() => setAiTodoModalOpen(false)}
+                                onClick={() => {
+                                  setAiTodoModalOpen(false);
+                                  setAiTodoSourceMessage(null);
+                                }}
                                 className="px-5 py-3 rounded-2xl font-black text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
                               >
                                 Cancel
@@ -6383,6 +6571,7 @@ const AdminDashboard = ({
                                     c,
                                     cycleStart,
                                   );
+                                  const hasSourceEmail = !!aiTodoSourceMessage?.id;
 
                                   // Build next todoCycles updates in-memory,
                                   // then write everything in one Firestore update.
@@ -6415,6 +6604,35 @@ const AdminDashboard = ({
                                           const norm = text.toLowerCase();
                                           if (existingTextSet.has(norm))
                                             return null;
+                                          const assigneeEmails = Array.isArray(
+                                            p.assigneeEmails,
+                                          )
+                                            ? p.assigneeEmails
+                                                .map((e) =>
+                                                  String(e || '').trim().toLowerCase(),
+                                                )
+                                                .filter(Boolean)
+                                            : [];
+                                          const dueDate = parseDateInputToMs(
+                                            p.dueDateInput,
+                                          );
+                                          const subtasks = (
+                                            Array.isArray(p.subtasks) ? p.subtasks : []
+                                          )
+                                            .map((s) => {
+                                              const subText = String(s?.text || '').trim();
+                                              if (!subText) return null;
+                                              return newSubtaskTemplate({
+                                                text: subText,
+                                                assigneeEmails: [],
+                                                dueDate: null,
+                                                estimatedHours:
+                                                  normalizeTodoEstimatedHours(
+                                                    s.estimatedHoursInput,
+                                                  ),
+                                              });
+                                            })
+                                            .filter(Boolean);
                                           return {
                                             id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
                                             text,
@@ -6423,18 +6641,20 @@ const AdminDashboard = ({
                                             pinned: false,
                                             recurring: false,
                                             recurringId: null,
-                                            dueDate: parseDateInputToMs(p.dueDateInput),
-                                            assigneeEmails: Array.isArray(p.assigneeEmails)
-                                              ? p.assigneeEmails
-                                                  .map((e) =>
-                                                    String(e || '').trim().toLowerCase(),
-                                                  )
-                                                  .filter(Boolean)
-                                              : [],
+                                            dueDate,
+                                            assigneeEmails,
                                             recurrence: null,
                                             estimatedHours: normalizeTodoEstimatedHours(
                                               p.estimatedHoursInput,
                                             ),
+                                            subtasks,
+                                            emailAttachments: hasSourceEmail
+                                              ? [
+                                                  buildEmailAttachmentRecord(
+                                                    aiTodoSourceMessage,
+                                                  ),
+                                                ].filter(Boolean)
+                                              : [],
                                           };
                                         })
                                         .filter(Boolean);
@@ -6460,6 +6680,7 @@ const AdminDashboard = ({
                                     );
                                     setAiTodoModalOpen(false);
                                     setAiTodoTranscript('');
+                                    setAiTodoSourceMessage(null);
                                     setAiTodoCandidates([]);
                                     setAiTodoSelected({});
                                   } finally {
@@ -7084,6 +7305,54 @@ const AdminDashboard = ({
                                                                   onRemove={removeClientDocument}
                                                                 />
                                                               )}
+                                                              {updateClientTodo ? (
+                                                                <TodoItemEmailAttachments
+                                                                  item={item}
+                                                                  client={c}
+                                                                  disabled={
+                                                                    todoSaving ||
+                                                                    isCycleLocked(c, cycleStart)
+                                                                  }
+                                                                  onAttach={async (record) => {
+                                                                    const next = items.map((i) =>
+                                                                      i.id === item.id
+                                                                        ? addEmailAttachmentToItem(
+                                                                            i,
+                                                                            record,
+                                                                          )
+                                                                        : i,
+                                                                    );
+                                                                    await updateClientTodo(
+                                                                      c,
+                                                                      cycleStart,
+                                                                      catKey,
+                                                                      {
+                                                                        ...catTodo,
+                                                                        items: next,
+                                                                      },
+                                                                    );
+                                                                  }}
+                                                                  onRemove={async (attachmentId) => {
+                                                                    const next = items.map((i) =>
+                                                                      i.id === item.id
+                                                                        ? removeEmailAttachmentFromItem(
+                                                                            i,
+                                                                            attachmentId,
+                                                                          )
+                                                                        : i,
+                                                                    );
+                                                                    await updateClientTodo(
+                                                                      c,
+                                                                      cycleStart,
+                                                                      catKey,
+                                                                      {
+                                                                        ...catTodo,
+                                                                        items: next,
+                                                                      },
+                                                                    );
+                                                                  }}
+                                                                />
+                                                              ) : null}
                                                               <TaskNotesSection
                                                                 item={item}
                                                                 allItems={catTodo?.items || [item]}

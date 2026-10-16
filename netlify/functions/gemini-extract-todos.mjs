@@ -211,6 +211,39 @@ export default async (req) => {
   const allowedCategories = Array.from(new Set(retainerCategories));
   const fallbackCategory = allowedCategories[0];
 
+  const sharedHierarchyRules = `
+Hierarchy rules (important — avoid a flat long list):
+- Each top-level entry is a PRIMARY to-do (a project or initiative).
+- Put related smaller action items under that primary as "subtasks".
+- Standalone single actions stay as a primary with an empty "subtasks" array.
+- Prefer fewer primaries with nested subtasks over many sibling primaries.
+- At most 10 primaries; each primary at most 8 subtasks.
+- Primary "text" should name the initiative (e.g. "Website redesign kickoff").
+- Subtask "text" should be a concise imperative step.
+- "estimatedHours" on a primary is total effort when there are no subtasks, or roll-up estimate when there are.
+- Subtask "estimatedHours" is effort for that step (0.25 steps when possible); use null if unknown.
+`.trim();
+
+  const jsonShapeHelp = `
+Output requirements:
+- Respond with JSON only, no markdown.
+- JSON shape:
+{
+  "todos": [
+    {
+      "text": "string",
+      "category": "one of allowed categories",
+      "estimatedHours": number or null,
+      "subtasks": [
+        { "text": "string", "estimatedHours": number or null }
+      ]
+    }
+  ]
+}
+- Prefer explicit durations from the source (e.g. "2 hours", "30 min"). If no duration is implied, estimate a reasonable agency effort or use null.
+- If there are no action items, return {"todos":[]}.
+`.trim();
+
   const prompt =
     sourceType === 'email'
       ? `
@@ -220,28 +253,15 @@ Task:
 1) Read the email (headers + body).
 2) Extract action items: work Ignite should do, client requests, follow-ups, deadlines, and next steps.
 3) Ignore signatures, legal footers, unsubscribe links, tracking URLs, and pure FYI content with no action.
-4) Group similar action items together to reduce the number of to-do entries.
-   - Each group should be a single actionable to-do text that combines the shared intent.
-5) Assign each grouped to-do to exactly ONE category from the allowed categories.
+4) Group related actions into primary to-dos with nested subtasks when they belong to the same initiative or project.
+5) Assign each PRIMARY to-do to exactly ONE category from the allowed categories.
    - Pick the closest match by semantics.
    - If unsure, assign to: "${fallbackCategory}".
+   - Subtasks inherit the parent's category (do not assign categories on subtasks).
 
-Output requirements:
-- Respond with JSON only, no markdown.
-- JSON shape:
-{
-  "todos": [
-    {
-      "text": "string",
-      "category": "one of allowed categories",
-      "estimatedHours": number or null
-    }
-  ]
-}
-- "text" should be a concise imperative to-do sentence.
-- "estimatedHours" is a best-guess effort in hours (use 0.25 steps when possible). Prefer explicit durations from the email (e.g. "2 hours", "30 min"). If no duration is implied, estimate a reasonable agency effort or use null.
-- Return at most 15 to-do groups.
-- If there are no action items, return {"todos":[]}.
+${sharedHierarchyRules}
+
+${jsonShapeHelp}
 
 Allowed categories:
 ${allowedCategories.map((c) => `- ${c}`).join('\n')}
@@ -260,28 +280,15 @@ You are an assistant that extracts structured action items from meeting transcri
 Task:
 1) Read the meeting transcript.
 2) Extract action items mentioned as things that must be done (tasks, follow-ups, next steps).
-3) Group similar action items together to reduce the number of to-do entries.
-   - Each group should be a single actionable to-do text that combines the shared intent.
-4) Assign each grouped to-do to exactly ONE category from the allowed categories.
+3) Group related actions into primary to-dos with nested subtasks when they belong to the same initiative or project.
+4) Assign each PRIMARY to-do to exactly ONE category from the allowed categories.
    - Pick the closest match by semantics.
    - If unsure, assign to: "${fallbackCategory}".
+   - Subtasks inherit the parent's category (do not assign categories on subtasks).
 
-Output requirements:
-- Respond with JSON only, no markdown.
-- JSON shape:
-{
-  "todos": [
-    {
-      "text": "string",
-      "category": "one of allowed categories",
-      "estimatedHours": number or null
-    }
-  ]
-}
-- "text" should be a concise imperative to-do sentence.
-- "estimatedHours" is a best-guess effort in hours (use 0.25 steps when possible). Prefer explicit durations from the transcript. If no duration is implied, estimate a reasonable agency effort or use null.
-- Return at most 15 to-do groups.
-- If there are no action items, return {"todos":[]}.
+${sharedHierarchyRules}
+
+${jsonShapeHelp}
 
 Allowed categories:
 ${allowedCategories.map((c) => `- ${c}`).join('\n')}
@@ -371,6 +378,25 @@ ${trimmedTranscript}
     return Math.round(n * 4) / 4;
   };
 
+  const normalizeSubtasks = (raw) => {
+    const list = Array.isArray(raw?.subtasks)
+      ? raw.subtasks
+      : Array.isArray(raw?.subTasks)
+        ? raw.subTasks
+        : Array.isArray(raw?.children)
+          ? raw.children
+          : [];
+    return list
+      .map((s) => ({
+        text: String(s?.text || s?.todo || s?.task || '').trim(),
+        estimatedHours: normalizeEstimatedHours(
+          s?.estimatedHours ?? s?.estimated_hours,
+        ),
+      }))
+      .filter((s) => s.text)
+      .slice(0, 8);
+  };
+
   const todos = parsed.todos
     .map((t) => ({
       text: String(t?.text || t?.todo || t?.task || '').trim(),
@@ -378,9 +404,10 @@ ${trimmedTranscript}
       estimatedHours: normalizeEstimatedHours(
         t?.estimatedHours ?? t?.estimated_hours,
       ),
+      subtasks: normalizeSubtasks(t),
     }))
     .filter((t) => t.text)
-    .slice(0, 15);
+    .slice(0, 10);
 
   return new Response(JSON.stringify({ todos, model: usedModel }), {
     status: 200,
