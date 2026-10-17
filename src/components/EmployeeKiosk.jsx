@@ -1408,7 +1408,7 @@ const EmployeeKiosk = ({
   );
 
   const persistCategoryTodoItemsForRow = React.useCallback(
-    async (row, nextItems) => {
+    async (row, nextItems, options = {}) => {
       if (!updateClientTodo || !selectedClientObj || !row) return;
       if (todoSaving) return;
       if (isCycleLocked(selectedClientObj, row.cycleStart)) {
@@ -1427,6 +1427,9 @@ const EmployeeKiosk = ({
             ...ctx.catTodo,
             items: nextItems,
           },
+          options?.demotedPrimary
+            ? { demotedPrimary: options.demotedPrimary }
+            : undefined,
         );
       } finally {
         setTodoSaving(false);
@@ -1976,8 +1979,12 @@ const EmployeeKiosk = ({
                                     setTodoSaving={setTodoSaving}
                                     updateClientTodo={updateClientTodo}
                                     setClientTodoItemDone={setClientTodoItemDone}
-                                    onPersistItems={(nextItems) =>
-                                      persistCategoryTodoItemsForRow(row, nextItems)
+                                    onPersistItems={(nextItems, options) =>
+                                      persistCategoryTodoItemsForRow(
+                                        row,
+                                        nextItems,
+                                        options,
+                                      )
                                     }
                                     canDragReorder={rowCanDragReorder}
                                     showPriorCycleBadge={rowCtx.isPriorCycle}
@@ -2410,8 +2417,12 @@ const EmployeeKiosk = ({
                                     setTodoSaving={setTodoSaving}
                                     updateClientTodo={updateClientTodo}
                                     setClientTodoItemDone={setClientTodoItemDone}
-                                    onPersistItems={(nextItems) =>
-                                      persistCategoryTodoItemsForRow(row, nextItems)
+                                    onPersistItems={(nextItems, options) =>
+                                      persistCategoryTodoItemsForRow(
+                                        row,
+                                        nextItems,
+                                        options,
+                                      )
                                     }
                                     canDragReorder={rowCanDragReorder}
                                     showPriorCycleBadge={rowCtx.isPriorCycle}

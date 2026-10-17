@@ -2734,12 +2734,58 @@ export default function App() {
     );
   }, []);
 
-  const updateClientTodo = async (client, cycleStart, categoryKey, nextCategoryData) => {
+  const updateClientTodo = async (
+    client,
+    cycleStart,
+    categoryKey,
+    nextCategoryData,
+    options = {},
+  ) => {
     const freshClient = resolveClient(client) || client;
-    const cycles = ensureCurrentCycleTodoData(freshClient, cycleStart);
+    let cycles = ensureCurrentCycleTodoData(freshClient, cycleStart);
     const cycleData = cycles[String(cycleStart)] || {};
     const prevCategory = cycleData[categoryKey] || {};
     cycles[String(cycleStart)] = { ...cycleData, [categoryKey]: nextCategoryData };
+
+    // When a primary is nested as a step, strip that primary id from every
+    // billing cycle and skip recurring respawn. Otherwise prior-cycle merge
+    // (and reconcile) brings the primary back alongside the new sub-task.
+    const demotedPrimary = options?.demotedPrimary;
+    if (demotedPrimary?.id) {
+      let recurringSkipKey = '';
+      const seriesId = demotedPrimary.recurring
+        ? String(demotedPrimary.recurringId || demotedPrimary.id || '')
+        : '';
+      if (demotedPrimary.recurring) {
+        recurringSkipKey = recurringAnchorKey(seriesId, demotedPrimary.dueDate);
+      }
+      const { cycles: strippedCycles } = removeTodoItemFromAllCycles(
+        cycles,
+        categoryKey,
+        demotedPrimary.id,
+        {
+          recurringSkipKey,
+          matchRecurringId: seriesId,
+          matchDueDate: demotedPrimary.dueDate,
+        },
+      );
+      cycles = strippedCycles;
+      // Re-apply the nested list for this cycle (remove-all may have rewritten
+      // the category from a stale snapshot before nest).
+      cycles[String(cycleStart)] = {
+        ...(cycles[String(cycleStart)] || {}),
+        [categoryKey]: nextCategoryData,
+      };
+      if (recurringSkipKey) {
+        cycles = ensureRecurringSkipOnCategory(
+          cycles,
+          String(cycleStart),
+          categoryKey,
+          recurringSkipKey,
+        );
+      }
+    }
+
     const period = getBillingPeriod(freshClient.billingDay || 1, 0);
     if (String(cycleStart) === String(period.start)) {
       const slice = cycles[String(cycleStart)];
@@ -2750,6 +2796,19 @@ export default function App() {
         newRecurringTodoRowId,
       );
       if (changed) cycles[String(cycleStart)] = cycleDataByCategory;
+      // Nest list must win over any reconcile respawn of the demoted primary.
+      if (demotedPrimary?.id) {
+        const after = cycles[String(cycleStart)]?.[categoryKey];
+        if (after && Array.isArray(after.items)) {
+          const cleaned = after.items.filter((i) => i?.id !== demotedPrimary.id);
+          if (cleaned.length !== after.items.length) {
+            cycles[String(cycleStart)] = {
+              ...(cycles[String(cycleStart)] || {}),
+              [categoryKey]: { ...after, items: cleaned },
+            };
+          }
+        }
+      }
     }
     const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(freshClient, cycles);
     await updateDoc(doc(db, 'clients', freshClient.id), { todoCycles: cycles, ...teamAccessPatch });

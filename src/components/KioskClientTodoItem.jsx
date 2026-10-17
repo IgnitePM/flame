@@ -269,19 +269,26 @@ export default function KioskClientTodoItem({
     return effectiveSubtaskAssignees(sub, item, user?.email).includes(meLower);
   };
 
-  const persistItems = (nextItems, { errorMessage } = {}) => {
+  const persistItems = (nextItems, { errorMessage, demotedPrimary } = {}) => {
+    const options = demotedPrimary ? { demotedPrimary } : undefined;
     if (onPersistItems) {
-      onPersistItems(nextItems).catch?.(() => {
+      Promise.resolve(onPersistItems(nextItems, options)).catch?.(() => {
         if (errorMessage) window.alert(errorMessage);
       });
       return;
     }
     if (!updateClientTodo) return;
     setTodoSaving(true);
-    updateClientTodo(client, cycleStart, catKey, {
-      ...catTodo,
-      items: nextItems,
-    })
+    updateClientTodo(
+      client,
+      cycleStart,
+      catKey,
+      {
+        ...catTodo,
+        items: nextItems,
+      },
+      options,
+    )
       .catch(() => {
         if (errorMessage) window.alert(errorMessage);
       })
@@ -353,7 +360,7 @@ export default function KioskClientTodoItem({
       return;
     }
     if (!result.ok) return;
-    persistItems(result.items);
+    persistItems(result.items, { demotedPrimary: result.demotedPrimary });
   };
 
   const applyDrop = (dropTarget, e) => {
@@ -369,7 +376,7 @@ export default function KioskClientTodoItem({
       return;
     }
     if (!result.ok) return;
-    persistItems(result.items);
+    persistItems(result.items, { demotedPrimary: result.demotedPrimary });
   };
 
   const handleSubtaskDragOver = (e) => {

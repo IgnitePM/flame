@@ -171,7 +171,9 @@ export function applyTodoListDragDrop(items, drag, drop) {
     const sub = subtaskFromPrimary(primary);
     let next = list.filter((i) => i.id !== drag.id);
     next = appendSubtaskToPrimary(next, drop.primaryId, sub);
-    return { ok: true, items: next };
+    // demotedPrimary: callers must clear this id across other billing cycles so
+    // prior-cycle merge / recurring reconcile cannot resurrect it as a primary.
+    return { ok: true, items: next, demotedPrimary: primary };
   }
 
   if (drag.kind === 'subtask' && drop.type === 'before-subtask') {
@@ -226,7 +228,7 @@ export function applyTodoListDragDrop(items, drag, drop) {
         ? insertSubtaskInParent(i, sub, drop.subtaskId)
         : i,
     );
-    return { ok: true, items: next };
+    return { ok: true, items: next, demotedPrimary: primary };
   }
 
   return { ok: false, items: list };
