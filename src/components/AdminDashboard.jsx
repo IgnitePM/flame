@@ -125,6 +125,7 @@ import {
   buildEmailAttachmentRecord,
   removeEmailAttachmentFromItem,
 } from '../utils/todoEmailAttachments.js';
+import { buildTaskComment } from '../utils/taskComments.js';
 import TodoEstimateHoursSlider, {
   normalizeTodoEstimatedHours,
 } from './TodoEstimateHoursSlider.jsx';
@@ -6316,6 +6317,9 @@ const AdminDashboard = ({
                                             text,
                                             estimatedHoursInput:
                                               subEst == null ? '' : String(subEst),
+                                            notes: String(
+                                              s?.notes || s?.note || s?.context || '',
+                                            ).trim(),
                                           };
                                         })
                                         .filter(Boolean);
@@ -6331,6 +6335,9 @@ const AdminDashboard = ({
                                         dueDateInput: '',
                                         estimatedHoursInput:
                                           est == null ? '' : String(est),
+                                        notes: String(
+                                          t.notes || t.note || t.context || '',
+                                        ).trim(),
                                         subtasks,
                                       };
                                     }).filter((t) => t.text);
@@ -6423,19 +6430,46 @@ const AdminDashboard = ({
                                             {t.subtasks.map((sub) => (
                                               <li
                                                 key={sub.id}
-                                                className="text-xs font-bold text-slate-600 flex items-start gap-2"
+                                                className="text-xs font-bold text-slate-600 flex flex-col gap-1"
                                               >
-                                                <span className="text-slate-300 shrink-0">↳</span>
-                                                <span className="min-w-0 flex-1">{sub.text}</span>
-                                                {sub.estimatedHoursInput ? (
-                                                  <span className="shrink-0 text-[10px] font-black text-slate-400">
-                                                    {sub.estimatedHoursInput}h
-                                                  </span>
+                                                <div className="flex items-start gap-2">
+                                                  <span className="text-slate-300 shrink-0">↳</span>
+                                                  <span className="min-w-0 flex-1">{sub.text}</span>
+                                                  {sub.estimatedHoursInput ? (
+                                                    <span className="shrink-0 text-[10px] font-black text-slate-400">
+                                                      {sub.estimatedHoursInput}h
+                                                    </span>
+                                                  ) : null}
+                                                </div>
+                                                {sub.notes ? (
+                                                  <p className="pl-4 text-[11px] font-medium text-slate-500 whitespace-pre-wrap">
+                                                    {sub.notes}
+                                                  </p>
                                                 ) : null}
                                               </li>
                                             ))}
                                           </ul>
                                         ) : null}
+                                        <div className="space-y-1">
+                                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                            Task notes
+                                          </label>
+                                          <textarea
+                                            value={t.notes || ''}
+                                            onChange={(e) =>
+                                              setAiTodoCandidates((prev) =>
+                                                prev.map((row) =>
+                                                  row.id === t.id
+                                                    ? { ...row, notes: e.target.value }
+                                                    : row,
+                                                ),
+                                              )
+                                            }
+                                            rows={3}
+                                            placeholder="Context needed to complete this task without re-reading the source…"
+                                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-800 outline-none focus:ring-2 focus:ring-[#fd7414] resize-y min-h-[64px]"
+                                          />
+                                        </div>
                                         <div className="space-y-1">
                                           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
                                             Retainer category
@@ -6616,12 +6650,22 @@ const AdminDashboard = ({
                                           const dueDate = parseDateInputToMs(
                                             p.dueDateInput,
                                           );
+                                          const makeAiNoteComment = (notesText) =>
+                                            buildTaskComment({
+                                              text: String(notesText || '').trim(),
+                                              authorEmail: user?.email,
+                                              authorName:
+                                                user?.displayName || user?.email || 'AI Extract',
+                                              staffEmails: assignableEmails,
+                                              adminUsers,
+                                            });
                                           const subtasks = (
                                             Array.isArray(p.subtasks) ? p.subtasks : []
                                           )
                                             .map((s) => {
                                               const subText = String(s?.text || '').trim();
                                               if (!subText) return null;
+                                              const subNote = makeAiNoteComment(s.notes);
                                               return newSubtaskTemplate({
                                                 text: subText,
                                                 assigneeEmails: [],
@@ -6630,9 +6674,13 @@ const AdminDashboard = ({
                                                   normalizeTodoEstimatedHours(
                                                     s.estimatedHoursInput,
                                                   ),
+                                                ...(subNote
+                                                  ? { comments: [subNote] }
+                                                  : {}),
                                               });
                                             })
                                             .filter(Boolean);
+                                          const primaryNote = makeAiNoteComment(p.notes);
                                           return {
                                             id: `todo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
                                             text,
@@ -6648,6 +6696,7 @@ const AdminDashboard = ({
                                               p.estimatedHoursInput,
                                             ),
                                             subtasks,
+                                            comments: primaryNote ? [primaryNote] : [],
                                             emailAttachments: hasSourceEmail
                                               ? [
                                                   buildEmailAttachmentRecord(

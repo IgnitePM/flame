@@ -222,6 +222,13 @@ Hierarchy rules (important — avoid a flat long list):
 - Subtask "text" should be a concise imperative step.
 - "estimatedHours" on a primary is total effort when there are no subtasks, or roll-up estimate when there are.
 - Subtask "estimatedHours" is effort for that step (0.25 steps when possible); use null if unknown.
+
+Notes (important — make tasks self-contained):
+- "notes" holds context someone needs to complete the work WITHOUT re-reading the full email/transcript.
+- Include requirements, constraints, URLs, credentials hints (never passwords), acceptance criteria, decisions already made, quoted client wording, and relevant background.
+- Omit notes only when the title alone is fully sufficient.
+- Keep notes factual and concise (plain text, short paragraphs or bullets). Do not invent details not in the source.
+- Primary "notes" cover the initiative; subtask "notes" cover step-specific details only.
 `.trim();
 
   const jsonShapeHelp = `
@@ -234,8 +241,13 @@ Output requirements:
       "text": "string",
       "category": "one of allowed categories",
       "estimatedHours": number or null,
+      "notes": "string or null",
       "subtasks": [
-        { "text": "string", "estimatedHours": number or null }
+        {
+          "text": "string",
+          "estimatedHours": number or null,
+          "notes": "string or null"
+        }
       ]
     }
   ]
@@ -378,6 +390,17 @@ ${trimmedTranscript}
     return Math.round(n * 4) / 4;
   };
 
+  const normalizeNotes = (raw) => {
+    const notes = String(
+      raw?.notes ?? raw?.note ?? raw?.context ?? raw?.details ?? '',
+    )
+      .replace(/\r\n/g, '\n')
+      .trim();
+    if (!notes) return null;
+    // Cap keeps Firestore docs and UI review manageable.
+    return notes.length > 4000 ? notes.slice(0, 4000) : notes;
+  };
+
   const normalizeSubtasks = (raw) => {
     const list = Array.isArray(raw?.subtasks)
       ? raw.subtasks
@@ -392,6 +415,7 @@ ${trimmedTranscript}
         estimatedHours: normalizeEstimatedHours(
           s?.estimatedHours ?? s?.estimated_hours,
         ),
+        notes: normalizeNotes(s),
       }))
       .filter((s) => s.text)
       .slice(0, 8);
@@ -404,6 +428,7 @@ ${trimmedTranscript}
       estimatedHours: normalizeEstimatedHours(
         t?.estimatedHours ?? t?.estimated_hours,
       ),
+      notes: normalizeNotes(t),
       subtasks: normalizeSubtasks(t),
     }))
     .filter((t) => t.text)
