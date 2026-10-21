@@ -578,6 +578,10 @@ export async function validateSetPasswordToken(token) {
   if (!row?.email) {
     return { ok: false, error: 'This link is invalid or has already been used.' };
   }
+  // Staff invites also live in portalInviteTokens with kind: 'staff'.
+  if (String(row.kind || '').toLowerCase() === 'staff') {
+    return { ok: false, error: 'This link is invalid or has already been used.' };
+  }
   if (Number(row.expiresAt || 0) < Date.now()) {
     return { ok: false, error: 'This link has expired. Ask Ignite to resend your invite.' };
   }
