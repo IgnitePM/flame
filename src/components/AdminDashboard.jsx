@@ -1988,16 +1988,21 @@ const AdminDashboard = ({
         ids: [],
         role: a.role || 'billing',
         features: a.features || {},
+        displayName: String(a.displayName || '').trim(),
         hasCanonical: false,
       };
     }
     acc[key].ids.push(a.id);
     if (a.id === key) acc[key].hasCanonical = true;
-    // Prefer canonical record's role if present
+    // Prefer canonical record's role / features / name if present
     if (a.id === key && a.role) acc[key].role = a.role;
     if (a.id === key && a.features) acc[key].features = a.features;
     else if (a.features?.salesFunnel && !acc[key].features?.salesFunnel) {
       acc[key].features = { ...(acc[key].features || {}), ...a.features };
+    }
+    const named = String(a.displayName || '').trim();
+    if (named && (a.id === key || !acc[key].displayName)) {
+      acc[key].displayName = named;
     }
     return acc;
   }, {});
@@ -2008,6 +2013,7 @@ const AdminDashboard = ({
       ids: g.ids,
       role: g.role || 'billing',
       features: g.features || {},
+      displayName: g.displayName || '',
       hasCanonical: g.hasCanonical,
     }))
     .sort((a, b) => a.email.localeCompare(b.email));
@@ -2102,6 +2108,71 @@ const AdminDashboard = ({
     if (displayName) patch.displayName = displayName;
     await setDoc(doc('admins', em), patch, { merge: true });
     return em;
+  };
+  const [userClientAccessOpen, setUserClientAccessOpen] = useState({});
+  const [userClientAccessBusy, setUserClientAccessBusy] = useState('');
+
+  const kioskStaffEmails = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          (adminUsers || [])
+            .filter((u) => String(u?.role || '') === 'kiosk')
+            .map((u) => adminEmailKey(u?.email))
+            .filter(Boolean),
+        ),
+      ).sort(),
+    [adminUsers],
+  );
+
+  const clientsSortedForAccess = useMemo(
+    () =>
+      [...(clients || [])]
+        .filter((c) => c?.id)
+        .sort((a, b) =>
+          String(a.name || '').localeCompare(String(b.name || ''), undefined, {
+            sensitivity: 'base',
+          }),
+        ),
+    [clients],
+  );
+
+  const toggleUserClientAccess = async (staffEmail, client) => {
+    const em = adminEmailKey(staffEmail);
+    const clientId = String(client?.id || '').trim();
+    if (!em || !clientId) return;
+    const busyKey = `${em}__${clientId}`;
+    setUserClientAccessBusy(busyKey);
+    try {
+      const raw = client.teamMemberAccessEmails;
+      let next;
+      if (raw == null) {
+        // Legacy open (everyone can see): unchecking this user converts to an
+        // explicit list of all kiosk emails except them.
+        const seeded = new Set(kioskStaffEmails);
+        seeded.delete(em);
+        next = [...seeded].sort();
+      } else {
+        const cur = Array.isArray(raw)
+          ? raw.map(adminEmailKey).filter(Boolean)
+          : typeof raw === 'string' && raw.trim()
+            ? [adminEmailKey(raw)]
+            : [];
+        const set = new Set(cur);
+        if (set.has(em)) set.delete(em);
+        else set.add(em);
+        next = [...set].sort();
+      }
+      await updateDoc(doc('clients', clientId), {
+        teamMemberAccessEmails: next,
+      });
+    } catch (err) {
+      window.alert(
+        `Could not update client access.\n\n${err?.message || String(err)}`,
+      );
+    } finally {
+      setUserClientAccessBusy('');
+    }
   };
   const [approvalResendBusy, setApprovalResendBusy] = useState('');
   const [todoAddTextDraft, setTodoAddTextDraft] = useState({});
@@ -8868,17 +8939,25 @@ const AdminDashboard = ({
                       Name
                       <input
                         type="text"
+                        key={`${emailKey}__name__${a.displayName || ''}`}
                         defaultValue={a.displayName || ''}
                         placeholder="Display name"
                         onBlur={async (e) => {
                           const next = String(e.target.value || '').trim();
                           if (next === String(a.displayName || '').trim()) return;
                           try {
+                            await Promise.all(
+                              (a.ids || []).map((id) =>
+                                updateDoc(doc('admins', id), {
+                                  displayName: next || '',
+                                }),
+                              ),
+                            );
                             await setDoc(
-                              doc('admins', String(a.email).toLowerCase()),
+                              doc('admins', emailKey),
                               {
                                 email: a.email,
-                                displayName: next || null,
+                                displayName: next || '',
                               },
                               { merge: true },
                             );
@@ -9061,7 +9140,75 @@ const AdminDashboard = ({
                   >
                     Reset password
                   </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setUserClientAccessOpen((prev) => ({
+                        ...prev,
+                        [emailKey]: !prev[emailKey],
+                      }))
+                    }
+                    className="px-3 py-1.5 rounded-lg text-xs font-black border border-slate-200 bg-white text-slate-700"
+                  >
+                    {userClientAccessOpen[emailKey]
+                      ? 'Hide client access'
+                      : 'Client access'}
+                  </button>
                 </div>
+                {userClientAccessOpen[emailKey] ? (
+                  <div className="rounded-2xl border border-slate-200 bg-white p-3 space-y-2">
+                    <p className="text-[10px] font-bold text-slate-400 leading-snug">
+                      Workspace / kiosk visibility. Applies when this user&apos;s
+                      role is <span className="text-slate-600">Kiosk-only</span>.
+                      Admin and Billing already see every client.
+                      {a.role !== 'kiosk'
+                        ? ' Switch their role to Kiosk-only for this list to take effect.'
+                        : ''}
+                    </p>
+                    {clientsSortedForAccess.length === 0 ? (
+                      <p className="text-xs italic text-slate-400">
+                        No clients yet.
+                      </p>
+                    ) : (
+                      <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                        {clientsSortedForAccess.map((c) => {
+                          const raw = c.teamMemberAccessEmails;
+                          const legacyOpen = raw == null;
+                          const selected = legacyOpen
+                            ? true
+                            : Array.isArray(raw)
+                              ? raw.map(adminEmailKey).includes(emailKey)
+                              : adminEmailKey(raw) === emailKey;
+                          const busyKey = `${emailKey}__${c.id}`;
+                          return (
+                            <label
+                              key={c.id}
+                              className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selected}
+                                disabled={userClientAccessBusy === busyKey}
+                                onChange={() =>
+                                  toggleUserClientAccess(emailKey, c)
+                                }
+                                className="rounded border-slate-300"
+                              />
+                              <span className="min-w-0 truncate">
+                                {c.name || '(unnamed client)'}
+                              </span>
+                              {legacyOpen ? (
+                                <span className="shrink-0 text-[9px] font-black uppercase tracking-widest text-slate-400">
+                                  Open to all
+                                </span>
+                              ) : null}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
               </div>
               );
             })}
