@@ -1,8 +1,10 @@
 /**
  * Invite-only staff accounts (email + password), same pattern as portal invites.
  *
- * Creates/ensures a Firebase Auth user, emails a custom set-password link
- * (scanner-safe), writes admins/{email}, and tracks status in staffInvites/{email}.
+ * Reuses portalInviteTokens / portalInviteSecrets / portalInvites (kind: 'staff')
+ * so it works with existing Firestore rules — no new collections required.
+ * The admin browser creates/updates admins/{email}; this function only handles
+ * Auth + email + invite tracking (digest bot is billing and cannot write admins).
  */
 
 import { randomBytes } from 'node:crypto';
@@ -156,9 +158,12 @@ async function updateAccountProfile(idToken, { displayName } = {}) {
   return data;
 }
 
-async function assertNotPortalUser(db, email) {
+async function assertNotClientPortalInvite(db, email) {
   const invite = await fetchDoc(db, `portalInvites/${email}`);
-  if (invite && String(invite.status || '').toLowerCase() !== 'revoked') {
+  if (!invite) return;
+  const kind = String(invite.kind || 'portal').toLowerCase();
+  const status = String(invite.status || '').toLowerCase();
+  if (kind !== 'staff' && status !== 'revoked') {
     throw new Error(
       'That email has a client portal invite. Revoke the portal invite first, or use a different email.',
     );
@@ -168,14 +173,14 @@ async function assertNotPortalUser(db, email) {
 async function issueSetPasswordToken(db, email, prevTokenId) {
   if (prevTokenId) {
     try {
-      await removeDoc(db, `staffInviteTokens/${prevTokenId}`);
+      await removeDoc(db, `portalInviteTokens/${prevTokenId}`);
     } catch {
       /* ignore */
     }
   }
   const token = newSetPasswordToken();
   const expiresAt = Date.now() + TOKEN_TTL_MS;
-  await mergeDoc(db, `staffInviteTokens/${token}`, {
+  await mergeDoc(db, `portalInviteTokens/${token}`, {
     email,
     kind: 'staff',
     expiresAt,
@@ -267,20 +272,28 @@ export async function inviteStaffUser({
   if (!em || !em.includes('@')) throw new Error('Enter a valid email address.');
 
   const db = await getDigestDb();
-  await assertNotPortalUser(db, em);
+  await assertNotClientPortalInvite(db, em);
 
-  const prev = (await fetchDoc(db, `staffInvites/${em}`)) || {};
-  const existingAdmin = (await fetchDoc(db, `admins/${em}`)) || {};
+  // Admins doc must already exist (created by the admin browser). Billing bot
+  // cannot create/update admins/{email} under current Firestore rules.
+  const existingAdmin = await fetchDoc(db, `admins/${em}`);
+  if (!existingAdmin) {
+    throw new Error(
+      'Staff user record is missing. Save the user in Users first, then send the invite again.',
+    );
+  }
+
+  const prev = (await fetchDoc(db, `portalInvites/${em}`)) || {};
   if (forceNewPassword) {
     try {
-      await removeDoc(db, `staffInviteSecrets/${em}`);
+      await removeDoc(db, `portalInviteSecrets/${em}`);
     } catch {
       /* ignore */
     }
   }
   const existingSecret = forceNewPassword
     ? null
-    : await fetchDoc(db, `staffInviteSecrets/${em}`);
+    : await fetchDoc(db, `portalInviteSecrets/${em}`);
   let tempPassword = existingSecret?.tempPassword
     ? String(existingSecret.tempPassword)
     : '';
@@ -290,13 +303,13 @@ export async function inviteStaffUser({
     tempPassword = randomPassword();
     const authResult = await ensureAuthUser(em, tempPassword);
     if (!authResult.created) {
-      // Existing Auth user (already set a password, or Google-linked): use Firebase reset.
       await sendFirebasePasswordReset(em);
       legacyFirebaseFallback = true;
       tempPassword = '';
     } else {
-      await mergeDoc(db, `staffInviteSecrets/${em}`, {
+      await mergeDoc(db, `portalInviteSecrets/${em}`, {
         email: em,
+        kind: 'staff',
         tempPassword,
         updatedAt: Date.now(),
       });
@@ -310,14 +323,14 @@ export async function inviteStaffUser({
     const issued = await issueSetPasswordToken(
       db,
       em,
-      prev.setPasswordTokenId || null,
+      prev.kind === 'staff' ? prev.setPasswordTokenId || null : null,
     );
     token = issued.token;
     expiresAt = issued.expiresAt;
     link = setPasswordUrl(token);
-  } else if (prev.setPasswordTokenId) {
+  } else if (prev.kind === 'staff' && prev.setPasswordTokenId) {
     try {
-      await removeDoc(db, `staffInviteTokens/${prev.setPasswordTokenId}`);
+      await removeDoc(db, `portalInviteTokens/${prev.setPasswordTokenId}`);
     } catch {
       /* ignore */
     }
@@ -332,23 +345,15 @@ export async function inviteStaffUser({
   });
 
   const now = Date.now();
-  const adminPatch = {
+  await mergeDoc(db, `portalInvites/${em}`, {
     email: em,
+    kind: 'staff',
     role: nextRole,
-    updatedAt: now,
-  };
-  if (name) adminPatch.displayName = name;
-  if (!existingAdmin.createdAt) adminPatch.createdAt = now;
-  if (!existingAdmin.firstLoginAt) adminPatch.needsFirstLoginNotify = true;
-
-  await mergeDoc(db, `admins/${em}`, adminPatch);
-
-  await mergeDoc(db, `staffInvites/${em}`, {
-    email: em,
-    role: nextRole,
+    clientId: null,
+    clientName: '',
     status: 'pending',
-    invitedAt: prev.invitedAt || now,
-    invitedBy: invitedBy || prev.invitedBy || '',
+    invitedAt: prev.kind === 'staff' ? prev.invitedAt || now : now,
+    invitedBy: invitedBy || (prev.kind === 'staff' ? prev.invitedBy : '') || '',
     lastInvitedAt: now,
     lastRemindedAt: isReminder ? now : prev.lastRemindedAt || null,
     remindCount: isReminder
@@ -356,7 +361,8 @@ export async function inviteStaffUser({
       : Number(prev.remindCount || 0),
     setPasswordTokenId: token,
     setPasswordTokenExpiresAt: expiresAt,
-    authCreatedOnInvite: prev.authCreatedOnInvite || !legacyFirebaseFallback,
+    authCreatedOnInvite:
+      (prev.kind === 'staff' && prev.authCreatedOnInvite) || !legacyFirebaseFallback,
     displayName: name || prev.displayName || existingAdmin.displayName || '',
     updatedAt: now,
   });
@@ -374,21 +380,25 @@ export async function markStaffInviteRevoked(email) {
   const em = normEmail(email);
   if (!em) throw new Error('Missing email.');
   const db = await getDigestDb();
-  const prev = (await fetchDoc(db, `staffInvites/${em}`)) || {};
+  const prev = (await fetchDoc(db, `portalInvites/${em}`)) || {};
+  if (String(prev.kind || '') !== 'staff') {
+    return { ok: true, email: em, skipped: 'not_staff_invite' };
+  }
   if (prev.setPasswordTokenId) {
     try {
-      await removeDoc(db, `staffInviteTokens/${prev.setPasswordTokenId}`);
+      await removeDoc(db, `portalInviteTokens/${prev.setPasswordTokenId}`);
     } catch {
       /* ignore */
     }
   }
   try {
-    await removeDoc(db, `staffInviteSecrets/${em}`);
+    await removeDoc(db, `portalInviteSecrets/${em}`);
   } catch {
     /* ignore */
   }
-  await mergeDoc(db, `staffInvites/${em}`, {
+  await mergeDoc(db, `portalInvites/${em}`, {
     email: em,
+    kind: 'staff',
     status: 'revoked',
     setPasswordTokenId: null,
     setPasswordTokenExpiresAt: null,
@@ -406,8 +416,11 @@ export async function validateStaffSetPasswordToken(token) {
     };
   }
   const db = await getDigestDb();
-  const row = await fetchDoc(db, `staffInviteTokens/${raw}`);
+  const row = await fetchDoc(db, `portalInviteTokens/${raw}`);
   if (!row?.email) {
+    return { ok: false, error: 'This link is invalid or has already been used.' };
+  }
+  if (String(row.kind || '') !== 'staff') {
     return { ok: false, error: 'This link is invalid or has already been used.' };
   }
   if (Number(row.expiresAt || 0) < Date.now()) {
@@ -433,7 +446,10 @@ export async function completeStaffSetPassword({ token, password, profile } = {}
 
   const em = validated.email;
   const db = await getDigestDb();
-  const secret = await fetchDoc(db, `staffInviteSecrets/${em}`);
+  const secret = await fetchDoc(db, `portalInviteSecrets/${em}`);
+  if (String(secret?.kind || '') !== 'staff' && secret?.tempPassword) {
+    // Allow secrets written before kind was stamped.
+  }
   const tempPassword = String(secret?.tempPassword || '');
   if (!tempPassword) {
     throw new Error(
@@ -447,30 +463,26 @@ export async function completeStaffSetPassword({ token, password, profile } = {}
 
   const raw = String(token || '').trim();
   try {
-    await removeDoc(db, `staffInviteTokens/${raw}`);
+    await removeDoc(db, `portalInviteTokens/${raw}`);
   } catch {
     /* ignore */
   }
   try {
-    await removeDoc(db, `staffInviteSecrets/${em}`);
+    await removeDoc(db, `portalInviteSecrets/${em}`);
   } catch {
     /* ignore */
   }
 
-  const invite = (await fetchDoc(db, `staffInvites/${em}`)) || {};
+  const invite = (await fetchDoc(db, `portalInvites/${em}`)) || {};
   const now = Date.now();
-  await mergeDoc(db, `staffInvites/${em}`, {
+  await mergeDoc(db, `portalInvites/${em}`, {
+    kind: 'staff',
     status: 'accepted',
     acceptedAt: invite.acceptedAt || now,
     passwordSetAt: now,
     displayName: name,
     setPasswordTokenId: null,
     setPasswordTokenExpiresAt: null,
-    updatedAt: now,
-  });
-  await mergeDoc(db, `admins/${em}`, {
-    email: em,
-    displayName: name,
     updatedAt: now,
   });
 

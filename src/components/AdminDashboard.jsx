@@ -2063,17 +2063,19 @@ const AdminDashboard = ({
   const [staffInviteBusyEmail, setStaffInviteBusyEmail] = useState('');
   const [staffInvitesByEmail, setStaffInvitesByEmail] = useState({});
 
+  // Staff invites are stored in portalInvites with kind: 'staff' (existing rules).
   useEffect(() => {
     if (!isAdmin || adminTab !== 'users') {
       setStaffInvitesByEmail({});
       return undefined;
     }
     const unsub = onSnapshot(
-      fsCollection(db, 'staffInvites'),
+      fsCollection(db, 'portalInvites'),
       (snap) => {
         const map = {};
         snap.docs.forEach((d) => {
           const data = d.data() || {};
+          if (String(data.kind || '').toLowerCase() !== 'staff') return;
           const em = String(data.email || d.id || '')
             .trim()
             .toLowerCase();
@@ -2085,6 +2087,22 @@ const AdminDashboard = ({
     );
     return () => unsub();
   }, [isAdmin, adminTab]);
+
+  const ensureStaffAdminDoc = async (emailKey, { role, displayName } = {}) => {
+    const em = String(emailKey || '')
+      .trim()
+      .toLowerCase();
+    if (!em) throw new Error('Enter a valid email address.');
+    const patch = {
+      email: em,
+      role: role || 'kiosk',
+      updatedAt: Date.now(),
+      needsFirstLoginNotify: true,
+    };
+    if (displayName) patch.displayName = displayName;
+    await setDoc(doc('admins', em), patch, { merge: true });
+    return em;
+  };
   const [approvalResendBusy, setApprovalResendBusy] = useState('');
   const [todoAddTextDraft, setTodoAddTextDraft] = useState({});
   const [todoAddDueDraft, setTodoAddDueDraft] = useState({});
@@ -8718,6 +8736,7 @@ const AdminDashboard = ({
                   if (!emailKey) return;
                   setStaffInviteBusyEmail(emailKey);
                   try {
+                    await ensureStaffAdminDoc(emailKey, { role: newAdminRole });
                     const resp = await authedFetch(
                       '/.netlify/functions/staff-invite',
                       {
@@ -8968,6 +8987,10 @@ const AdminDashboard = ({
                     onClick={async () => {
                       setStaffInviteBusyEmail(emailKey);
                       try {
+                        await ensureStaffAdminDoc(emailKey, {
+                          role: a.role || 'kiosk',
+                          displayName: a.displayName || '',
+                        });
                         const resp = await authedFetch(
                           '/.netlify/functions/staff-invite',
                           {
@@ -9006,6 +9029,10 @@ const AdminDashboard = ({
                     onClick={async () => {
                       setStaffInviteBusyEmail(emailKey);
                       try {
+                        await ensureStaffAdminDoc(emailKey, {
+                          role: a.role || 'kiosk',
+                          displayName: a.displayName || '',
+                        });
                         const resp = await authedFetch(
                           '/.netlify/functions/staff-invite',
                           {
