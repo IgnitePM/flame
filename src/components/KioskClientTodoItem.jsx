@@ -589,7 +589,11 @@ export default function KioskClientTodoItem({
             className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4 shrink-0 mt-0.5"
           />
           <div className="min-w-0 flex-1">
-            <div className={`text-sm break-words leading-snug ${item.done ? 'line-through opacity-70' : ''}`}>
+            <div
+              className={`text-sm break-words [overflow-wrap:anywhere] leading-snug ${
+                item.done ? 'line-through opacity-70' : ''
+              }`}
+            >
               {safeDisplayForReact(item.text) || '(no text)'}
               {item.recurring && (
                 <span className="ml-2 text-[9px] font-black uppercase tracking-widest text-[#fd7414]">
@@ -660,7 +664,7 @@ export default function KioskClientTodoItem({
                 }
               >
                 <div className="flex flex-col gap-1.5 px-2 py-1.5 min-w-0 w-full max-w-full">
-                  <div className="flex flex-wrap items-start gap-2 min-w-0 w-full">
+                  <div className="flex items-start gap-2 min-w-0 w-full">
                     {canDragReorder ? (
                       <TodoDragHandle
                         disabled={todoSaving}
@@ -707,8 +711,12 @@ export default function KioskClientTodoItem({
                       }}
                       className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] w-4 h-4 shrink-0 mt-0.5"
                     />
-                    <div className="min-w-0 flex-1 basis-[min(100%,10rem)]">
-                      <div className={`text-sm break-words ${sub.done ? 'line-through opacity-70' : ''}`}>
+                    <div className="min-w-0 flex-1">
+                      <div
+                        className={`text-sm break-words [overflow-wrap:anywhere] leading-snug ${
+                          sub.done ? 'line-through opacity-70' : ''
+                        }`}
+                      >
                         {safeDisplayForReact(sub.text) || '(step)'}
                       </div>
                       {sub.dueDate && (
@@ -722,31 +730,31 @@ export default function KioskClientTodoItem({
                         </div>
                       ) : null}
                     </div>
-                    {canManageTodos && (
-                      <div className="flex shrink-0 flex-wrap items-center gap-1 max-w-full ml-auto">
-                        <AssigneePicker
-                          openKey={subAssigneeOpenKey}
-                          assigneeOpenKey={assigneeOpenKey}
-                          assignees={subAssignees}
-                          assignableEmails={assignableEmails}
-                          client={client}
-                          onChange={(next) => onSubtaskAssigneesChange?.(sub.id, next)}
-                          onOpenChange={onAssigneeOpenChange}
-                          inheritLabel="Inherit"
-                          align="right"
-                          disabled={pickerDisabled}
-                        />
-                        <button
-                          type="button"
-                          disabled={pickerDisabled}
-                          onClick={() => onOpenOptions?.(item, sub)}
-                          className="kiosk-light-control shrink-0 px-2 py-1 rounded-lg bg-white border border-slate-200 text-[9px] font-black uppercase tracking-widest text-black"
-                        >
-                          Options
-                        </button>
-                      </div>
-                    )}
                   </div>
+                  {canManageTodos && (
+                    <div className="flex flex-wrap items-center gap-1.5 w-full min-w-0 pl-7 sm:pl-8">
+                      <AssigneePicker
+                        openKey={subAssigneeOpenKey}
+                        assigneeOpenKey={assigneeOpenKey}
+                        assignees={subAssignees}
+                        assignableEmails={assignableEmails}
+                        client={client}
+                        onChange={(next) => onSubtaskAssigneesChange?.(sub.id, next)}
+                        onOpenChange={onAssigneeOpenChange}
+                        inheritLabel="Inherit"
+                        align="right"
+                        disabled={pickerDisabled}
+                      />
+                      <button
+                        type="button"
+                        disabled={pickerDisabled}
+                        onClick={() => onOpenOptions?.(item, sub)}
+                        className="kiosk-light-control shrink-0 px-2 py-1 rounded-lg bg-white border border-slate-200 text-[9px] font-black uppercase tracking-widest text-black"
+                      >
+                        Options
+                      </button>
+                    </div>
+                  )}
                 </div>
               </li>
             );
