@@ -2,9 +2,13 @@ import {
   completeSetPassword,
   validateSetPasswordToken,
 } from './lib/portalInvite.mjs';
+import {
+  completeStaffSetPassword,
+  validateStaffSetPasswordToken,
+} from './lib/staffInvite.mjs';
 
 /**
- * Public: validate or complete a custom portal set-password token.
+ * Public: validate or complete a custom set-password token (portal or staff).
  * POST { action: 'validate'|'complete', token, password? }
  * No auth header — token is the credential.
  */
@@ -28,21 +32,43 @@ export default async (req) => {
 
   try {
     if (action === 'validate') {
-      const result = await validateSetPasswordToken(token);
-      return new Response(JSON.stringify(result), {
-        status: result.ok ? 200 : 400,
+      const portal = await validateSetPasswordToken(token);
+      if (portal.ok) {
+        return new Response(JSON.stringify({ ...portal, kind: 'portal' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      const staff = await validateStaffSetPasswordToken(token);
+      return new Response(JSON.stringify(staff), {
+        status: staff.ok ? 200 : 400,
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
     if (action === 'complete') {
-      const result = await completeSetPassword({
+      const portal = await validateSetPasswordToken(token);
+      if (portal.ok) {
+        const result = await completeSetPassword({
+          token,
+          password: body.password,
+          profile: {
+            name: body.name || body.displayName,
+            phone: body.phone,
+            title: body.title,
+          },
+        });
+        return new Response(JSON.stringify({ ...result, kind: 'portal' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      const result = await completeStaffSetPassword({
         token,
         password: body.password,
         profile: {
           name: body.name || body.displayName,
-          phone: body.phone,
-          title: body.title,
         },
       });
       return new Response(JSON.stringify(result), {

@@ -313,6 +313,24 @@ service cloud.firestore {
       allow read, write: if isBilling();
     }
 
+    // Staff workspace invites — doc id is invitee email (lowercase).
+    match /staffInvites/{emailId} {
+      allow read: if isAdmin() ||
+        (isSignedIn() && emailId == emailLower());
+      allow create, update: if isAdmin() || isBilling();
+      allow delete: if isAdmin();
+    }
+
+    // Opaque set-password tokens for staff invites (digest bot only).
+    match /staffInviteTokens/{tokenId} {
+      allow read, write: if isBilling();
+    }
+
+    // Temporary Auth passwords for pending staff invites (digest bot only).
+    match /staffInviteSecrets/{emailId} {
+      allow read, write: if isBilling();
+    }
+
     // Outbound + synced Gmail CRM emails (client or lead). Staff only; digest bot writes.
     match /clientEmailMessages/{messageId} {
       allow read: if isAnyStaff();

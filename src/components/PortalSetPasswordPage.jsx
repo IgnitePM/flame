@@ -2,9 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, Lock, RotateCw } from 'lucide-react';
 
 /**
- * Public set-password page for portal invites.
+ * Public set-password page for portal + staff invites.
  * Opening the link does nothing to the token; only submitting sets the password.
- * Collects name (+ optional phone/title) so the portal can show real names.
+ * Collects name (+ optional phone/title for portal) so accounts show real names.
  */
 export default function PortalSetPasswordPage() {
   const token = useMemo(() => {
@@ -16,6 +16,7 @@ export default function PortalSetPasswordPage() {
   }, []);
 
   const [email, setEmail] = useState('');
+  const [kind, setKind] = useState('portal');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [title, setTitle] = useState('');
@@ -25,13 +26,14 @@ export default function PortalSetPasswordPage() {
   const [error, setError] = useState('');
   const [done, setDone] = useState(false);
   const [loginUrl, setLoginUrl] = useState('/');
+  const isStaff = kind === 'staff';
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       if (!token) {
         setBusy(false);
-        setError('Missing invite link. Ask Ignite to resend your portal invite.');
+        setError('Missing invite link. Ask your admin to resend the invite.');
         return;
       }
       try {
@@ -46,6 +48,7 @@ export default function PortalSetPasswordPage() {
           setError(data.error || 'This link is invalid or expired.');
         } else {
           setEmail(data.email || '');
+          setKind(data.kind === 'staff' ? 'staff' : 'portal');
         }
       } catch (err) {
         if (!cancelled) setError(err?.message || 'Could not verify link.');
@@ -111,7 +114,7 @@ export default function PortalSetPasswordPage() {
           Set up your account
         </h1>
         <p className="text-slate-400 font-bold mb-6 uppercase tracking-widest text-[10px]">
-          Ignite PM · Client portal
+          {isStaff ? 'Ignite PM · Staff workspace' : 'Ignite PM · Client portal'}
         </p>
 
         {busy && !done ? (
@@ -161,22 +164,26 @@ export default function PortalSetPasswordPage() {
               className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
               required
             />
-            <input
-              type="text"
-              autoComplete="organization-title"
-              placeholder="Job title (optional)"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
-            />
-            <input
-              type="tel"
-              autoComplete="tel"
-              placeholder="Phone (optional)"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
-            />
+            {!isStaff ? (
+              <>
+                <input
+                  type="text"
+                  autoComplete="organization-title"
+                  placeholder="Job title (optional)"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                />
+                <input
+                  type="tel"
+                  autoComplete="tel"
+                  placeholder="Phone (optional)"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
+                />
+              </>
+            ) : null}
             <input
               type="password"
               autoComplete="new-password"
