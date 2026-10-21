@@ -373,8 +373,11 @@ body {
     align-items: stretch !important;
   }
 
-  .client-task-row > .flex.flex-wrap {
+  .client-task-row > .flex.flex-wrap,
+  .client-task-row > .flex.flex-col {
     width: 100%;
+    min-width: 0;
+    max-width: 100%;
   }
 
   /* Prevent accidental horizontal scroll on narrow viewports */

@@ -111,7 +111,7 @@ export default function TaskNotesSection({
   };
 
   return (
-    <div className={compact ? 'mt-2' : 'mt-3'}>
+    <div className={`w-full min-w-0 max-w-full ${compact ? 'mt-2' : 'mt-3'}`}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -121,23 +121,23 @@ export default function TaskNotesSection({
         Task notes{comments.length ? ` (${comments.length})` : ''}
       </button>
       {open && (
-        <div className="mt-2 space-y-2 rounded-xl border border-slate-100 bg-slate-50/80 p-2">
+        <div className="mt-2 w-full min-w-0 max-w-full space-y-2 rounded-xl border border-slate-100 bg-slate-50/80 p-2">
           {comments.length === 0 ? (
             <p className="text-[11px] italic text-slate-400">
               No notes yet. Add a comment for the audit trail.
             </p>
           ) : (
-            <ul className="max-h-40 space-y-2 overflow-y-auto pr-1">
+            <ul className="max-h-40 w-full min-w-0 space-y-2 overflow-y-auto overflow-x-hidden pr-1">
               {comments.map((c) => (
                 <li
                   key={c.id}
-                  className="rounded-lg bg-white px-2 py-1.5 text-xs text-slate-700"
+                  className="w-full min-w-0 rounded-lg bg-white px-2 py-1.5 text-xs text-slate-700"
                 >
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="font-black text-slate-800">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
+                    <span className="min-w-0 font-black text-slate-800 break-words">
                       {c.authorName || staffHandle(c.authorEmail)}
                     </span>
-                    <span className="text-[9px] font-bold text-slate-400">
+                    <span className="shrink-0 text-[9px] font-bold text-slate-400">
                       {c.createdAt
                         ? new Date(c.createdAt).toLocaleString(undefined, {
                             dateStyle: 'medium',
@@ -146,7 +146,7 @@ export default function TaskNotesSection({
                         : ''}
                     </span>
                   </div>
-                  <p className="mt-0.5 whitespace-pre-wrap break-words">
+                  <p className="mt-0.5 w-full min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                     {safeDisplayForReact(c.text)}
                   </p>
                   {Array.isArray(c.clientMentions) && c.clientMentions.length > 0 ? (

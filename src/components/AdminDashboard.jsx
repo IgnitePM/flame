@@ -350,7 +350,7 @@ function ClientCustomProjectsPanelInner({
               prev === openKey ? null : openKey,
             )
           }
-          className="min-w-[160px] max-w-[240px] rounded-xl border border-white/20 bg-zinc-950/95 px-3 py-2 text-xs font-black text-white outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px] flex items-center justify-between gap-2 disabled:opacity-40"
+          className="w-full min-w-0 sm:w-auto sm:min-w-[160px] sm:max-w-[240px] rounded-xl border border-white/20 bg-zinc-950/95 px-3 py-2 text-xs font-black text-white outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px] flex items-center justify-between gap-2 disabled:opacity-40"
           title="Assign to users"
         >
           <span className="truncate">{summary}</span>
@@ -989,10 +989,11 @@ function ClientCustomProjectsPanelInner({
                                                 return (
                                                   <li
                                                     key={sub.id}
-                                                    className={`flex flex-wrap items-center gap-2 rounded-lg px-2 py-2 bg-white border border-slate-100 w-full min-w-0 ${
+                                                    className={`flex flex-col gap-2 rounded-lg px-2 py-2 bg-white border border-slate-100 w-full min-w-0 ${
                                                       sub.done ? 'opacity-70' : ''
                                                     }`}
                                                   >
+                                                    <div className="flex items-start gap-2 w-full min-w-0">
                                                     <input
                                                       type="checkbox"
                                                       checked={!!sub.done}
@@ -1036,33 +1037,40 @@ function ClientCustomProjectsPanelInner({
                                                           setProjectTodoSaving(false);
                                                         }
                                                       }}
-                                                      className="rounded border-slate-300 text-[#fd7414] w-4 h-4 shrink-0"
+                                                      className="rounded border-slate-300 text-[#fd7414] w-4 h-4 shrink-0 mt-0.5"
                                                     />
-                                                    <span
-                                                      className={`flex-1 min-w-0 text-sm font-bold break-words ${
-                                                        sub.done
-                                                          ? 'line-through text-slate-400'
-                                                          : 'text-slate-700'
-                                                      }`}
-                                                    >
-                                                      {safeDisplayForReact(sub.text) ||
-                                                        '(sub-task)'}
-                                                    </span>
-                                                    {Number(sub.estimatedHours) > 0 ? (
-                                                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 tabular-nums">
-                                                        Est. {Number(sub.estimatedHours).toFixed(2)}h
+                                                    <div className="flex-1 min-w-0">
+                                                      <span
+                                                        className={`block text-sm font-bold break-words [overflow-wrap:anywhere] leading-snug ${
+                                                          sub.done
+                                                            ? 'line-through text-slate-400'
+                                                            : 'text-slate-700'
+                                                        }`}
+                                                      >
+                                                        {safeDisplayForReact(sub.text) ||
+                                                          '(sub-task)'}
                                                       </span>
-                                                    ) : null}
-                                                    <span className="text-[10px] font-bold text-slate-400">
-                                                      {sub.dueDate
-                                                        ? `Due ${new Date(sub.dueDate).toLocaleDateString()}`
-                                                        : 'No due'}
-                                                    </span>
+                                                      <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
+                                                        {Number(sub.estimatedHours) > 0 ? (
+                                                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 tabular-nums">
+                                                            Est.{' '}
+                                                            {Number(sub.estimatedHours).toFixed(2)}h
+                                                          </span>
+                                                        ) : null}
+                                                        <span className="text-[10px] font-bold text-slate-400">
+                                                          {sub.dueDate
+                                                            ? `Due ${new Date(sub.dueDate).toLocaleDateString()}`
+                                                            : 'No due'}
+                                                        </span>
+                                                      </div>
+                                                    </div>
+                                                    </div>
                                                     {!readOnly ? (
-                                                      <>
+                                                      <div className="flex flex-wrap items-center gap-2 w-full min-w-0 pl-6">
                                                         {renderAssigneeMultiSelect({
                                                           openKey: `proj_sub__${p.id}__${item.id}__${sub.id}`,
                                                           value: subAs,
+                                                          className: 'w-full min-w-0 sm:w-auto',
                                                           disabled:
                                                             projectTodoSaving ||
                                                             isCycleLocked(c, mStart),
@@ -1165,7 +1173,7 @@ function ClientCustomProjectsPanelInner({
                                                         >
                                                           <Trash2 className="w-4 h-4" />
                                                         </button>
-                                                      </>
+                                                      </div>
                                                     ) : null}
                                                   </li>
                                                 );
@@ -2911,7 +2919,7 @@ const AdminDashboard = ({
           className={
             isLight
               ? 'w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px] flex items-center justify-between gap-2 disabled:opacity-40'
-              : 'min-w-[160px] max-w-[240px] rounded-xl border border-white/20 bg-zinc-950/95 px-3 py-2 text-xs font-black text-white outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px] flex items-center justify-between gap-2 disabled:opacity-40'
+              : 'w-full min-w-0 sm:w-auto sm:min-w-[160px] sm:max-w-[240px] rounded-xl border border-white/20 bg-zinc-950/95 px-3 py-2 text-xs font-black text-white outline-none focus:ring-2 focus:ring-[#fd7414] h-[42px] flex items-center justify-between gap-2 disabled:opacity-40'
           }
           title="Assign to users"
         >
@@ -4245,8 +4253,9 @@ const AdminDashboard = ({
                           return (
                             <li
                               key={sub.id}
-                              className={`flex flex-wrap items-center gap-2 rounded-xl px-2 py-2 min-w-0 max-w-full w-full overflow-hidden ${subStyles.rowClass}`}
+                              className={`flex flex-col gap-2 rounded-xl px-2 py-2 min-w-0 max-w-full w-full overflow-hidden ${subStyles.rowClass}`}
                             >
+                              <div className="flex items-start gap-2 w-full min-w-0">
                               <input
                                 type="checkbox"
                                 checked={!!sub.done}
@@ -4279,10 +4288,10 @@ const AdminDashboard = ({
                                   }
                                 }}
                                 disabled={todoSaving}
-                                className="w-4 h-4 shrink-0"
+                                className="w-4 h-4 shrink-0 mt-0.5"
                               />
                               <div className="flex-1 min-w-0">
-                                <div className={`text-sm font-bold ${subStyles.textClass}`}>
+                                <div className={`text-sm font-bold break-words [overflow-wrap:anywhere] leading-snug ${subStyles.textClass}`}>
                                   {safeDisplayForReact(sub.text) || '(sub-task)'}
                                 </div>
                                 {sub.dueDate && (
@@ -4291,12 +4300,14 @@ const AdminDashboard = ({
                                   </div>
                                 )}
                               </div>
+                              </div>
                               {isAdmin && rowClient && (
-                                <div className="flex flex-wrap gap-2 shrink-0">
+                                <div className="flex flex-wrap gap-2 w-full min-w-0 pl-6">
                                   {renderAssigneeMultiSelect({
                                     openKey: `global_sub__${row.clientId}__${row.categoryKey}__${row.item.id}__${sub.id}`,
                                     client: rowClient,
                                     value: subAssigneeVal,
+                                    className: 'w-full min-w-0 sm:w-auto',
                                     disabled: todoSaving || !updateClientTodo,
                                     onChange: async (nextAssignees) => {
                                       if (!updateClientTodo || !rowClient) return;
@@ -7087,7 +7098,7 @@ const AdminDashboard = ({
                                                               className={`client-task-row flex flex-col gap-2 rounded-lg p-2 min-w-0 max-w-full ${urgency.rowClass}`}
                                                             >
                                                               <div
-                                                                className="flex flex-wrap items-center gap-2 w-full min-w-0 max-w-full"
+                                                                className="flex flex-col gap-2 w-full min-w-0 max-w-full"
                                                                 onDragOver={(e) => {
                                                                   if (todoSaving || isCycleLocked(c, cycleStart) || !clientTodoFiltersAllowReorder) return;
                                                                   e.preventDefault();
@@ -7114,6 +7125,7 @@ const AdminDashboard = ({
                                                                   }).finally(() => setTodoSaving(false));
                                                                 }}
                                                               >
+                                                              <div className="flex items-start gap-2 w-full min-w-0">
                                                               <span
                                                                 draggable={!(todoSaving || isCycleLocked(c, cycleStart)) && clientTodoFiltersAllowReorder}
                                                                 onDragStart={(e) => {
@@ -7122,7 +7134,7 @@ const AdminDashboard = ({
                                                                     id: item.id,
                                                                   });
                                                                 }}
-                                                                className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0 select-none touch-none"
+                                                                className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0 select-none touch-none mt-0.5"
                                                                 title="Drag to reorder"
                                                               >
                                                                 <GripVertical className="w-4 h-4" aria-hidden />
@@ -7166,7 +7178,7 @@ const AdminDashboard = ({
                                                                   );
                                                                 }}
                                                                 disabled={todoSaving}
-                                                                className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414]"
+                                                                className="rounded border-slate-300 text-[#fd7414] focus:ring-[#fd7414] shrink-0 mt-1"
                                                               />
                                                               {todoEditId === item.id ? (
                                                                 <input
@@ -7193,11 +7205,11 @@ const AdminDashboard = ({
                                                                     if (e.key === 'Escape') setTodoEditId(null);
                                                                   }}
                                                                   autoFocus
-                                                                  className="flex-1 text-sm border border-slate-200 rounded px-2 py-1 outline-none focus:ring-2 focus:ring-[#fd7414]"
+                                                                  className="flex-1 min-w-0 text-sm border border-slate-200 rounded px-2 py-1 outline-none focus:ring-2 focus:ring-[#fd7414]"
                                                                 />
                                                               ) : (
                                                                 <span
-                                                                  className={`flex-1 min-w-0 text-sm break-words ${urgency.textClass}`}
+                                                                  className={`flex-1 min-w-0 text-sm break-words [overflow-wrap:anywhere] leading-snug ${urgency.textClass}`}
                                                                   onDoubleClick={() => {
                                                                     if (isCycleLocked(c, cycleStart)) return;
                                                                     setTodoEditId(item.id);
@@ -7205,7 +7217,7 @@ const AdminDashboard = ({
                                                                   }}
                                                                 >
                                                                   <span className="flex items-center gap-2 flex-wrap">
-                                                                    <span>
+                                                                    <span className="min-w-0 break-words [overflow-wrap:anywhere]">
                                                                       {item.text || '(no text)'}
                                                                     </span>
                                                                     <TodoApprovalBadge item={item} />
@@ -7222,10 +7234,13 @@ const AdminDashboard = ({
                                                                   </span>
                                                                 </span>
                                                               )}
+                                                              </div>
+                                                              <div className="flex flex-wrap items-center gap-2 w-full min-w-0 pl-8 sm:pl-10">
                                                               {renderAssigneeMultiSelect({
                                                                 openKey: `todo_item__${c.id}__${cycleStart}__${catKey}__${item.id}`,
                                                                 client: c,
                                                                 value: assignees,
+                                                                className: 'w-full min-w-0 sm:w-auto',
                                                                 disabled: todoSaving || isCycleLocked(c, cycleStart),
                                                                 onChange: async (nextAssignees) => {
                                                                   if (isCycleLocked(c, cycleStart)) return;
@@ -7299,6 +7314,7 @@ const AdminDashboard = ({
                                                               >
                                                                 <Trash2 className="w-4 h-4" />
                                                               </button>
+                                                              </div>
                                                               </div>
                                                               {!isCycleLocked(c, cycleStart) ? (
                                                                 <div className="pl-8 pr-1 pt-1 pb-0.5">
@@ -7434,8 +7450,9 @@ const AdminDashboard = ({
                                                                     return (
                                                                       <li
                                                                         key={sub.id}
-                                                                        className={`flex flex-wrap items-center gap-2 rounded-lg px-2 py-2 min-w-0 max-w-full w-full overflow-hidden ${su.rowClass}`}
+                                                                        className={`flex flex-col gap-2 rounded-lg px-2 py-2 min-w-0 max-w-full w-full overflow-hidden ${su.rowClass}`}
                                                                       >
+                                                                        <div className="flex items-start gap-2 w-full min-w-0">
                                                                         <input
                                                                           type="checkbox"
                                                                           checked={!!sub.done}
@@ -7465,15 +7482,18 @@ const AdminDashboard = ({
                                                                             }
                                                                           }}
                                                                           disabled={todoSaving}
-                                                                          className="rounded border-slate-300 text-[#fd7414] w-4 h-4 shrink-0"
+                                                                          className="rounded border-slate-300 text-[#fd7414] w-4 h-4 shrink-0 mt-0.5"
                                                                         />
-                                                                        <span className={`flex-1 min-w-0 text-sm font-bold break-words ${su.textClass}`}>
+                                                                        <span className={`flex-1 min-w-0 text-sm font-bold break-words [overflow-wrap:anywhere] leading-snug ${su.textClass}`}>
                                                                           {safeDisplayForReact(sub.text) || '(sub-task)'}
                                                                         </span>
+                                                                        </div>
+                                                                        <div className="flex flex-wrap items-center gap-2 w-full min-w-0 pl-6">
                                                                         {renderAssigneeMultiSelect({
                                                                           openKey: `client_sub__${c.id}__${cycleStart}__${catKey}__${item.id}__${sub.id}`,
                                                                           client: c,
                                                                           value: subAs,
+                                                                          className: 'w-full min-w-0 sm:w-auto',
                                                                           disabled: todoSaving || isCycleLocked(c, cycleStart),
                                                                           onChange: async (nextAssignees) => {
                                                                             if (isCycleLocked(c, cycleStart)) return;
@@ -7533,6 +7553,7 @@ const AdminDashboard = ({
                                                                         >
                                                                           <Trash2 className="w-4 h-4" />
                                                                         </button>
+                                                                        </div>
                                                                       </li>
                                                                     );
                                                                   })}
