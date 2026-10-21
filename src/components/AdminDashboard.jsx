@@ -57,6 +57,8 @@ import {
 import { buildGlobalTodoRows } from '../utils/todoGlobalRows.js';
 import { isClientActiveForWork } from '../utils/clientActiveForWork.js';
 import { authedFetch } from '../utils/authedFetch.js';
+import { db, collection as fsCollection, onSnapshot } from '../firebase.js';
+import { portalInviteStatusLabel } from '../utils/portalAccess.js';
 import {
   findDuplicatePortalEmails,
   validatePortalEmailsExclusive,
@@ -2057,6 +2059,32 @@ const AdminDashboard = ({
   const [todoEditId, setTodoEditId] = useState(null);
   const [todoEditText, setTodoEditText] = useState('');
   const [todoSaving, setTodoSaving] = useState(false);
+  const [newAdminRole, setNewAdminRole] = useState('kiosk');
+  const [staffInviteBusyEmail, setStaffInviteBusyEmail] = useState('');
+  const [staffInvitesByEmail, setStaffInvitesByEmail] = useState({});
+
+  useEffect(() => {
+    if (!isAdmin || adminTab !== 'users') {
+      setStaffInvitesByEmail({});
+      return undefined;
+    }
+    const unsub = onSnapshot(
+      fsCollection(db, 'staffInvites'),
+      (snap) => {
+        const map = {};
+        snap.docs.forEach((d) => {
+          const data = d.data() || {};
+          const em = String(data.email || d.id || '')
+            .trim()
+            .toLowerCase();
+          if (em) map[em] = { id: d.id, ...data };
+        });
+        setStaffInvitesByEmail(map);
+      },
+      () => setStaffInvitesByEmail({}),
+    );
+    return () => unsub();
+  }, [isAdmin, adminTab]);
   const [approvalResendBusy, setApprovalResendBusy] = useState('');
   const [todoAddTextDraft, setTodoAddTextDraft] = useState({});
   const [todoAddDueDraft, setTodoAddDueDraft] = useState({});
@@ -8653,45 +8681,78 @@ const AdminDashboard = ({
       {adminTab === 'users' && (
         <div className="bg-white p-10 rounded-[40px] border border-slate-100 shadow-sm space-y-10 animate-in fade-in duration-500">
           <div>
-            <h3 className="font-black text-xl mb-2">Manage Administrators</h3>
+            <h3 className="font-black text-xl mb-2">Manage staff users</h3>
             <p className="text-slate-400 text-sm font-medium mb-6">
-              Authorize Google accounts to access this Admin Panel.
+              Invite anyone by email (any domain). They get a set-password link and can sign in with email + password — Google is optional.
             </p>
-            <div className="flex flex-col sm:flex-row gap-4">
-              <input
-                type="email"
-                value={newAdminEmail}
-                onChange={(e) => setNewAdminEmail(e.target.value)}
-                className="flex-1 bg-slate-50 border-slate-200 border p-5 rounded-3xl font-bold outline-none placeholder:text-slate-300"
-                placeholder="user@ignitepm.com"
-              />
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col sm:flex-row gap-3">
+                <input
+                  type="email"
+                  value={newAdminEmail}
+                  onChange={(e) => setNewAdminEmail(e.target.value)}
+                  className="flex-1 bg-slate-50 border-slate-200 border p-5 rounded-3xl font-bold outline-none placeholder:text-slate-300"
+                  placeholder="name@company.com"
+                />
+                <select
+                  value={newAdminRole}
+                  onChange={(e) => setNewAdminRole(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-3xl px-4 py-4 text-sm font-black text-slate-700 outline-none focus:ring-2 focus:ring-[#fd7414]"
+                >
+                  <option value="kiosk">Kiosk-only</option>
+                  <option value="billing">Billing</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
               <button
+                type="button"
+                disabled={
+                  !String(newAdminEmail || '').trim() ||
+                  staffInviteBusyEmail ===
+                    String(newAdminEmail || '').trim().toLowerCase()
+                }
                 onClick={async () => {
-                  if (!newAdminEmail) return;
-                  const emailKey = newAdminEmail.trim().toLowerCase();
+                  const emailKey = String(newAdminEmail || '')
+                    .trim()
+                    .toLowerCase();
+                  if (!emailKey) return;
+                  setStaffInviteBusyEmail(emailKey);
                   try {
-                    await setDoc(
-                      doc('admins', emailKey),
+                    const resp = await authedFetch(
+                      '/.netlify/functions/staff-invite',
                       {
-                        email: newAdminEmail.trim(),
-                        role: 'billing',
-                        createdAt: Date.now(),
-                        needsFirstLoginNotify: true,
+                        action: 'invite',
+                        email: emailKey,
+                        role: newAdminRole,
                       },
-                      { merge: true }
                     );
+                    const data = await resp.json().catch(() => ({}));
+                    if (!resp.ok) {
+                      throw new Error(data.error || 'Invite failed');
+                    }
                     setNewAdminEmail('');
+                    window.alert(
+                      data.legacyFirebaseFallback
+                        ? `Invite started for ${emailKey}. They’ll get a Firebase set-password email.`
+                        : `Invite sent to ${emailKey}. They’ll get an email with a Set password button.`,
+                    );
                   } catch (err) {
                     window.alert(
-                      `Could not grant access for "${newAdminEmail}".\n\n${
+                      `Could not invite "${emailKey}".\n\n${
                         err?.message || String(err)
-                      }\n\nMost common fix: ensure your super admin doc exists as admins/chris@ignitepm.com with role "admin", then sign out/in.`
+                      }`,
                     );
+                  } finally {
+                    setStaffInviteBusyEmail('');
                   }
                 }}
-                className="bg-black text-white px-10 py-5 rounded-3xl font-black shadow-2xl active:scale-95 transition-all"
+                className="bg-black text-white px-10 py-5 rounded-3xl font-black shadow-2xl active:scale-95 transition-all disabled:opacity-40 w-full sm:w-auto"
               >
-                Grant Access
+                {staffInviteBusyEmail &&
+                staffInviteBusyEmail ===
+                  String(newAdminEmail || '').trim().toLowerCase()
+                  ? 'Sending…'
+                  : 'Invite & send set-password email'}
               </button>
             </div>
           </div>
@@ -8751,12 +8812,23 @@ const AdminDashboard = ({
                 Super Admin
               </span>
             </div>
-            {dedupedAdminUsers.map((a) => (
+            {dedupedAdminUsers.map((a) => {
+              const emailKey = String(a.email || '')
+                .trim()
+                .toLowerCase();
+              const invite = staffInvitesByEmail[emailKey];
+              const inviteStatus = portalInviteStatusLabel(invite);
+              const inviteBusy = staffInviteBusyEmail === emailKey;
+              const pending = String(invite?.status || '').toLowerCase() === 'pending';
+              const accepted =
+                String(invite?.status || '').toLowerCase() === 'accepted';
+              return (
               <div
                 key={a.email}
-                className="flex justify-between items-center p-6 bg-slate-50 rounded-3xl group border-2 border-transparent hover:border-slate-200 transition-all"
+                className="flex flex-col gap-3 p-6 bg-slate-50 rounded-3xl group border-2 border-transparent hover:border-slate-200 transition-all"
               >
-                <div className="flex flex-col gap-2 flex-1 pr-4">
+                <div className="flex justify-between items-start gap-3">
+                <div className="flex flex-col gap-2 flex-1 min-w-0 pr-2">
                   <span className="font-black text-slate-700">
                     {a.displayName ? (
                       <>
@@ -8769,6 +8841,9 @@ const AdminDashboard = ({
                       a.email
                     )}
                   </span>
+                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    Invite: {inviteStatus}
+                  </div>
                   <div className="flex flex-wrap items-center gap-3">
                     <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
                       Name
@@ -8872,6 +8947,7 @@ const AdminDashboard = ({
                   </div>
                 </div>
                 <button
+                  type="button"
                   onClick={() =>
                     setDeleteConfirm({
                       collection: 'admins',
@@ -8880,12 +8956,88 @@ const AdminDashboard = ({
                       title: `admin access for "${a.email}"`,
                     })
                   }
-                  className="text-slate-300 hover:text-red-500 transition-all p-2"
+                  className="text-slate-300 hover:text-red-500 transition-all p-2 shrink-0"
                 >
                   <Trash2 className="w-5 h-5" />
                 </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={inviteBusy}
+                    onClick={async () => {
+                      setStaffInviteBusyEmail(emailKey);
+                      try {
+                        const resp = await authedFetch(
+                          '/.netlify/functions/staff-invite',
+                          {
+                            action: pending || accepted ? 'resend' : 'invite',
+                            email: emailKey,
+                            role: a.role || 'kiosk',
+                            displayName: a.displayName || '',
+                          },
+                        );
+                        const data = await resp.json().catch(() => ({}));
+                        if (!resp.ok) {
+                          throw new Error(data.error || 'Invite failed');
+                        }
+                        window.alert(
+                          pending || accepted
+                            ? `Resent set-password link to ${emailKey}.`
+                            : `Invite sent to ${emailKey}.`,
+                        );
+                      } catch (err) {
+                        window.alert(err?.message || String(err));
+                      } finally {
+                        setStaffInviteBusyEmail('');
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-black bg-black text-white disabled:opacity-40"
+                  >
+                    {inviteBusy
+                      ? '…'
+                      : pending || accepted
+                        ? 'Resend invite'
+                        : 'Send invite'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={inviteBusy}
+                    onClick={async () => {
+                      setStaffInviteBusyEmail(emailKey);
+                      try {
+                        const resp = await authedFetch(
+                          '/.netlify/functions/staff-invite',
+                          {
+                            action: 'reset',
+                            email: emailKey,
+                            role: a.role || 'kiosk',
+                            displayName: a.displayName || '',
+                          },
+                        );
+                        const data = await resp.json().catch(() => ({}));
+                        if (!resp.ok) {
+                          throw new Error(data.error || 'Reset failed');
+                        }
+                        window.alert(
+                          data.legacyFirebaseFallback
+                            ? `Password reset email sent to ${emailKey} (Firebase).`
+                            : `Password reset link sent to ${emailKey}.`,
+                        );
+                      } catch (err) {
+                        window.alert(err?.message || String(err));
+                      } finally {
+                        setStaffInviteBusyEmail('');
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-black border border-slate-200 bg-white text-slate-700 disabled:opacity-40"
+                  >
+                    Reset password
+                  </button>
+                </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
