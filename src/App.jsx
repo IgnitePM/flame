@@ -4187,7 +4187,7 @@ export default function App() {
     ) : (
       <div className="min-h-screen bg-[#0f0f11] text-zinc-100 font-sans">
         <nav className="sticky top-0 z-40 border-b border-white/10 bg-[#0f0f11]/90 backdrop-blur-md safe-pt">
-          <div className="mx-auto flex w-full max-w-[min(1720px,calc(100vw-1.5rem))] items-center justify-between px-4 py-3 sm:px-6">
+          <div className="mx-auto flex w-full max-w-full sm:max-w-[min(1720px,calc(100vw-1.5rem))] items-center justify-between px-2.5 py-3 sm:px-6">
             <div
               className="flex items-center gap-2 group cursor-pointer min-w-0"
               onClick={() => navigate('/kiosk')}
@@ -4428,7 +4428,7 @@ export default function App() {
           />
         </MobileNavDrawer>
 
-        <main className="mx-auto w-full max-w-[min(1720px,calc(100vw-1.5rem))] px-4 py-6 pb-24 sm:px-6 sm:py-8">
+        <main className="mx-auto w-full max-w-full sm:max-w-[min(1720px,calc(100vw-1.5rem))] px-1.5 py-3 pb-24 sm:px-6 sm:py-8">
           <IdleFailsafeGuard
             activeShift={activeShift}
             policy={policy}
