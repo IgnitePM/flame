@@ -146,6 +146,7 @@ import {
   removeTodoItemFromAllCycles,
   upsertRecurringSeriesTemplate,
 } from './utils/recurringTodoMaterialize.js';
+import { syncTaskCommentsAcrossCycles } from './utils/taskComments.js';
 import { canMarkParentTodoDone } from './utils/todoSubtasks.js';
 import {
   addAttachmentToItem,
@@ -2810,6 +2811,14 @@ export default function App() {
         }
       }
     }
+    // Task notes @-tagged to portal contacts must show on the current-cycle
+    // copy too — staff often leave the note on a prior billing cycle.
+    const commentSync = syncTaskCommentsAcrossCycles(
+      cycles,
+      categoryKey,
+      nextCategoryData?.items || [],
+    );
+    cycles = commentSync.cycles;
     const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(freshClient, cycles);
     await updateDoc(doc(db, 'clients', freshClient.id), { todoCycles: cycles, ...teamAccessPatch });
     const staffSet = new Set(staffEmails || []);

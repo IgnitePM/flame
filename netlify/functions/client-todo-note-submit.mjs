@@ -6,6 +6,7 @@ import { getBillingPeriod } from '../../src/utils/billingEngine.js';
 import {
   appendTaskComment,
   buildTaskComment,
+  syncTaskCommentsAcrossCycles,
 } from '../../src/utils/taskComments.js';
 import {
   collectClientStaffNotifyEmails,
@@ -110,9 +111,10 @@ export default async (req) => {
     items[idx] = nextItem;
     cycleData[categoryKey] = { ...catTodo, items };
     cycles[cycleKey] = cycleData;
+    const synced = syncTaskCommentsAcrossCycles(cycles, categoryKey, items);
 
     const db = await getDigestDb();
-    await mergeDoc(db, `clients/${clientId}`, { todoCycles: cycles });
+    await mergeDoc(db, `clients/${clientId}`, { todoCycles: synced.cycles });
 
     const title = String(item.text || 'Task').trim() || 'Task';
     const now = Date.now();
