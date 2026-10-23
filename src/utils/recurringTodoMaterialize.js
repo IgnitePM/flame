@@ -1,4 +1,9 @@
 import { getSubtasks, newSubtaskId, projectSubtaskDueDateForNewCycle } from './todoSubtasks.js';
+import {
+  getTaskComments,
+  mergeTaskCommentLists,
+  taskCommentListsDiffer,
+} from './taskComments.js';
 
 function stableRecurringSeriesId(item) {
   if (!item?.recurring) return '';
@@ -340,7 +345,24 @@ export function materializeCategoryTodoFromPrev(
 
   const existingIds = new Set(items.map((item) => item?.id).filter(Boolean));
   for (const item of prevItems.filter((row) => row && !row.done)) {
-    if (!item.id || existingIds.has(item.id)) continue;
+    if (!item.id) continue;
+    if (existingIds.has(item.id)) {
+      // Same task id already in this cycle (carried earlier). Still pull forward
+      // any notes that were added on the prior-cycle copy after the carry.
+      const idx = items.findIndex((row) => row?.id === item.id);
+      if (idx < 0) continue;
+      const current = items[idx];
+      const mergedComments = mergeTaskCommentLists(
+        getTaskComments(current),
+        getTaskComments(item),
+      );
+      if (!taskCommentListsDiffer(getTaskComments(current), mergedComments)) {
+        continue;
+      }
+      items[idx] = { ...current, comments: mergedComments };
+      changed = true;
+      continue;
+    }
     // Don't re-carry a recurring occurrence that was deleted for this anchor.
     if (item.recurring) {
       const skipKey = recurringAnchorKey(
@@ -757,6 +779,26 @@ export function mergeOpenItemsFromPrevCycle(existingCycleData, prevCycleData) {
     const existingCat = next[catKey] || { closed: false, items: [] };
     const existingIds = new Set((existingCat.items || []).map((item) => item?.id));
     const skipped = skippedAnchorSet(existingCat);
+    let items = [...(existingCat.items || [])];
+    let catChanged = false;
+
+    // Notes left on the prior-cycle copy after carry-forward still belong on
+    // the live task the portal shows for the current cycle.
+    items = items.map((current) => {
+      if (!current?.id) return current;
+      const prevItem = openPrev.find((row) => row?.id === current.id);
+      if (!prevItem) return current;
+      const mergedComments = mergeTaskCommentLists(
+        getTaskComments(current),
+        getTaskComments(prevItem),
+      );
+      if (!taskCommentListsDiffer(getTaskComments(current), mergedComments)) {
+        return current;
+      }
+      catChanged = true;
+      return { ...current, comments: mergedComments };
+    });
+
     const toAdd = openPrev
       .filter((item) => {
         if (!item?.id || existingIds.has(item.id)) return false;
@@ -770,12 +812,16 @@ export function mergeOpenItemsFromPrevCycle(existingCycleData, prevCycleData) {
         return true;
       })
       .map(carryPrimaryTodoItemFromPrevCycle);
-    if (!toAdd.length) continue;
+    if (toAdd.length) {
+      items = [...items, ...toAdd];
+      catChanged = true;
+    }
+    if (!catChanged) continue;
 
     changed = true;
     next[catKey] = {
       ...existingCat,
-      items: [...(existingCat.items || []), ...toAdd],
+      items,
     };
   }
 

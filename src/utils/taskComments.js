@@ -4,6 +4,50 @@ export function getTaskComments(item) {
   return Array.isArray(item?.comments) ? item.comments.filter(Boolean) : [];
 }
 
+/**
+ * Union two comment lists by comment id (stable order: existing first, then new).
+ * Used when the same task id exists in prior + current billing cycles so portal
+ * users still see notes that were left on the older cycle copy.
+ */
+export function mergeTaskCommentLists(existingComments, incomingComments) {
+  const existing = Array.isArray(existingComments)
+    ? existingComments.filter(Boolean)
+    : [];
+  const incoming = Array.isArray(incomingComments)
+    ? incomingComments.filter(Boolean)
+    : [];
+  if (!incoming.length) return existing;
+  if (!existing.length) return incoming;
+
+  const seen = new Set();
+  const out = [];
+  for (const comment of [...existing, ...incoming]) {
+    const id = String(comment?.id || '').trim();
+    if (id) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+    }
+    out.push(comment);
+  }
+  return out;
+}
+
+/** True when `next` has any comment id not present in `prev`. */
+export function taskCommentListsDiffer(prev, next) {
+  const a = Array.isArray(prev) ? prev.filter(Boolean) : [];
+  const b = Array.isArray(next) ? next.filter(Boolean) : [];
+  if (a.length !== b.length) return true;
+  const ids = new Set(
+    a.map((c) => String(c?.id || '').trim()).filter(Boolean),
+  );
+  for (const comment of b) {
+    const id = String(comment?.id || '').trim();
+    if (id && !ids.has(id)) return true;
+    if (!id) return true;
+  }
+  return false;
+}
+
 export function newCommentId() {
   return `cmt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -165,4 +209,46 @@ export function appendTaskComment(item, comment) {
     ...item,
     comments: [...getTaskComments(item), comment],
   };
+}
+
+/**
+ * Copy any comments present on `sourceItems` onto matching task ids in every
+ * other billing-cycle bucket. Keeps portal Home (current cycle) in sync when
+ * staff leave notes on a prior-cycle copy of the same task.
+ *
+ * @returns {{ cycles: object, changed: boolean }}
+ */
+export function syncTaskCommentsAcrossCycles(cycles, categoryKey, sourceItems) {
+  const next = { ...(cycles || {}) };
+  const sources = Array.isArray(sourceItems) ? sourceItems : [];
+  const byId = new Map();
+  for (const item of sources) {
+    if (!item?.id) continue;
+    const comments = getTaskComments(item);
+    if (!comments.length) continue;
+    byId.set(item.id, comments);
+  }
+  if (!byId.size || !categoryKey) return { cycles: next, changed: false };
+
+  let changed = false;
+  for (const [cycleKey, cycleData] of Object.entries(next)) {
+    if (!cycleData || typeof cycleData !== 'object') continue;
+    const cat = cycleData[categoryKey];
+    if (!cat || !Array.isArray(cat.items)) continue;
+    let catChanged = false;
+    const items = cat.items.map((row) => {
+      if (!row?.id || !byId.has(row.id)) return row;
+      const merged = mergeTaskCommentLists(getTaskComments(row), byId.get(row.id));
+      if (!taskCommentListsDiffer(getTaskComments(row), merged)) return row;
+      catChanged = true;
+      return { ...row, comments: merged };
+    });
+    if (!catChanged) continue;
+    changed = true;
+    next[cycleKey] = {
+      ...cycleData,
+      [categoryKey]: { ...cat, items },
+    };
+  }
+  return { cycles: next, changed };
 }

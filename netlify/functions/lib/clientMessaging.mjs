@@ -90,12 +90,12 @@ function emailShell({ eyebrow, title, bodyText, ctaLabel, ctaHref }) {
 export async function notifyPortalNewMessage({ client, messageBody, authorName }) {
   const to = portalEmails(client);
   if (!to.length) return { sent: 0, skipped: 'no_portal_emails' };
-  const href = appBaseUrl();
+  const href = `${appBaseUrl()}?tab=messages`;
   const { text, html } = emailShell({
     eyebrow: 'Ignite PM · Messages',
     title: `New message from Ignite — ${client.name || 'your account'}`,
     bodyText: `${authorName || 'Ignite'} wrote:\n\n${messageBody}`,
-    ctaLabel: 'Open portal',
+    ctaLabel: 'Open Messages',
     ctaHref: href,
   });
   await sendDigestEmail({
@@ -130,12 +130,12 @@ export async function notifyStaffClientMessage({ client, messageBody, authorEmai
 export async function notifyPortalReviewSent({ client, title, description }) {
   const to = portalEmails(client);
   if (!to.length) return { sent: 0, skipped: 'no_portal_emails' };
-  const href = appBaseUrl();
+  const href = `${appBaseUrl()}?tab=approvals`;
   const { text, html } = emailShell({
     eyebrow: 'Ignite PM · Approvals',
     title: `Please approve: ${title}`,
     bodyText: description || 'A new deliverable is ready for your approval in the client portal.',
-    ctaLabel: 'Open portal',
+    ctaLabel: 'Open Approvals',
     ctaHref: href,
   });
   await sendDigestEmail({
@@ -171,14 +171,14 @@ export async function notifyStaffReviewDecision({ client, title, status, note, b
 export async function notifyPortalTodoApprovalSent({ client, title, note }) {
   const to = portalEmails(client);
   if (!to.length) return { sent: 0, skipped: 'no_portal_emails' };
-  const href = `${appBaseUrl()}?tab=tasks`;
+  const href = `${appBaseUrl()}?tab=approvals`;
   const { text, html } = emailShell({
     eyebrow: 'Ignite PM · Task approval',
     title: `Please review: ${title}`,
     bodyText:
       note ||
       'A task is ready for your review in the client portal. Approve it or request revisions.',
-    ctaLabel: 'Open portal tasks',
+    ctaLabel: 'Open Approvals',
     ctaHref: href,
   });
   await sendDigestEmail({
@@ -206,7 +206,9 @@ export async function notifyPortalTodoNoteMention({
     ),
   ];
   if (!to.length) return { sent: 0, skipped: 'no_matching_portal_emails' };
-  const href = appBaseUrl();
+  // Land on Messages — task-note @mentions are mirrored into the shared inbox
+  // so clients can read the note even when the task lives on another cycle.
+  const href = `${appBaseUrl()}?tab=messages`;
   const title = String(taskTitle || 'Task').trim() || 'Task';
   const { text, html } = emailShell({
     eyebrow: 'Ignite PM · Task note',
@@ -214,7 +216,7 @@ export async function notifyPortalTodoNoteMention({
     bodyText: `${authorName || 'Ignite'} tagged you on ${
       client.name || 'your account'
     }:\n\n${commentText || '(no note text)'}`,
-    ctaLabel: 'Open portal',
+    ctaLabel: 'Open Messages',
     ctaHref: href,
   });
   await sendDigestEmail({

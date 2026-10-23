@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { orderTodosForDisplay } from '../utils/todoListOrder.js';
 import {
   clientHasEnabledRetainers,
@@ -58,6 +59,31 @@ import {
 } from 'lucide-react';
 
 const STRATEGY_BOOKING_URL = 'https://calendar.app.google/nsL6wM7189fAM1Vd7';
+
+/** Portal sections reachable via `?tab=` (email CTAs + shareable links). */
+const PORTAL_TAB_IDS = new Set([
+  'dashboard',
+  'messages',
+  'approvals',
+  'files',
+  'billing',
+  'company',
+  'analytics',
+  'tools',
+]);
+
+function normalizePortalTab(raw) {
+  const tab = String(raw || '')
+    .trim()
+    .toLowerCase();
+  if (!tab) return null;
+  // Tasks live on Home; accept legacy / email aliases.
+  if (tab === 'tasks' || tab === 'home' || tab === 'task') return 'dashboard';
+  if (tab === 'message') return 'messages';
+  if (tab === 'approval' || tab === 'reviews') return 'approvals';
+  if (!PORTAL_TAB_IDS.has(tab)) return null;
+  return tab;
+}
 
 function portalMessageReadDocId(clientId, email) {
   const c = String(clientId || '').trim();
@@ -121,7 +147,10 @@ const ClientPortal = ({
   auth,
   user,
 }) => {
-  const [portalSection, setPortalSection] = useState('dashboard');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [portalSection, setPortalSection] = useState(
+    () => normalizePortalTab(searchParams.get('tab')) || 'dashboard',
+  );
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [portalUserProfile, setPortalUserProfile] = useState(null);
@@ -322,8 +351,26 @@ const ClientPortal = ({
   useEffect(() => {
     if (portalSection === 'analytics' && !clientHasActiveAnalyticsRetainer(clientProfile)) {
       setPortalSection('dashboard');
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('tab');
+          return next;
+        },
+        { replace: true },
+      );
     }
-  }, [portalSection, clientProfile]);
+  }, [portalSection, clientProfile, setSearchParams]);
+
+  // Honor `?tab=` from email CTAs and in-app links.
+  useEffect(() => {
+    const fromUrl = normalizePortalTab(searchParams.get('tab'));
+    if (!fromUrl || fromUrl === portalSection) return;
+    if (fromUrl === 'analytics' && !clientHasActiveAnalyticsRetainer(clientProfile)) {
+      return;
+    }
+    setPortalSection(fromUrl);
+  }, [searchParams, clientProfile, portalSection]);
 
   const minPortalOffset = (() => {
     if (!clientProfile.clientStartDate) return -1e9;
@@ -438,6 +485,15 @@ const ClientPortal = ({
     const tab = allPortalTabs.find((t) => t.id === id);
     if (tab?.disabled) return;
     setPortalSection(id);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (id === 'dashboard') next.delete('tab');
+        else next.set('tab', id);
+        return next;
+      },
+      { replace: true },
+    );
     if (id === 'messages') markMessagesRead();
     setMoreOpen(false);
   };

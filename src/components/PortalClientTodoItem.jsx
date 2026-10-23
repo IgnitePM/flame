@@ -53,8 +53,15 @@ export default function PortalClientTodoItem({
   const [saving, setSaving] = React.useState(false);
   const [localComments, setLocalComments] = React.useState(comments);
 
+  const prevCommentCountRef = React.useRef(comments.length);
   React.useEffect(() => {
-    setLocalComments(getTaskComments(item));
+    const next = getTaskComments(item);
+    setLocalComments(next);
+    // Open Notes when new comments arrive after mount (cycle merge / live update).
+    if (next.length > prevCommentCountRef.current) {
+      setNotesOpen(true);
+    }
+    prevCommentCountRef.current = next.length;
   }, [item]);
 
   const postNote = async () => {
