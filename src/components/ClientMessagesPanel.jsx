@@ -13,7 +13,7 @@ import { authedFetch } from '../utils/authedFetch.js';
 import {
   isDriveFolder,
   listDriveFolder,
-  uploadFileToDriveFolder,
+  uploadFileToClientSharedFolder,
   driveFileViewUrl,
 } from '../utils/clientDrive.js';
 import MentionTextarea from './MentionTextarea.jsx';
@@ -160,7 +160,10 @@ export default function ClientMessagesPanel({
   };
 
   const openDrivePicker = async () => {
-    const folderId = String(client?.googleDriveFolderId || '').trim();
+    // Prefer the shared subfolder so attached Drive links open for portal contacts.
+    const folderId = String(
+      client?.googleDriveSharedFolderId || client?.googleDriveFolderId || '',
+    ).trim();
     if (!folderId) {
       window.alert('Link or create this client’s Drive folder in the Files tab first.');
       return;
@@ -197,14 +200,20 @@ export default function ClientMessagesPanel({
   };
 
   const uploadAndAttach = async (file) => {
-    const folderId = String(client?.googleDriveFolderId || '').trim();
-    if (!folderId) {
+    if (!clientId) {
+      window.alert('Link a Drive folder before uploading attachments.');
+      return;
+    }
+    if (
+      !String(client?.googleDriveSharedFolderId || client?.googleDriveFolderId || '').trim()
+    ) {
       window.alert('Link a Drive folder before uploading attachments.');
       return;
     }
     setBusy(true);
     try {
-      const meta = await uploadFileToDriveFolder(folderId, file);
+      // Shared folder + auto ACL so clients can open the Drive link.
+      const meta = await uploadFileToClientSharedFolder(clientId, file);
       attachDriveFile(meta);
     } catch (err) {
       window.alert(err?.message || 'Upload failed.');

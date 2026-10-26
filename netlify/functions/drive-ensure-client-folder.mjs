@@ -2,6 +2,7 @@ import { describeAuthError, requireStaffCaller } from './lib/requireAuth.mjs';
 import { fetchDoc, getDigestDb, mergeDoc } from './lib/firebaseDigestClient.mjs';
 import {
   driveEnsureNamedFolder,
+  ensureSharedFolderAccessForClient,
   folderUrl,
   getValidCompanyAccessToken,
   loadCompanyConnection,
@@ -74,6 +75,19 @@ export default async (req) => {
         updatedAt: Date.now(),
       };
       await mergeDoc(db, `clients/${clientId}`, patch);
+      let share = { results: [] };
+      if (patch.googleDriveSharedFolderId) {
+        try {
+          share = await ensureSharedFolderAccessForClient(
+            accessToken,
+            client,
+            patch.googleDriveSharedFolderId,
+            { sendNotificationEmail: false },
+          );
+        } catch (err) {
+          console.warn('[drive-ensure-client-folder] share:', err?.message || err);
+        }
+      }
       return new Response(
         JSON.stringify({
           ok: true,
@@ -82,6 +96,7 @@ export default async (req) => {
           sharedFolderId: patch.googleDriveSharedFolderId,
           folderUrl: patch.googleDriveFolderUrl,
           sharedFolderUrl: patch.googleDriveSharedFolderUrl,
+          share,
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       );
@@ -117,6 +132,18 @@ export default async (req) => {
     };
     await mergeDoc(db, `clients/${clientId}`, patch);
 
+    let share = { results: [] };
+    try {
+      share = await ensureSharedFolderAccessForClient(
+        accessToken,
+        { ...client, ...patch },
+        shared.id,
+        { sendNotificationEmail: false },
+      );
+    } catch (err) {
+      console.warn('[drive-ensure-client-folder] share:', err?.message || err);
+    }
+
     return new Response(
       JSON.stringify({
         ok: true,
@@ -126,6 +153,7 @@ export default async (req) => {
         folderUrl: patch.googleDriveFolderUrl,
         sharedFolderUrl: patch.googleDriveSharedFolderUrl,
         createdBy: caller.email,
+        share,
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     );

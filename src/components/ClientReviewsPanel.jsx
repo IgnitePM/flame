@@ -14,7 +14,7 @@ import {
   driveFileViewUrl,
   isDriveFolder,
   listDriveFolder,
-  uploadFileToDriveFolder,
+  uploadFileToClientSharedFolder,
 } from '../utils/clientDrive.js';
 
 function formatWhen(ms) {
@@ -96,7 +96,9 @@ export default function ClientReviewsPanel({ client, mode = 'staff' }) {
   }, [clientId]);
 
   const openDrivePicker = async () => {
-    const folderId = String(client?.googleDriveFolderId || '').trim();
+    const folderId = String(
+      client?.googleDriveSharedFolderId || client?.googleDriveFolderId || '',
+    ).trim();
     if (!folderId) {
       window.alert('Link or create this client’s Drive folder in the Files tab first.');
       return;
@@ -133,14 +135,19 @@ export default function ClientReviewsPanel({ client, mode = 'staff' }) {
   };
 
   const uploadAndAttach = async (file) => {
-    const folderId = String(client?.googleDriveFolderId || '').trim();
-    if (!folderId) {
+    if (!clientId) {
+      window.alert('Link a Drive folder before uploading.');
+      return;
+    }
+    if (
+      !String(client?.googleDriveSharedFolderId || client?.googleDriveFolderId || '').trim()
+    ) {
       window.alert('Link a Drive folder before uploading.');
       return;
     }
     setBusy(true);
     try {
-      const meta = await uploadFileToDriveFolder(folderId, file);
+      const meta = await uploadFileToClientSharedFolder(clientId, file);
       attachDriveFile(meta);
     } catch (err) {
       window.alert(err?.message || 'Upload failed.');

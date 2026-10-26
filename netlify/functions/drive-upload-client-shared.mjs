@@ -1,6 +1,10 @@
 import { describeAuthError, requireClientOrStaffCaller } from './lib/requireAuth.mjs';
 import { fetchDoc, getDigestDb } from './lib/firebaseDigestClient.mjs';
-import { driveStartResumableUpload, getValidCompanyAccessToken } from './lib/driveOAuth.mjs';
+import {
+  driveStartResumableUpload,
+  ensureSharedFolderAccessForClient,
+  getValidCompanyAccessToken,
+} from './lib/driveOAuth.mjs';
 
 /**
  * Portal (or staff): start a resumable Drive upload into the client's
@@ -69,6 +73,23 @@ export default async (req) => {
       String(req.headers.get('origin') || req.headers.get('Origin') || '').trim() ||
       String(process.env.URL || process.env.DEPLOY_PRIME_URL || '').replace(/\/$/, '');
 
+    // Folder-level ACL so the Drive webViewLink opens without "Request access".
+    // Idempotent; skips emails that already have permission.
+    let share = { results: [] };
+    try {
+      share = await ensureSharedFolderAccessForClient(
+        accessToken,
+        client,
+        sharedFolderId,
+        { sendNotificationEmail: false },
+      );
+    } catch (err) {
+      console.warn(
+        '[drive-upload-client-shared] share:',
+        err?.message || err,
+      );
+    }
+
     const uploadUrl = await driveStartResumableUpload(accessToken, {
       name,
       mimeType: String(body.mimeType || 'application/octet-stream'),
@@ -83,6 +104,7 @@ export default async (req) => {
         uploadUrl,
         folderId: sharedFolderId,
         uploadedBy: caller.email || '',
+        share,
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     );

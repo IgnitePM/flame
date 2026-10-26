@@ -1,17 +1,19 @@
 import { describeAuthError, requireStaffCaller } from './lib/requireAuth.mjs';
 import { fetchDoc, getDigestDb, mergeDoc } from './lib/firebaseDigestClient.mjs';
 import {
-  driveCreatePermission,
   driveEnsureNamedFolder,
+  ensureSharedFolderAccessForClient,
   folderUrl,
   getValidCompanyAccessToken,
+  portalEmailsFromClient,
   SHARED_WITH_CLIENT_FOLDER_NAME,
 } from './lib/driveOAuth.mjs';
 
 /**
  * Staff: share the client's "Shared with client" subfolder with email(s).
  * Does not grant access to the parent client folder or company Shared Drive.
- * POST { clientId, emails: string[] | string, role?: 'reader'|'commenter'|'writer' }
+ * POST { clientId, emails?: string[] | string, role?: 'reader'|'commenter'|'writer' }
+ * When emails are omitted, shares with all clients.clientEmails portal contacts.
  */
 export default async (req) => {
   if (req.method !== 'POST') {
@@ -40,12 +42,8 @@ export default async (req) => {
 
   try {
     const clientId = String(body.clientId || '').trim();
-    const emailsRaw = Array.isArray(body.emails) ? body.emails : [body.emails || body.email];
-    const emails = emailsRaw
-      .map((e) => String(e || '').trim().toLowerCase())
-      .filter((e) => e.includes('@'));
-    if (!clientId || !emails.length) {
-      return new Response(JSON.stringify({ error: 'clientId and at least one email are required.' }), {
+    if (!clientId) {
+      return new Response(JSON.stringify({ error: 'clientId is required.' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -86,26 +84,46 @@ export default async (req) => {
       });
     }
 
-    const results = [];
-    for (const email of emails) {
-      try {
-        const perm = await driveCreatePermission(accessToken, sharedFolderId, {
-          email,
-          role,
-          type: 'user',
-        });
-        results.push({ email, ok: true, permissionId: perm.id });
-      } catch (err) {
-        results.push({ email, ok: false, error: err?.message || 'Share failed' });
-      }
+    const emailsRaw = Array.isArray(body.emails)
+      ? body.emails
+      : body.emails || body.email
+        ? [body.emails || body.email]
+        : null;
+    const emails =
+      emailsRaw == null
+        ? portalEmailsFromClient(client)
+        : emailsRaw
+            .map((e) => String(e || '').trim().toLowerCase())
+            .filter((e) => e.includes('@'));
+
+    if (!emails.length) {
+      return new Response(
+        JSON.stringify({
+          error:
+            'No emails to share with. Add Authorized Emails on the client, or pass emails in the request.',
+        }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } },
+      );
     }
+
+    const share = await ensureSharedFolderAccessForClient(
+      accessToken,
+      client,
+      sharedFolderId,
+      {
+        role,
+        // Manual share from CRM — notify contacts once.
+        sendNotificationEmail: body.sendNotificationEmail !== false,
+        emails,
+      },
+    );
 
     return new Response(
       JSON.stringify({
         ok: true,
         sharedFolderId,
         sharedFolderUrl: folderUrl(sharedFolderId),
-        results,
+        results: share.results || [],
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     );
