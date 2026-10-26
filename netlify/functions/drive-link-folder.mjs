@@ -3,6 +3,7 @@ import { fetchDoc, getDigestDb, mergeDoc } from './lib/firebaseDigestClient.mjs'
 import {
   driveEnsureNamedFolder,
   driveGetFile,
+  ensureSharedFolderAccessForClient,
   folderUrl,
   getValidCompanyAccessToken,
   parseDriveIdFromUrl,
@@ -82,6 +83,18 @@ export default async (req) => {
     };
     await mergeDoc(db, `clients/${clientId}`, patch);
 
+    let share = { results: [] };
+    try {
+      share = await ensureSharedFolderAccessForClient(
+        accessToken,
+        { ...client, ...patch },
+        shared.id,
+        { sendNotificationEmail: false },
+      );
+    } catch (err) {
+      console.warn('[drive-link-folder] share:', err?.message || err);
+    }
+
     return new Response(
       JSON.stringify({
         ok: true,
@@ -90,6 +103,7 @@ export default async (req) => {
         sharedFolderId: shared.id,
         folderUrl: patch.googleDriveFolderUrl,
         sharedFolderUrl: patch.googleDriveSharedFolderUrl,
+        share,
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     );

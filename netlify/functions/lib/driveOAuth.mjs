@@ -6,6 +6,12 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import https from 'node:https';
 import { fetchDoc, getDigestDb, mergeDoc, removeDoc } from './firebaseDigestClient.mjs';
+import {
+  isDrivePermissionAlreadyExistsError,
+  portalEmailsFromClient,
+} from './driveShareHelpers.mjs';
+
+export { isDrivePermissionAlreadyExistsError, portalEmailsFromClient };
 
 export const DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive'].join(' ');
 
@@ -534,12 +540,21 @@ export async function driveStartResumableUpload(
   return uploadUrl;
 }
 
-export async function driveCreatePermission(accessToken, fileId, { email, role = 'reader', type = 'user' }) {
+export async function driveCreatePermission(
+  accessToken,
+  fileId,
+  {
+    email,
+    role = 'reader',
+    type = 'user',
+    sendNotificationEmail = true,
+  } = {},
+) {
   const id = String(fileId || '').trim();
   if (!id) throw new Error('fileId required');
   const params = new URLSearchParams({
     supportsAllDrives: 'true',
-    sendNotificationEmail: 'true',
+    sendNotificationEmail: sendNotificationEmail ? 'true' : 'false',
     fields: 'id,type,role,emailAddress',
   });
   return driveJson(
@@ -554,6 +569,85 @@ export async function driveCreatePermission(accessToken, fileId, { email, role =
       },
     },
   );
+}
+
+/**
+ * Share a Drive file/folder with one or more emails (reader by default).
+ * Treats "already shared" as success so callers can run this on every upload.
+ */
+export async function driveShareWithEmails(
+  accessToken,
+  fileId,
+  emails = [],
+  { role = 'reader', sendNotificationEmail = false } = {},
+) {
+  const id = String(fileId || '').trim();
+  const list = [
+    ...new Set(
+      (emails || [])
+        .map((e) => String(e || '').trim().toLowerCase())
+        .filter((e) => e.includes('@')),
+    ),
+  ];
+  if (!id || !list.length) {
+    return { sharedFolderId: id || null, results: [], skipped: 'no_emails_or_file' };
+  }
+
+  const results = [];
+  for (const email of list) {
+    try {
+      const perm = await driveCreatePermission(accessToken, id, {
+        email,
+        role,
+        type: 'user',
+        sendNotificationEmail,
+      });
+      results.push({
+        email,
+        ok: true,
+        alreadyHadAccess: false,
+        permissionId: perm?.id || null,
+      });
+    } catch (err) {
+      if (isDrivePermissionAlreadyExistsError(err)) {
+        results.push({
+          email,
+          ok: true,
+          alreadyHadAccess: true,
+          permissionId: null,
+        });
+        continue;
+      }
+      results.push({ email, ok: false, error: err?.message || 'Share failed' });
+    }
+  }
+  return { fileId: id, results };
+}
+
+/**
+ * Ensure every portal contact on the client can open the "Shared with client"
+ * folder (and files inside it) in Google Drive without requesting access.
+ */
+export async function ensureSharedFolderAccessForClient(
+  accessToken,
+  client,
+  sharedFolderId,
+  { role = 'reader', sendNotificationEmail = false, emails = null } = {},
+) {
+  const folderId = String(sharedFolderId || client?.googleDriveSharedFolderId || '').trim();
+  const list =
+    emails != null ? emails : portalEmailsFromClient(client);
+  if (!folderId) {
+    return { sharedFolderId: null, results: [], skipped: 'no_shared_folder' };
+  }
+  if (!list.length) {
+    return { sharedFolderId: folderId, results: [], skipped: 'no_portal_emails' };
+  }
+  const out = await driveShareWithEmails(accessToken, folderId, list, {
+    role,
+    sendNotificationEmail,
+  });
+  return { sharedFolderId: folderId, ...out };
 }
 
 export function publicConnectionStatus(connection) {

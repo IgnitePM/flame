@@ -9,12 +9,13 @@ import {
 import {
   isDriveFolder,
   listDriveFolder,
+  uploadFileToClientSharedFolder,
   uploadFileToDriveFolder,
 } from '../utils/clientDrive.js';
 
 /**
  * Task attachments backed by the client's Google Drive folder.
- * Pick an existing Drive file or upload into the client folder.
+ * Prefer the "Shared with client" subfolder so portal contacts can open links.
  */
 export default function TodoItemAttachments({
   item,
@@ -37,22 +38,24 @@ export default function TodoItemAttachments({
 
   const attachments = getTodoAttachments(item);
   const atLimit = attachments.length >= maxAttachments;
+  const sharedFolderId = String(client?.googleDriveSharedFolderId || '').trim();
   const clientFolderId = String(client?.googleDriveFolderId || '').trim();
+  const defaultFolderId = sharedFolderId || clientFolderId;
 
   const openPicker = async () => {
-    if (!clientFolderId) {
+    if (!defaultFolderId) {
       window.alert(
         'Link or create this client’s Google Drive folder in the Files tab first.',
       );
       return;
     }
     setPickerOpen(true);
-    setFolderId(clientFolderId);
+    setFolderId(defaultFolderId);
     setPickerSearch('');
     setError('');
     setLoading(true);
     try {
-      const data = await listDriveFolder(clientFolderId);
+      const data = await listDriveFolder(defaultFolderId);
       setFiles(Array.isArray(data.files) ? data.files : []);
     } catch (err) {
       setError(err?.message || 'Could not load Drive files.');
@@ -97,12 +100,16 @@ export default function TodoItemAttachments({
   };
 
   const handleUpload = async (file) => {
-    const targetFolder = String(folderId || clientFolderId || '').trim();
-    if (!file || !onAttachDriveFile || !targetFolder) return;
+    const targetFolder = String(folderId || defaultFolderId || '').trim();
+    if (!file || !onAttachDriveFile || (!targetFolder && !client?.id)) return;
     setUploading(true);
     setError('');
     try {
-      const meta = await uploadFileToDriveFolder(targetFolder, file);
+      // Prefer shared-folder upload so Drive ACLs include portal contacts.
+      const meta =
+        client?.id && (!folderId || folderId === sharedFolderId)
+          ? await uploadFileToClientSharedFolder(client.id, file)
+          : await uploadFileToDriveFolder(targetFolder, file);
       await onAttachDriveFile(client, meta, {
         linkedTodoId: item.id,
         linkedTodoText: item.text || '',

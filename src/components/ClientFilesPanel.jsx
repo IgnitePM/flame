@@ -100,8 +100,24 @@ export default function ClientFilesPanel({
   const [busy, setBusy] = React.useState('');
   const [error, setError] = React.useState('');
   const [linkUrl, setLinkUrl] = React.useState(client?.googleDriveFolderUrl || '');
-  const [shareEmails, setShareEmails] = React.useState('');
+  const portalEmails = React.useMemo(
+    () =>
+      [
+        ...new Set(
+          (Array.isArray(client?.clientEmails) ? client.clientEmails : [])
+            .map((e) => String(e || '').trim().toLowerCase())
+            .filter((e) => e.includes('@')),
+        ),
+      ].join(', '),
+    [client?.clientEmails],
+  );
+  const [shareEmails, setShareEmails] = React.useState(portalEmails);
   const [searchInput, setSearchInput] = React.useState('');
+
+  React.useEffect(() => {
+    // Keep the share field aligned with Authorized Emails when empty / first load.
+    setShareEmails((prev) => (String(prev || '').trim() ? prev : portalEmails));
+  }, [portalEmails]);
   const [searchQuery, setSearchQuery] = React.useState('');
   const [searchResults, setSearchResults] = React.useState(null);
   const [viewMode, setViewMode] = React.useState(() =>
@@ -608,6 +624,7 @@ export default function ClientFilesPanel({
           </div>
           <p className="text-[10px] font-medium text-slate-400">
             Clients only get that subfolder — not the whole client folder or Shared Drive.
+            Portal uploads also share this folder automatically with Authorized Emails.
           </p>
           <div className="flex flex-wrap gap-2">
             <input
@@ -618,6 +635,16 @@ export default function ClientFilesPanel({
               placeholder="client@email.com"
               className="flex-1 min-w-[160px] bg-white border border-slate-200 px-3 py-2 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-[#fd7414]"
             />
+            {portalEmails ? (
+              <button
+                type="button"
+                disabled={disabled || !!busy}
+                onClick={() => setShareEmails(portalEmails)}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-600 disabled:opacity-40"
+              >
+                Portal contacts
+              </button>
+            ) : null}
             <button
               type="button"
               disabled={disabled || !!busy}
