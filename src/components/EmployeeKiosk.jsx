@@ -2298,9 +2298,16 @@ const EmployeeKiosk = ({
                           </div>
                         </div>
                       </div>
-                      <div className="text-6xl font-black text-slate-900 text-center mb-8 font-mono tracking-tighter">
+                      <div className="text-6xl font-black text-slate-900 text-center mb-4 font-mono tracking-tighter">
                         {formatTime(liveTaskDuration)}
                       </div>
+                      <button
+                        type="button"
+                        onClick={handleStopTask}
+                        className="w-full bg-black hover:bg-slate-900 text-white p-5 rounded-2xl font-black text-lg mb-6 shadow-xl flex items-center justify-center gap-3 transition-all active:scale-95"
+                      >
+                        <Pause className="w-5 h-5 fill-current" /> Pause Task
+                      </button>
                       {/* Retainer progress (show first while actively working) */}
                       {retainerStats && selectedRetainerCategory && (
                         <div className="mt-5 bg-white border border-slate-200 rounded-[24px] p-4">
@@ -2809,12 +2816,6 @@ const EmployeeKiosk = ({
                         </div>
                       )}
 
-                      <button
-                        onClick={handleStopTask}
-                        className="w-full bg-black hover:bg-slate-900 text-white p-5 rounded-2xl font-black text-lg mt-6 shadow-xl flex items-center justify-center gap-3 transition-all active:scale-95"
-                      >
-                        <Pause className="w-5 h-5 fill-current" /> Pause Task
-                      </button>
                     </div>
                   )}
 
