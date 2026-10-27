@@ -114,6 +114,7 @@ import ClientProfileSummary from './ClientProfileSummary.jsx';
 import ClientFilesPanel from './ClientFilesPanel.jsx';
 import ClientMessagesPanel from './ClientMessagesPanel.jsx';
 import ClientReviewsPanel from './ClientReviewsPanel.jsx';
+import ClientTaskApprovalsPanel from './ClientTaskApprovalsPanel.jsx';
 import PortalFeedbackPanel from './PortalFeedbackPanel.jsx';
 import ClientCycleActivityPanel from './ClientCycleActivityPanel.jsx';
 import RetainerCategoryStats from './RetainerCategoryStats.jsx';
@@ -5985,7 +5986,21 @@ const AdminDashboard = ({
                     )}
 
                     {showClientApprovals && (
-                      <ClientReviewsPanel client={c} mode="staff" />
+                      <div className="space-y-8">
+                        <ClientTaskApprovalsPanel
+                          client={c}
+                          getBillingPeriod={getBillingPeriod}
+                          getTodoStateForCycle={getTodoStateForCycle}
+                          todoCategoryKey={todoCategoryKey}
+                          projects={projects}
+                          currentCycleStart={mStart}
+                          onOpenApproval={openTaskApprovalForItem}
+                          onResendApproval={resendTodoApprovalEmail}
+                          resendBusyKey={approvalResendBusy}
+                          currentUserEmail={user?.email || ''}
+                        />
+                        <ClientReviewsPanel client={c} mode="staff" />
+                      </div>
                     )}
 
                     {showClientFiles && (
