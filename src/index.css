@@ -386,14 +386,64 @@ body {
     max-width: 100%;
   }
 
-  /* Kiosk: reduce heavy padding on small screens */
+  /* Kiosk: reclaim horizontal space — drop nested inset on small screens */
   .ignite-kiosk-shell .p-8 {
-    padding: 1.25rem;
+    padding: 0.75rem;
+  }
+
+  .ignite-kiosk-shell .p-6 {
+    padding: 0.75rem;
+  }
+
+  .ignite-kiosk-shell .p-4 {
+    padding: 0.75rem;
+  }
+
+  .ignite-kiosk-shell .p-10 {
+    padding: 1rem;
+  }
+
+  .ignite-kiosk-shell .px-6 {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
+  .ignite-kiosk-shell .rounded-\[32px\] {
+    border-radius: 0;
+  }
+
+  .ignite-kiosk-shell .rounded-\[24px\] {
+    border-radius: 0.75rem;
   }
 
   @media (min-width: 640px) {
     .ignite-kiosk-shell .p-8 {
       padding: 2rem;
+    }
+
+    .ignite-kiosk-shell .p-6 {
+      padding: 1.5rem;
+    }
+
+    .ignite-kiosk-shell .p-4 {
+      padding: 1rem;
+    }
+
+    .ignite-kiosk-shell .p-10 {
+      padding: 2.5rem;
+    }
+
+    .ignite-kiosk-shell .px-6 {
+      padding-left: 1.5rem;
+      padding-right: 1.5rem;
+    }
+
+    .ignite-kiosk-shell .rounded-\[32px\] {
+      border-radius: 2rem;
+    }
+
+    .ignite-kiosk-shell .rounded-\[24px\] {
+      border-radius: 1.5rem;
     }
   }
 }

@@ -84,7 +84,7 @@ const KioskProjectProgressCard = ({ project, stats, className = '' }) => {
     project?.estimate?.cost ?? project?.estimatedBudget ?? 0,
   );
   return (
-    <div className={`${className} bg-white border border-slate-200 rounded-[24px] p-4`}>
+    <div className={`${className} bg-white border border-slate-200 rounded-xl sm:rounded-[24px] p-3 sm:p-4`}>
       <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
         Project Progress
       </div>
@@ -1658,18 +1658,18 @@ const EmployeeKiosk = ({
     <div className="w-full ignite-kiosk-shell">
       <div className="grid grid-cols-1 gap-4 sm:gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(400px,min(38vw,520px))] lg:items-start lg:gap-10">
         <div className="space-y-6 min-w-0 order-1 lg:col-start-1 lg:row-start-1">
-      <div className="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-x-hidden overflow-y-visible lg:min-h-0">
-        <div className="p-4 sm:p-8 text-center border-b border-slate-50 bg-slate-50/30">
-          <div className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mb-3">
+      <div className="bg-white rounded-xl sm:rounded-2xl shadow-xl border border-slate-100 overflow-x-hidden overflow-y-visible lg:min-h-0">
+        <div className="p-3 sm:p-8 text-center border-b border-slate-50 bg-slate-50/30">
+          <div className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mb-2 sm:mb-3">
             Currently Active
           </div>
-          <h2 className="text-2xl font-black">
+          <h2 className="text-xl sm:text-2xl font-black">
             {user.displayName || user.email}
           </h2>
         </div>
 
         {activeShift && (
-          <div className="px-6 py-3 border-b border-slate-100 bg-white">
+          <div className="px-3 sm:px-6 py-2.5 sm:py-3 border-b border-slate-100 bg-white">
             <div className="flex items-center justify-center gap-3">
               <a
                 href="https://app-na3.hubspot.com/"
@@ -1727,22 +1727,22 @@ const EmployeeKiosk = ({
           </div>
         )}
 
-        <div className="p-8 bg-slate-50/50">
+        <div className="px-0 py-3 sm:p-8 bg-slate-50/50">
           {!activeShift ? (
-            <div className="space-y-4">
+            <div className="space-y-4 px-3 sm:px-0">
               <p className="text-slate-500 font-medium text-center mb-6">
                 You are currently clocked out.
               </p>
               <button
                 onClick={handleClockIn}
-                className="w-full bg-[#fd7414] hover:bg-[#e66a12] text-white p-6 rounded-[24px] font-black text-xl shadow-xl shadow-[#fd7414]/20 transition-all flex items-center justify-center gap-3"
+                className="w-full bg-[#fd7414] hover:bg-[#e66a12] text-white p-4 sm:p-6 rounded-2xl sm:rounded-[24px] font-black text-lg sm:text-xl shadow-xl shadow-[#fd7414]/20 transition-all flex items-center justify-center gap-3"
               >
                 <Play className="fill-current w-6 h-6" /> Start Your Day
               </button>
             </div>
           ) : (
-            <div className="space-y-8">
-              <div className="flex flex-col items-center">
+            <div className="space-y-5 sm:space-y-8">
+              <div className="flex flex-col items-center px-3 sm:px-0">
                 <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
                   Total Shift Time
                 </div>
@@ -1752,17 +1752,17 @@ const EmployeeKiosk = ({
               </div>
 
               {activeShift.status === 'break' ? (
-                <div className="bg-blue-50 p-10 rounded-[32px] border border-blue-200 text-center animate-in zoom-in-95 duration-500">
+                <div className="bg-blue-50 p-4 sm:p-10 rounded-none sm:rounded-[32px] border-y border-x-0 sm:border border-blue-200 text-center animate-in zoom-in-95 duration-500 mx-0">
                   <Coffee className="w-12 h-12 text-blue-500 mx-auto mb-4" />
                   <h3 className="font-black text-2xl text-slate-900 mb-2">
                     You're on a break.
                   </h3>
-                  <p className="text-slate-500 mb-8 font-medium">
+                  <p className="text-slate-500 mb-6 sm:mb-8 font-medium">
                     Your shift timer is paused. Take your time!
                   </p>
                   <button
                     onClick={handleEndBreak}
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white p-6 rounded-[32px] font-black text-xl shadow-xl shadow-blue-600/20 flex items-center justify-center gap-3 transition-all active:scale-95"
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white p-4 sm:p-6 rounded-2xl sm:rounded-[32px] font-black text-lg sm:text-xl shadow-xl shadow-blue-600/20 flex items-center justify-center gap-3 transition-all active:scale-95"
                   >
                     <Play className="w-5 h-5 fill-current" /> Resume Shift
                   </button>
@@ -1770,7 +1770,7 @@ const EmployeeKiosk = ({
               ) : (
                 <>
                   {!activeTask ? (
-                    <div className="bg-white p-6 rounded-[24px] border border-slate-200 shadow-sm space-y-4 animate-in slide-in-from-bottom-4">
+                    <div className="bg-white p-3 sm:p-6 rounded-none sm:rounded-[24px] border-y border-x-0 sm:border border-slate-200 shadow-sm space-y-4 animate-in slide-in-from-bottom-4">
                       <div className="flex items-center gap-2 mb-2 text-[#fd7414]">
                         <Activity className="w-5 h-5" />
                         <h3 className="font-black text-sm uppercase tracking-wider">
@@ -1871,7 +1871,7 @@ const EmployeeKiosk = ({
                       </button>
 
                       {selectedClientObj && selectedTodoCategoryLabel && (
-                        <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4 space-y-3">
+                        <div className="mt-4 bg-white border border-slate-200 rounded-xl sm:rounded-[24px] p-3 sm:p-4 space-y-3">
                           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
                             Company profile —{' '}
                             <button
@@ -1916,7 +1916,7 @@ const EmployeeKiosk = ({
                         selectedClientObj &&
                         selectedTodoCategoryName &&
                         currentCycleCategoryTodo && (
-                          <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
+                          <div className="mt-4 bg-white border border-slate-200 rounded-xl sm:rounded-[24px] p-3 sm:p-4">
                             <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
                               To-do — {selectedTodoCategoryLabel}
                               {currentCycleCategoryTodo.catTodo.closed && (
@@ -2157,7 +2157,7 @@ const EmployeeKiosk = ({
 
                       {/* Retainer progress (this category only) for current cycle */}
                       {retainerStats && selectedRetainerCategory && (
-                        <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
+                        <div className="mt-4 bg-white border border-slate-200 rounded-xl sm:rounded-[24px] p-3 sm:p-4">
                           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
                             Retainer Progress
                           </div>
@@ -2189,7 +2189,7 @@ const EmployeeKiosk = ({
 
                       {/* Log Social Ad Spend (kiosk-only when Social Ad Budget selected) */}
                       {isSocialAdCategory && selectedClientObj && onLogSocialAdSpend && (
-                        <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
+                        <div className="mt-4 bg-white border border-slate-200 rounded-xl sm:rounded-[24px] p-3 sm:p-4">
                           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
                             Log Social Ad Spend
                           </div>
@@ -2256,21 +2256,21 @@ const EmployeeKiosk = ({
                       )}
                     </div>
                   ) : (
-                    <div className="bg-orange-50 p-8 rounded-[32px] border border-orange-200 text-left animate-in zoom-in-95 duration-300 min-w-0 max-w-full">
-                      <div className="flex justify-between items-start mb-6 gap-3 min-w-0">
-                        <div className="flex items-start gap-3 min-w-0">
+                    <div className="bg-orange-50 px-3.5 py-4 sm:p-8 rounded-none sm:rounded-[32px] border-y border-x-0 sm:border border-orange-200 text-left animate-in zoom-in-95 duration-300 min-w-0 max-w-full">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-start mb-4 sm:mb-6 min-w-0">
+                        <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 w-full">
                           {selectedClientObj?.logoUrl ? (
                             <img
                               src={selectedClientObj.logoUrl}
                               alt=""
-                              className="h-12 w-12 rounded-2xl object-cover border border-orange-200 shrink-0 bg-white mt-0.5"
+                              className="h-10 w-10 sm:h-12 sm:w-12 rounded-xl sm:rounded-2xl object-cover border border-orange-200 shrink-0 bg-white mt-0.5"
                             />
                           ) : null}
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                           <button
                             type="button"
                             onClick={() => openClientPageByName(activeTask.clientName)}
-                            className="font-black text-2xl text-slate-900 break-words text-left hover:text-[#fd7414] hover:underline"
+                            className="font-black text-xl sm:text-2xl text-slate-900 break-words [overflow-wrap:anywhere] text-left hover:text-[#fd7414] hover:underline leading-snug"
                             title="Open client page"
                           >
                             {activeTask.clientName}
@@ -2282,7 +2282,7 @@ const EmployeeKiosk = ({
                           </div>
                           </div>
                         </div>
-                        <div className="flex flex-col items-end gap-2 shrink-0">
+                        <div className="flex flex-row flex-wrap items-center gap-2 sm:flex-col sm:items-end shrink-0">
                           {selectedClientObj ? (
                             <button
                               type="button"
@@ -2298,12 +2298,12 @@ const EmployeeKiosk = ({
                           </div>
                         </div>
                       </div>
-                      <div className="text-6xl font-black text-slate-900 text-center mb-8 font-mono tracking-tighter">
+                      <div className="text-5xl sm:text-6xl font-black text-slate-900 text-center mb-5 sm:mb-8 font-mono tracking-tighter">
                         {formatTime(liveTaskDuration)}
                       </div>
                       {/* Retainer progress (show first while actively working) */}
                       {retainerStats && selectedRetainerCategory && (
-                        <div className="mt-5 bg-white border border-slate-200 rounded-[24px] p-4">
+                        <div className="mt-5 bg-white border border-slate-200 rounded-xl sm:rounded-[24px] p-3 sm:p-4">
                           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
                             Retainer Progress
                           </div>
@@ -2354,7 +2354,7 @@ const EmployeeKiosk = ({
                         selectedClientObj &&
                         selectedTodoCategoryName &&
                         currentCycleCategoryTodo && (
-                          <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4">
+                          <div className="mt-4 bg-white border border-slate-200 rounded-xl sm:rounded-[24px] p-3 sm:p-4">
                             <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
                               To-do — {selectedTodoCategoryLabel}
                               {currentCycleCategoryTodo.catTodo.closed && (
@@ -2594,7 +2594,7 @@ const EmployeeKiosk = ({
                         )}
 
                       {selectedClientObj && selectedRetainerCategory && (
-                        <div className="mt-5 bg-white border border-slate-200 rounded-[24px] p-4">
+                        <div className="mt-5 bg-white border border-slate-200 rounded-xl sm:rounded-[24px] p-3 sm:p-4">
                           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
                             Notes for{' '}
                             <button
@@ -2629,7 +2629,7 @@ const EmployeeKiosk = ({
                       )}
 
                       {selectedClientObj && selectedRetainerCategory && onLogClientExpense && (
-                        <div className="mt-5 bg-white border border-slate-200 rounded-[24px] p-4">
+                        <div className="mt-5 bg-white border border-slate-200 rounded-xl sm:rounded-[24px] p-3 sm:p-4">
                           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
                             Log Client Expense
                           </div>
@@ -2820,7 +2820,7 @@ const EmployeeKiosk = ({
 
                   {taskLogs.filter((t) => t.shiftId === activeShift.id && t.status === 'completed').length >
                     0 && (
-                    <div className="bg-transparent space-y-3 pt-4">
+                    <div className="bg-transparent space-y-3 pt-4 px-3 sm:px-0">
                       <div className="flex items-center gap-2 mb-4 px-2">
                         <History className="w-4 h-4 text-slate-400" />
                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
@@ -2836,7 +2836,7 @@ const EmployeeKiosk = ({
                         .map((task) => (
                           <div
                             key={task.id}
-                            className="bg-white rounded-2xl p-4 flex justify-between items-center border border-slate-200 shadow-sm group"
+                            className="bg-white rounded-2xl p-3 sm:p-4 flex justify-between items-center border border-slate-200 shadow-sm group"
                           >
                             <div>
                               <button
@@ -2864,7 +2864,7 @@ const EmployeeKiosk = ({
                     </div>
                   )}
 
-                  <div className="pt-6 border-t border-slate-100 flex flex-col sm:flex-row justify-center gap-4">
+                  <div className="pt-6 border-t border-slate-100 flex flex-col sm:flex-row justify-center gap-4 px-3 sm:px-0">
                     <button
                       onClick={handleTakeBreak}
                       className="text-slate-500 hover:text-[#fd7414] font-bold p-3 transition-all text-sm uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 bg-slate-100 hover:bg-orange-50 rounded-xl"
@@ -2972,7 +2972,7 @@ const EmployeeKiosk = ({
       </div>
         </div>
 
-          <section className="order-3 lg:col-start-1 lg:row-start-2 rounded-2xl border border-zinc-700 bg-zinc-900 p-5 shadow-md space-y-3 min-w-0">
+          <section className="order-3 lg:col-start-1 lg:row-start-2 rounded-xl sm:rounded-2xl border border-zinc-700 bg-zinc-900 p-3 sm:p-5 shadow-md space-y-3 min-w-0">
             <div className="text-[10px] font-black text-zinc-300 uppercase tracking-widest">
               Retainers ending soon
             </div>
@@ -3120,7 +3120,7 @@ const EmployeeKiosk = ({
             </div>
           </section>
 
-        <aside className="order-2 lg:col-start-2 lg:row-start-1 lg:row-span-2 rounded-2xl border border-slate-100 bg-white p-5 shadow-lg min-w-0 w-full flex flex-col gap-3">
+        <aside className="order-2 lg:col-start-2 lg:row-start-1 lg:row-span-2 rounded-xl sm:rounded-2xl border border-slate-100 bg-white p-3 sm:p-5 shadow-lg min-w-0 w-full flex flex-col gap-3">
           <KioskNotificationsPanel
             notifications={notifications}
             onDismiss={dismissNotification}
