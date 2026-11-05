@@ -22,6 +22,8 @@ describe('listMcpTools', () => {
     const names = tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
       'add_subtask',
+      'add_todo_comment',
+      'complete_todo',
       'create_client_note',
       'create_todo',
       'get_client',
@@ -59,7 +61,7 @@ describe('dispatchMcpJsonRpc', () => {
       method: 'tools/list',
     });
     assert.equal(res.status, 200);
-    assert.equal(res.body.result.tools.length, 13);
+    assert.equal(res.body.result.tools.length, 15);
   });
 
   it('returns tool error for unknown tool', async () => {
@@ -114,5 +116,33 @@ describe('dispatchMcpJsonRpc', () => {
     });
     assert.equal(res.body.result.isError, true);
     assert.match(res.body.result.content[0].text, /url|driveFileId/i);
+  });
+
+  it('requires todoId+text for add_todo_comment', async () => {
+    const res = await dispatchMcpJsonRpc({
+      jsonrpc: '2.0',
+      id: 6,
+      method: 'tools/call',
+      params: {
+        name: 'add_todo_comment',
+        arguments: { clientId: 'x', text: '' },
+      },
+    });
+    assert.equal(res.body.result.isError, true);
+    assert.match(res.body.result.content[0].text, /todoId|text/i);
+  });
+
+  it('requires todoId for complete_todo', async () => {
+    const res = await dispatchMcpJsonRpc({
+      jsonrpc: '2.0',
+      id: 7,
+      method: 'tools/call',
+      params: {
+        name: 'complete_todo',
+        arguments: { clientId: 'x' },
+      },
+    });
+    assert.equal(res.body.result.isError, true);
+    assert.match(res.body.result.content[0].text, /todoId/i);
   });
 });
