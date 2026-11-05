@@ -1,17 +1,21 @@
 /**
- * Stateless MCP JSON-RPC (Streamable HTTP) — tools only, read-only.
+ * Stateless MCP JSON-RPC (Streamable HTTP) — tools for staff CRM access.
  */
 
 export const MCP_SERVER_INFO = {
   name: 'ignite-flame',
-  version: '1.0.0',
+  version: '1.2.0',
 };
 
 export const MCP_INSTRUCTIONS = [
-  'Ignite Flame CRM — staff-only, read-only access to clients, retainers, todos, and internal notes.',
+  'Ignite Flame CRM — staff-only access to clients, retainers, todos, notes, time, expenses, and document links.',
   'Prefer search_clients before get_client when you only have a partial name.',
-  'Use get_client_notes for staff internal notes (not visible in the client portal).',
-  'Never invent client IDs; use search/get results.',
+  'Use get_client_notes / create_client_note for staff internal notes (not in the client portal).',
+  'Use create_todo (optional subtasks + dueDate) and add_subtask / update_todo_due_date for task planning from conversations.',
+  'Use log_time for completed manual time entries (max 12h). Use log_expense for CAD/USD costs. Use log_perplexity_credits for Computer credit usage (stored as expenses).',
+  'Use link_document to attach a Drive file id/URL or bookmark a URL on the client (no raw file upload).',
+  'Retainer category is required for time/expense/todo writes — match an enabled category from get_client.',
+  'Never invent client IDs; never delete data.',
 ].join(' ');
 
 const TOOLS = [
@@ -87,6 +91,290 @@ const TOOLS = [
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   },
+  {
+    name: 'create_client_note',
+    description:
+      'Create or update a staff-only internal note for a client (not visible in the client portal). Defaults to appending to general notes. Use scope=cycle with a retainer category for cycle notes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        clientId: { type: 'string' },
+        name: { type: 'string', description: 'Client name if id unknown' },
+        text: { type: 'string', description: 'Note body to write' },
+        scope: {
+          type: 'string',
+          description: '"general" (default) or "cycle"',
+        },
+        mode: {
+          type: 'string',
+          description: '"append" (default) or "replace"',
+        },
+        category: {
+          type: 'string',
+          description: 'Retainer category label (required when scope=cycle)',
+        },
+        categoryKey: {
+          type: 'string',
+          description: 'Retainer category key (alternative to category)',
+        },
+        cycleStart: {
+          type: 'number',
+          description: 'Billing cycle start ms (defaults to current cycle)',
+        },
+        actorEmail: {
+          type: 'string',
+          description: 'Optional attribution email for activity log',
+        },
+      },
+      required: ['text'],
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+      idempotentHint: false,
+    },
+  },
+  {
+    name: 'create_todo',
+    description:
+      'Create an open staff task on a client’s current (or specified) billing cycle under an enabled retainer category. Not a portal request — appears immediately as a normal CRM task.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        clientId: { type: 'string' },
+        name: { type: 'string', description: 'Client name if id unknown' },
+        text: { type: 'string', description: 'Task title/body' },
+        category: {
+          type: 'string',
+          description: 'Enabled retainer category label (e.g. SEO)',
+        },
+        categoryKey: {
+          type: 'string',
+          description: 'Category key if label unknown',
+        },
+        cycleStart: {
+          type: 'number',
+          description: 'Billing cycle start ms (defaults to current)',
+        },
+        assigneeEmails: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional staff emails to assign',
+        },
+        dueDate: {
+          type: 'string',
+          description: 'Optional due date (ISO string or ms)',
+        },
+        estimatedHours: {
+          type: 'number',
+          description: 'Optional estimate in hours',
+        },
+        pinned: {
+          type: 'boolean',
+          description: 'Pin the task (default false)',
+        },
+        subtasks: {
+          type: 'array',
+          description:
+            'Optional subtasks to create with the parent (each: text, dueDate?, assigneeEmails?)',
+          items: {
+            type: 'object',
+            properties: {
+              text: { type: 'string' },
+              dueDate: { type: 'string' },
+              assigneeEmails: { type: 'array', items: { type: 'string' } },
+              estimatedHours: { type: 'number' },
+            },
+          },
+        },
+        actorEmail: {
+          type: 'string',
+          description: 'Optional attribution email for activity log',
+        },
+      },
+      required: ['text'],
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+      idempotentHint: false,
+    },
+  },
+  {
+    name: 'add_subtask',
+    description:
+      'Add a subtask (with optional due date) under an existing open todo.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        clientId: { type: 'string' },
+        name: { type: 'string' },
+        todoId: { type: 'string', description: 'Parent task id' },
+        text: { type: 'string' },
+        dueDate: { type: 'string' },
+        assigneeEmails: { type: 'array', items: { type: 'string' } },
+        estimatedHours: { type: 'number' },
+        categoryKey: { type: 'string' },
+        cycleStart: { type: 'number' },
+        actorEmail: { type: 'string' },
+      },
+      required: ['todoId', 'text'],
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+      idempotentHint: false,
+    },
+  },
+  {
+    name: 'update_todo_due_date',
+    description:
+      'Set or clear a todo due date (subtask dues are clamped if the parent moves earlier).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        clientId: { type: 'string' },
+        name: { type: 'string' },
+        todoId: { type: 'string' },
+        dueDate: {
+          type: 'string',
+          description: 'ISO date/ms, or null/"clear" to remove',
+        },
+        categoryKey: { type: 'string' },
+        cycleStart: { type: 'number' },
+        actorEmail: { type: 'string' },
+      },
+      required: ['todoId'],
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+      idempotentHint: false,
+    },
+  },
+  {
+    name: 'log_time',
+    description:
+      'Log completed manual time against a client retainer category (creates timesheet + taskLog). Max 12 hours per entry.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        clientId: { type: 'string' },
+        name: { type: 'string' },
+        category: { type: 'string' },
+        categoryKey: { type: 'string' },
+        hours: { type: 'number' },
+        minutes: { type: 'number' },
+        durationMinutes: { type: 'number' },
+        startTime: { type: 'string', description: 'ISO start (optional)' },
+        endTime: { type: 'string', description: 'ISO end (optional)' },
+        date: { type: 'string', description: 'Work date / start if startTime omitted' },
+        notes: { type: 'string' },
+        employeeName: { type: 'string' },
+        actorEmail: { type: 'string' },
+      },
+      required: [],
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+      idempotentHint: false,
+    },
+  },
+  {
+    name: 'log_expense',
+    description:
+      'Log a client expense against a retainer category (CAD by default; optional USD/EUR/GBP). Applies 1.3 markup for hour categories unless applyMarkup=false.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        clientId: { type: 'string' },
+        name: { type: 'string' },
+        category: { type: 'string' },
+        categoryKey: { type: 'string' },
+        amount: { type: 'number' },
+        currency: { type: 'string', description: 'CAD (default), USD, EUR, GBP' },
+        description: { type: 'string' },
+        date: { type: 'string' },
+        applyMarkup: { type: 'boolean' },
+        credits: {
+          type: 'number',
+          description: 'If set instead of amount, logs as Perplexity credits',
+        },
+        actorEmail: { type: 'string' },
+      },
+      required: [],
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+      idempotentHint: false,
+    },
+  },
+  {
+    name: 'log_perplexity_credits',
+    description:
+      'Log Perplexity Computer credits used on a client (1 credit = $0.01 USD → CAD + markup). Stored as an expense with originalCurrency PERPLEXITY_CREDITS.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        clientId: { type: 'string' },
+        name: { type: 'string' },
+        category: { type: 'string' },
+        categoryKey: { type: 'string' },
+        credits: { type: 'number', description: 'Number of Computer credits used' },
+        description: { type: 'string' },
+        date: { type: 'string' },
+        applyMarkup: { type: 'boolean' },
+        actorEmail: { type: 'string' },
+      },
+      required: ['credits'],
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+      idempotentHint: false,
+    },
+  },
+  {
+    name: 'link_document',
+    description:
+      'Link a Google Drive file (id or URL) or arbitrary document URL onto a client (and optionally a todo). Does not upload file bytes — paste a Drive link from the conversation.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        clientId: { type: 'string' },
+        name: { type: 'string' },
+        url: { type: 'string' },
+        driveFileId: { type: 'string' },
+        label: {
+          type: 'string',
+          description: 'Document display name (not the client name)',
+        },
+        fileName: { type: 'string', description: 'Alias for label' },
+        mimeType: { type: 'string' },
+        sizeBytes: { type: 'number' },
+        todoId: { type: 'string', description: 'Optional task to attach to' },
+        categoryKey: { type: 'string' },
+        cycleStart: { type: 'number' },
+        actorEmail: { type: 'string' },
+      },
+      required: [],
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+      idempotentHint: false,
+    },
+  },
 ];
 
 function textResult(payload, isError = false) {
@@ -126,18 +414,71 @@ export async function callMcpTool(name, args = {}) {
     throw err;
   }
 
-  const knowledge = await import('./mcpClientKnowledge.mjs');
+  const needsCategory = new Set([
+    'create_todo',
+    'log_time',
+    'log_expense',
+    'log_perplexity_credits',
+  ]);
+  if (needsCategory.has(tool) && !args.category && !args.categoryKey) {
+    const err = new Error(
+      'category or categoryKey is required. Use get_client / get_retainer_usage for enabled categories.',
+    );
+    err.code = 'bad_request';
+    throw err;
+  }
+  if (tool === 'create_client_note' && !String(args.text || '').trim()) {
+    const err = new Error('text is required for create_client_note.');
+    err.code = 'bad_request';
+    throw err;
+  }
+  if (tool === 'add_subtask' && (!args.todoId || !String(args.text || '').trim())) {
+    const err = new Error('todoId and text are required for add_subtask.');
+    err.code = 'bad_request';
+    throw err;
+  }
+  if (tool === 'update_todo_due_date' && !args.todoId) {
+    const err = new Error('todoId is required for update_todo_due_date.');
+    err.code = 'bad_request';
+    throw err;
+  }
+  if (
+    tool === 'link_document' &&
+    !String(args.url || '').trim() &&
+    !String(args.driveFileId || '').trim()
+  ) {
+    const err = new Error('url or driveFileId is required for link_document.');
+    err.code = 'bad_request';
+    throw err;
+  }
+  if (tool === 'log_perplexity_credits' && !(Number(args.credits) > 0)) {
+    const err = new Error('credits must be a positive number.');
+    err.code = 'bad_request';
+    throw err;
+  }
+  if (
+    tool === 'log_expense' &&
+    !(Number(args.amount) > 0) &&
+    !(Number(args.credits) > 0)
+  ) {
+    const err = new Error('amount or credits is required for log_expense.');
+    err.code = 'bad_request';
+    throw err;
+  }
 
   switch (tool) {
     case 'search_clients': {
+      const knowledge = await import('./mcpClientKnowledge.mjs');
       const results = await knowledge.searchClients(args.query, args.limit);
       return textResult({ count: results.length, clients: results });
     }
     case 'get_client': {
+      const knowledge = await import('./mcpClientKnowledge.mjs');
       const client = await requireClient(args);
       return textResult(knowledge.sanitizeClientSummary(client));
     }
     case 'get_client_notes': {
+      const knowledge = await import('./mcpClientKnowledge.mjs');
       const client = await requireClient(args);
       const notes = await knowledge.getClientNotes(client.id);
       return textResult({
@@ -147,6 +488,7 @@ export async function callMcpTool(name, args = {}) {
       });
     }
     case 'list_open_todos': {
+      const knowledge = await import('./mcpClientKnowledge.mjs');
       const client = await requireClient(args);
       const data = await knowledge.listOpenTodos(client, args.limit);
       return textResult({
@@ -156,9 +498,58 @@ export async function callMcpTool(name, args = {}) {
       });
     }
     case 'get_retainer_usage': {
+      const knowledge = await import('./mcpClientKnowledge.mjs');
       const client = await requireClient(args);
       const usage = await knowledge.getRetainerUsage(client);
       return textResult(usage);
+    }
+    case 'create_client_note': {
+      const client = await requireClient(args);
+      const writes = await import('./mcpClientWrites.mjs');
+      const result = await writes.createClientNote(client, args);
+      return textResult(result);
+    }
+    case 'create_todo': {
+      const client = await requireClient(args);
+      const writes = await import('./mcpClientWrites.mjs');
+      const result = await writes.createTodo(client, args);
+      return textResult(result);
+    }
+    case 'add_subtask': {
+      const client = await requireClient(args);
+      const writes = await import('./mcpClientWrites.mjs');
+      const result = await writes.addSubtask(client, args);
+      return textResult(result);
+    }
+    case 'update_todo_due_date': {
+      const client = await requireClient(args);
+      const writes = await import('./mcpClientWrites.mjs');
+      const result = await writes.updateTodoDueDate(client, args);
+      return textResult(result);
+    }
+    case 'log_time': {
+      const client = await requireClient(args);
+      const writes = await import('./mcpClientWrites.mjs');
+      const result = await writes.logTime(client, args);
+      return textResult(result);
+    }
+    case 'log_expense': {
+      const client = await requireClient(args);
+      const writes = await import('./mcpClientWrites.mjs');
+      const result = await writes.logExpense(client, args);
+      return textResult(result);
+    }
+    case 'log_perplexity_credits': {
+      const client = await requireClient(args);
+      const writes = await import('./mcpClientWrites.mjs');
+      const result = await writes.logPerplexityCredits(client, args);
+      return textResult(result);
+    }
+    case 'link_document': {
+      const client = await requireClient(args);
+      const writes = await import('./mcpClientWrites.mjs');
+      const result = await writes.linkDocument(client, args);
+      return textResult(result);
     }
     default: {
       const err = new Error(`Unknown tool: ${tool}`);

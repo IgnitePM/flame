@@ -27,6 +27,7 @@
 import { getApps, initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
 import {
+  addDoc,
   collection,
   deleteDoc,
   doc,
@@ -97,6 +98,20 @@ export async function fetchDoc(db, path) {
 /** Merge-write a document by full path (e.g. digest cursor). */
 export async function mergeDoc(db, path, data) {
   await setDoc(doc(db, path), data, { merge: true });
+}
+
+/**
+ * Create a new document in a collection (auto id).
+ * `collectionName` is top-level only (e.g. 'taskLogs', 'expenses').
+ * Returns the new document id.
+ */
+export async function createDoc(db, collectionName, data) {
+  const name = String(collectionName || '').trim();
+  if (!name || name.includes('/')) {
+    throw new Error('createDoc expects a top-level collection name.');
+  }
+  const ref = await addDoc(collection(db, name), data);
+  return ref.id;
 }
 
 /** Delete a document by full path. */
