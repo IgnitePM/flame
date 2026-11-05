@@ -137,6 +137,17 @@ function collectOpenTodoRows(client, { limit = MAX_TODOS } = {}) {
             text: clip(c.text, MAX_COMMENT_CHARS),
             at: c.createdAt || null,
           }));
+        const subtasks = (Array.isArray(item.subtasks) ? item.subtasks : [])
+          .slice(0, 30)
+          .map((s) => ({
+            id: s.id,
+            text: String(s.text || '').trim(),
+            done: !!s.done,
+            dueDate: s.dueDate || null,
+            assignees: Array.isArray(s.assigneeEmails)
+              ? s.assigneeEmails.filter(Boolean).slice(0, 10)
+              : [],
+          }));
         rows.push({
           cycleStart: Number(cycleKey) || cycleKey,
           categoryKey,
@@ -150,6 +161,7 @@ function collectOpenTodoRows(client, { limit = MAX_TODOS } = {}) {
           pinned: !!item.pinned,
           recurring: !!item.recurring,
           comments,
+          subtasks,
           isCurrentCycle: String(cycleKey) === String(period.start),
         });
       }

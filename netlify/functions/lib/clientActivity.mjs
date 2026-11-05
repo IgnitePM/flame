@@ -23,6 +23,8 @@ function activityTypeLabel(type) {
     review_sent: 'Approval sent',
     review_decision: 'Approval decision',
     todo_created: 'Task created',
+    time_logged: 'Time logged',
+    expense_logged: 'Expense logged',
     todo_request: 'Task request',
     todo_request_decision: 'Task request decision',
     todo_approval_sent: 'Task sent for approval',

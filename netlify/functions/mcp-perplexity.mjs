@@ -3,7 +3,8 @@ import { dispatchMcpJsonRpc, MCP_SERVER_INFO } from './lib/mcpProtocol.mjs';
 
 /**
  * Staff-only Perplexity Computer MCP connector.
- * Read tools + create_client_note / create_todo (no deletes).
+ * Reads + writes: notes, todos/subtasks, time, expenses/credits, document links.
+ * No deletes / no raw file byte uploads.
  *
  * URL (production):
  *   https://<your-site>/.netlify/functions/mcp-perplexity
@@ -81,9 +82,24 @@ export default async (req) => {
           'get_retainer_usage',
           'create_client_note',
           'create_todo',
+          'add_subtask',
+          'update_todo_due_date',
+          'log_time',
+          'log_expense',
+          'log_perplexity_credits',
+          'link_document',
         ],
         readOnly: false,
-        canWrite: ['create_client_note', 'create_todo'],
+        canWrite: [
+          'create_client_note',
+          'create_todo',
+          'add_subtask',
+          'update_todo_due_date',
+          'log_time',
+          'log_expense',
+          'log_perplexity_credits',
+          'link_document',
+        ],
       }),
       { status: 200, headers: baseHeaders },
     );

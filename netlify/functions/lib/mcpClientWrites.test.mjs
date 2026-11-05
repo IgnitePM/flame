@@ -1,10 +1,15 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildStaffSubtask,
   buildStaffTodoItem,
+  computeExpenseAmounts,
+  extractDriveFileId,
+  findTodoInClient,
   mergeNoteText,
   normalizeAssigneeEmails,
   parseDueDateMs,
+  resolveDurationMs,
   resolveMcpActorEmail,
   resolveRetainerCategory,
   todoCategoryKey,
@@ -56,6 +61,19 @@ describe('buildStaffTodoItem', () => {
   });
 });
 
+describe('buildStaffSubtask', () => {
+  it('clamps subtask due to parent due', () => {
+    const parent = { dueDate: Date.parse('2026-06-01T12:00:00Z') };
+    const sub = buildStaffSubtask(
+      parent,
+      { text: 'Draft', dueDate: '2026-12-01' },
+      42,
+    );
+    assert.equal(sub.text, 'Draft');
+    assert.equal(sub.dueDate, parent.dueDate);
+  });
+});
+
 describe('resolveRetainerCategory', () => {
   const client = {
     retainers: { SEO: 10, 'Social Media': 5 },
@@ -75,6 +93,60 @@ describe('resolveRetainerCategory', () => {
       () => resolveRetainerCategory(client, { category: 'Ads' }),
       /Unknown category/,
     );
+  });
+});
+
+describe('resolveDurationMs / expenses / drive', () => {
+  it('resolves hours into a window', () => {
+    const { durationMs } = resolveDurationMs({ hours: 1.5 });
+    assert.equal(durationMs, 1.5 * 3600000);
+  });
+
+  it('rejects over-long time entries', () => {
+    assert.throws(() => resolveDurationMs({ hours: 13 }), /12 hours/i);
+  });
+
+  it('computes perplexity credit expenses', () => {
+    const computed = computeExpenseAmounts({
+      credits: 100,
+      categoryLabel: 'SEO',
+      client: { retainers: { SEO: 10 }, hourlyRate: 150 },
+      fxToCad: { CAD: 1, USD: 1.36, EUR: 1.47, GBP: 1.72 },
+    });
+    assert.equal(computed.isPerplexity, true);
+    assert.equal(computed.perplexityCredits, 100);
+    assert.ok(computed.finalCost > computed.rawAmount);
+  });
+
+  it('computes CAD expenses with markup', () => {
+    const computed = computeExpenseAmounts({
+      amount: 10,
+      currency: 'CAD',
+      categoryLabel: 'SEO',
+      client: { retainers: { SEO: 10 }, hourlyRate: 100 },
+    });
+    assert.equal(computed.rawAmount, 10);
+    assert.equal(computed.finalCost, 13);
+  });
+
+  it('extracts Drive file ids from URLs', () => {
+    assert.equal(
+      extractDriveFileId('https://drive.google.com/file/d/abc123XYZ_/view'),
+      'abc123XYZ_',
+    );
+  });
+
+  it('finds todos in nested cycles', () => {
+    const client = {
+      todoCycles: {
+        '1': {
+          SEO: { items: [{ id: 'todo_a', text: 'A', subtasks: [] }] },
+        },
+      },
+    };
+    const found = findTodoInClient(client, 'todo_a');
+    assert.equal(found.categoryKey, 'SEO');
+    assert.equal(found.item.text, 'A');
   });
 });
 
