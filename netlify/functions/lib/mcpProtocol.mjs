@@ -1,17 +1,20 @@
 /**
- * Stateless MCP JSON-RPC (Streamable HTTP) — tools only, read-only.
+ * Stateless MCP JSON-RPC (Streamable HTTP) — tools for staff CRM access.
  */
 
 export const MCP_SERVER_INFO = {
   name: 'ignite-flame',
-  version: '1.0.0',
+  version: '1.1.0',
 };
 
 export const MCP_INSTRUCTIONS = [
-  'Ignite Flame CRM — staff-only, read-only access to clients, retainers, todos, and internal notes.',
+  'Ignite Flame CRM — staff-only access to clients, retainers, todos, and internal notes.',
   'Prefer search_clients before get_client when you only have a partial name.',
   'Use get_client_notes for staff internal notes (not visible in the client portal).',
+  'Use create_client_note to append staff notes (default) or replace with mode=replace.',
+  'Use create_todo to add an open staff task on the current billing cycle; category must match an enabled retainer.',
   'Never invent client IDs; use search/get results.',
+  'Do not delete data or invent secrets; write tools only create notes and tasks.',
 ].join(' ');
 
 const TOOLS = [
@@ -87,6 +90,103 @@ const TOOLS = [
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   },
+  {
+    name: 'create_client_note',
+    description:
+      'Create or update a staff-only internal note for a client (not visible in the client portal). Defaults to appending to general notes. Use scope=cycle with a retainer category for cycle notes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        clientId: { type: 'string' },
+        name: { type: 'string', description: 'Client name if id unknown' },
+        text: { type: 'string', description: 'Note body to write' },
+        scope: {
+          type: 'string',
+          description: '"general" (default) or "cycle"',
+        },
+        mode: {
+          type: 'string',
+          description: '"append" (default) or "replace"',
+        },
+        category: {
+          type: 'string',
+          description: 'Retainer category label (required when scope=cycle)',
+        },
+        categoryKey: {
+          type: 'string',
+          description: 'Retainer category key (alternative to category)',
+        },
+        cycleStart: {
+          type: 'number',
+          description: 'Billing cycle start ms (defaults to current cycle)',
+        },
+        actorEmail: {
+          type: 'string',
+          description: 'Optional attribution email for activity log',
+        },
+      },
+      required: ['text'],
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+      idempotentHint: false,
+    },
+  },
+  {
+    name: 'create_todo',
+    description:
+      'Create an open staff task on a client’s current (or specified) billing cycle under an enabled retainer category. Not a portal request — appears immediately as a normal CRM task.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        clientId: { type: 'string' },
+        name: { type: 'string', description: 'Client name if id unknown' },
+        text: { type: 'string', description: 'Task title/body' },
+        category: {
+          type: 'string',
+          description: 'Enabled retainer category label (e.g. SEO)',
+        },
+        categoryKey: {
+          type: 'string',
+          description: 'Category key if label unknown',
+        },
+        cycleStart: {
+          type: 'number',
+          description: 'Billing cycle start ms (defaults to current)',
+        },
+        assigneeEmails: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional staff emails to assign',
+        },
+        dueDate: {
+          type: 'string',
+          description: 'Optional due date (ISO string or ms)',
+        },
+        estimatedHours: {
+          type: 'number',
+          description: 'Optional estimate in hours',
+        },
+        pinned: {
+          type: 'boolean',
+          description: 'Pin the task (default false)',
+        },
+        actorEmail: {
+          type: 'string',
+          description: 'Optional attribution email for activity log',
+        },
+      },
+      required: ['text'],
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+      idempotentHint: false,
+    },
+  },
 ];
 
 function textResult(payload, isError = false) {
@@ -126,18 +226,32 @@ export async function callMcpTool(name, args = {}) {
     throw err;
   }
 
-  const knowledge = await import('./mcpClientKnowledge.mjs');
+  if (tool === 'create_todo' && !args.category && !args.categoryKey) {
+    const err = new Error(
+      'category or categoryKey is required. Use get_client / get_retainer_usage for enabled categories.',
+    );
+    err.code = 'bad_request';
+    throw err;
+  }
+  if (tool === 'create_client_note' && !String(args.text || '').trim()) {
+    const err = new Error('text is required for create_client_note.');
+    err.code = 'bad_request';
+    throw err;
+  }
 
   switch (tool) {
     case 'search_clients': {
+      const knowledge = await import('./mcpClientKnowledge.mjs');
       const results = await knowledge.searchClients(args.query, args.limit);
       return textResult({ count: results.length, clients: results });
     }
     case 'get_client': {
+      const knowledge = await import('./mcpClientKnowledge.mjs');
       const client = await requireClient(args);
       return textResult(knowledge.sanitizeClientSummary(client));
     }
     case 'get_client_notes': {
+      const knowledge = await import('./mcpClientKnowledge.mjs');
       const client = await requireClient(args);
       const notes = await knowledge.getClientNotes(client.id);
       return textResult({
@@ -147,6 +261,7 @@ export async function callMcpTool(name, args = {}) {
       });
     }
     case 'list_open_todos': {
+      const knowledge = await import('./mcpClientKnowledge.mjs');
       const client = await requireClient(args);
       const data = await knowledge.listOpenTodos(client, args.limit);
       return textResult({
@@ -156,9 +271,22 @@ export async function callMcpTool(name, args = {}) {
       });
     }
     case 'get_retainer_usage': {
+      const knowledge = await import('./mcpClientKnowledge.mjs');
       const client = await requireClient(args);
       const usage = await knowledge.getRetainerUsage(client);
       return textResult(usage);
+    }
+    case 'create_client_note': {
+      const client = await requireClient(args);
+      const writes = await import('./mcpClientWrites.mjs');
+      const result = await writes.createClientNote(client, args);
+      return textResult(result);
+    }
+    case 'create_todo': {
+      const client = await requireClient(args);
+      const writes = await import('./mcpClientWrites.mjs');
+      const result = await writes.createTodo(client, args);
+      return textResult(result);
     }
     default: {
       const err = new Error(`Unknown tool: ${tool}`);

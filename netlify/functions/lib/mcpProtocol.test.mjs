@@ -12,23 +12,27 @@ describe('handleInitialize', () => {
     assert.equal(result.protocolVersion, '2025-03-26');
     assert.ok(result.capabilities.tools);
     assert.equal(result.serverInfo.name, 'ignite-flame');
+    assert.match(result.instructions, /create_todo/i);
   });
 });
 
 describe('listMcpTools', () => {
-  it('exposes the read-only tool set', () => {
+  it('exposes read + write tools', () => {
     const { tools } = listMcpTools();
     const names = tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
+      'create_client_note',
+      'create_todo',
       'get_client',
       'get_client_notes',
       'get_retainer_usage',
       'list_open_todos',
       'search_clients',
     ]);
-    for (const t of tools) {
-      assert.equal(t.annotations.readOnlyHint, true);
-    }
+    const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
+    assert.equal(byName.search_clients.annotations.readOnlyHint, true);
+    assert.equal(byName.create_todo.annotations.readOnlyHint, false);
+    assert.equal(byName.create_client_note.annotations.readOnlyHint, false);
   });
 });
 
@@ -48,7 +52,7 @@ describe('dispatchMcpJsonRpc', () => {
       method: 'tools/list',
     });
     assert.equal(res.status, 200);
-    assert.equal(res.body.result.tools.length, 5);
+    assert.equal(res.body.result.tools.length, 7);
   });
 
   it('returns tool error for unknown tool', async () => {
@@ -60,5 +64,20 @@ describe('dispatchMcpJsonRpc', () => {
     });
     assert.equal(res.status, 200);
     assert.equal(res.body.result.isError, true);
+  });
+
+  it('requires category for create_todo before Firestore write', async () => {
+    const res = await dispatchMcpJsonRpc({
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'tools/call',
+      params: {
+        name: 'create_todo',
+        arguments: { clientId: 'missing', text: 'Do thing' },
+      },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.result.isError, true);
+    assert.match(res.body.result.content[0].text, /category/i);
   });
 });

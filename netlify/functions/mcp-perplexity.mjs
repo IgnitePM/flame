@@ -2,7 +2,8 @@ import { mcpApiKeyConfigured, verifyMcpApiKey } from './lib/mcpAuth.mjs';
 import { dispatchMcpJsonRpc, MCP_SERVER_INFO } from './lib/mcpProtocol.mjs';
 
 /**
- * Staff-only Perplexity Computer MCP connector (read-only).
+ * Staff-only Perplexity Computer MCP connector.
+ * Read tools + create_client_note / create_todo (no deletes).
  *
  * URL (production):
  *   https://<your-site>/.netlify/functions/mcp-perplexity
@@ -78,8 +79,11 @@ export default async (req) => {
           'get_client_notes',
           'list_open_todos',
           'get_retainer_usage',
+          'create_client_note',
+          'create_todo',
         ],
-        readOnly: true,
+        readOnly: false,
+        canWrite: ['create_client_note', 'create_todo'],
       }),
       { status: 200, headers: baseHeaders },
     );
