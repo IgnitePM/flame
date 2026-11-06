@@ -35,11 +35,14 @@ describe('listMcpTools', () => {
       'log_perplexity_credits',
       'log_time',
       'search_clients',
+      'update_todo',
       'update_todo_due_date',
     ]);
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
     assert.equal(byName.search_clients.annotations.readOnlyHint, true);
     assert.equal(byName.create_todo.annotations.readOnlyHint, false);
+    assert.equal(byName.update_todo.annotations.readOnlyHint, false);
+    assert.ok(byName.create_todo.inputSchema.properties.recurrenceMode);
     assert.equal(byName.log_time.annotations.readOnlyHint, false);
     assert.equal(byName.link_document.annotations.readOnlyHint, false);
   });
@@ -61,7 +64,7 @@ describe('dispatchMcpJsonRpc', () => {
       method: 'tools/list',
     });
     assert.equal(res.status, 200);
-    assert.equal(res.body.result.tools.length, 15);
+    assert.equal(res.body.result.tools.length, 16);
   });
 
   it('returns tool error for unknown tool', async () => {

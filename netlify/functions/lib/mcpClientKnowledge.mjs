@@ -147,6 +147,10 @@ function collectOpenTodoRows(client, { limit = MAX_TODOS } = {}) {
             assignees: Array.isArray(s.assigneeEmails)
               ? s.assigneeEmails.filter(Boolean).slice(0, 10)
               : [],
+            recurring: !!s.recurring,
+            recurrence: s.recurrence || null,
+            estimatedHours:
+              s.estimatedHours != null ? s.estimatedHours : null,
           }));
         rows.push({
           cycleStart: Number(cycleKey) || cycleKey,
@@ -160,6 +164,16 @@ function collectOpenTodoRows(client, { limit = MAX_TODOS } = {}) {
           approvalStatus: item.approvalStatus || null,
           pinned: !!item.pinned,
           recurring: !!item.recurring,
+          recurringId: item.recurringId || null,
+          recurrence: item.recurrence || null,
+          estimatedHours:
+            item.estimatedHours != null ? item.estimatedHours : null,
+          estimatedExpense:
+            item.estimatedExpense != null ? item.estimatedExpense : null,
+          expenseMarkupPercent:
+            item.expenseMarkupPercent != null
+              ? item.expenseMarkupPercent
+              : null,
           comments,
           subtasks,
           isCurrentCycle: String(cycleKey) === String(period.start),

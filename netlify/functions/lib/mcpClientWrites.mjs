@@ -19,7 +19,13 @@ import { buildPerplexityExpenseDescription } from '../../../src/utils/perplexity
 import {
   markPrimaryTodoDoneAcrossCycles,
   recurringAnchorKey,
+  removeRecurringSeriesTemplate,
+  upsertRecurringSeriesTemplate,
 } from '../../../src/utils/recurringTodoMaterialize.js';
+import {
+  applyRecurrenceFields,
+  recurrenceModeFromStored,
+} from '../../../src/utils/todoRecurrence.js';
 import {
   appendTaskComment,
   buildTaskComment,
@@ -49,10 +55,13 @@ import {
   extractDriveFileId,
   findTodoInClient,
   mergeNoteText,
+  normalizeTodoExpenseAmount,
+  normalizeTodoMarkupPercent,
   parseDueDateMs,
   resolveDurationMs,
   resolveMcpActorEmail,
   resolveRetainerCategory,
+  resolveTodoRecurrence,
 } from './mcpClientWriteUtils.mjs';
 
 export {
@@ -256,6 +265,33 @@ export async function createClientNote(client, args = {}) {
   };
 }
 
+function todoItemPublicFields(item) {
+  return {
+    id: item.id,
+    text: item.text,
+    dueDate: item.dueDate ?? null,
+    assigneeEmails: Array.isArray(item.assigneeEmails) ? item.assigneeEmails : [],
+    estimatedHours: item.estimatedHours ?? null,
+    estimatedExpense: item.estimatedExpense ?? null,
+    expenseMarkupPercent: item.expenseMarkupPercent ?? null,
+    pinned: !!item.pinned,
+    recurring: !!item.recurring,
+    recurringId: item.recurringId || null,
+    recurrence: item.recurrence || null,
+    recurrenceMode: recurrenceModeFromStored(item.recurrence) || null,
+    subtasks: (Array.isArray(item.subtasks) ? item.subtasks : []).map((s) => ({
+      id: s.id,
+      text: s.text,
+      dueDate: s.dueDate ?? null,
+      assigneeEmails: Array.isArray(s.assigneeEmails) ? s.assigneeEmails : [],
+      estimatedHours: s.estimatedHours ?? null,
+      recurring: !!s.recurring,
+      recurrence: s.recurrence || null,
+      recurrenceMode: recurrenceModeFromStored(s.recurrence) || null,
+    })),
+  };
+}
+
 export async function createTodo(client, args = {}) {
   assertActiveClient(client);
   const { categoryLabel, categoryKey } = resolveRetainerCategory(client, args);
@@ -267,7 +303,11 @@ export async function createTodo(client, args = {}) {
     assigneeEmails: args.assigneeEmails,
     dueDate: args.dueDate,
     estimatedHours: args.estimatedHours,
+    estimatedExpense: args.estimatedExpense,
+    expenseMarkupPercent: args.expenseMarkupPercent,
     pinned: args.pinned,
+    recurrenceMode: args.recurrenceMode,
+    recurrence: args.recurrence,
   });
 
   const subtaskArgs = Array.isArray(args.subtasks) ? args.subtasks : [];
@@ -288,7 +328,11 @@ export async function createTodo(client, args = {}) {
     }
     const items = Array.isArray(catTodo.items) ? [...catTodo.items] : [];
     items.push(item);
-    cycleData[categoryKey] = { ...catTodo, closed: false, items };
+    let nextCat = { ...catTodo, closed: false, items };
+    if (item.recurring) {
+      nextCat = upsertRecurringSeriesTemplate(nextCat, item);
+    }
+    cycleData[categoryKey] = nextCat;
     cycles[cycleKey] = cycleData;
     return cycles;
   });
@@ -313,6 +357,8 @@ export async function createTodo(client, args = {}) {
         cycleStart,
         assigneeEmails: item.assigneeEmails,
         subtaskCount: item.subtasks.length,
+        recurring: !!item.recurring,
+        recurrenceMode: recurrenceModeFromStored(item.recurrence) || null,
       },
     });
   } catch (err) {
@@ -326,20 +372,7 @@ export async function createTodo(client, args = {}) {
     category: categoryLabel,
     categoryKey,
     cycleStart,
-    item: {
-      id: item.id,
-      text: item.text,
-      dueDate: item.dueDate,
-      assigneeEmails: item.assigneeEmails,
-      estimatedHours: item.estimatedHours,
-      pinned: item.pinned,
-      subtasks: item.subtasks.map((s) => ({
-        id: s.id,
-        text: s.text,
-        dueDate: s.dueDate,
-        assigneeEmails: s.assigneeEmails,
-      })),
-    },
+    item: todoItemPublicFields(item),
   };
 }
 
@@ -762,6 +795,258 @@ export async function updateTodoDueDate(client, args = {}) {
       id: s.id,
       dueDate: s.dueDate,
     })),
+  };
+}
+
+/**
+ * Update an existing open todo (or one of its subtasks) with the same options
+ * available in the CRM: text, assignees, pin, due, estimates, expense, recurrence.
+ */
+export async function updateTodo(client, args = {}) {
+  assertActiveClient(client);
+  const actorEmail = resolveMcpActorEmail(args.actorEmail);
+  const todoId = String(args.todoId || '').trim();
+  if (!todoId) {
+    const err = new Error('todoId is required for update_todo.');
+    err.code = 'bad_request';
+    throw err;
+  }
+
+  const fresh = await loadFreshClient(client);
+  const found = findTodoInClient(fresh, todoId, {
+    cycleStart: args.cycleStart,
+    categoryKey: args.categoryKey,
+  });
+  if (!found) {
+    const err = new Error('Todo not found. Pass todoId from list_open_todos / create_todo.');
+    err.code = 'not_found';
+    throw err;
+  }
+
+  const subtaskId = String(args.subtaskId || '').trim();
+  let updatedPreview = found.item;
+  let changed = [];
+
+  await mutateTodoCycles(client, (cycles) => {
+    changed = [];
+    const live = findTodoInClient(
+      { ...client, todoCycles: cycles },
+      found.item.id,
+      { cycleStart: found.cycleStart, categoryKey: found.categoryKey },
+    );
+    if (!live) {
+      const err = new Error('Todo not found during write.');
+      err.code = 'not_found';
+      throw err;
+    }
+    if (live.catTodo?.closed) {
+      const err = new Error(
+        'That category is closed for this billing cycle. Unlock it in the CRM first.',
+      );
+      err.code = 'cycle_closed';
+      throw err;
+    }
+
+    let nextItem = { ...live.item };
+    const targetIsSub = Boolean(subtaskId);
+
+    const patchTarget = (row) => {
+      let next = { ...row };
+      if (args.text != null) {
+        const body = String(args.text || '').trim();
+        if (!body) {
+          const err = new Error('text cannot be empty.');
+          err.code = 'bad_request';
+          throw err;
+        }
+        if (body.length > MAX_TODO_TEXT) {
+          const err = new Error(`Task text exceeds ${MAX_TODO_TEXT} characters.`);
+          err.code = 'too_long';
+          throw err;
+        }
+        if (body !== String(row.text || '')) {
+          next.text = body;
+          changed.push('text');
+        }
+      }
+      if (args.assigneeEmails !== undefined) {
+        const emails = Array.isArray(args.assigneeEmails)
+          ? [
+              ...new Set(
+                args.assigneeEmails
+                  .map((e) => String(e || '').trim().toLowerCase())
+                  .filter((e) => e.includes('@')),
+              ),
+            ].slice(0, 10)
+          : [];
+        next.assigneeEmails = emails;
+        changed.push('assigneeEmails');
+      }
+      if (!targetIsSub && args.pinned !== undefined) {
+        next.pinned = !!args.pinned;
+        changed.push('pinned');
+      }
+      if (args.dueDate !== undefined) {
+        const clear =
+          args.dueDate === null ||
+          args.dueDate === '' ||
+          String(args.dueDate || '').toLowerCase() === 'clear';
+        const nextDue = clear ? null : parseDueDateMs(args.dueDate);
+        if (!clear && nextDue == null) {
+          const err = new Error(
+            'dueDate must be an ISO date/ms, or null/"clear" to remove.',
+          );
+          err.code = 'bad_request';
+          throw err;
+        }
+        next.dueDate = nextDue;
+        changed.push('dueDate');
+      }
+      if (args.estimatedHours !== undefined) {
+        if (args.estimatedHours === null || args.estimatedHours === '') {
+          next.estimatedHours = null;
+        } else {
+          const n = Number(args.estimatedHours);
+          if (!Number.isFinite(n) || n < 0 || n > 500) {
+            const err = new Error(
+              'estimatedHours must be a number between 0 and 500.',
+            );
+            err.code = 'bad_request';
+            throw err;
+          }
+          next.estimatedHours = n;
+        }
+        changed.push('estimatedHours');
+      }
+      if (!targetIsSub && args.estimatedExpense !== undefined) {
+        if (args.estimatedExpense === null || args.estimatedExpense === '') {
+          next.estimatedExpense = null;
+          if (args.expenseMarkupPercent === undefined) {
+            next.expenseMarkupPercent = null;
+          }
+        } else {
+          const amount = normalizeTodoExpenseAmount(args.estimatedExpense);
+          if (amount == null) {
+            const err = new Error('estimatedExpense must be a positive number.');
+            err.code = 'bad_request';
+            throw err;
+          }
+          next.estimatedExpense = amount;
+          next.expenseMarkupPercent = normalizeTodoMarkupPercent(
+            args.expenseMarkupPercent ?? next.expenseMarkupPercent,
+          );
+        }
+        changed.push('estimatedExpense');
+      } else if (!targetIsSub && args.expenseMarkupPercent !== undefined) {
+        next.expenseMarkupPercent = normalizeTodoMarkupPercent(
+          args.expenseMarkupPercent,
+        );
+        changed.push('expenseMarkupPercent');
+      }
+
+      const wantsRecurrence =
+        args.recurrenceMode !== undefined || args.recurrence !== undefined;
+      if (wantsRecurrence) {
+        const dueForRecurrence =
+          next.dueDate != null ? next.dueDate : row.dueDate;
+        const { recurrence } = resolveTodoRecurrence(args, dueForRecurrence);
+        if (recurrence && !dueForRecurrence) {
+          const err = new Error(
+            'dueDate is required when setting a recurrence.',
+          );
+          err.code = 'bad_request';
+          throw err;
+        }
+        next = applyRecurrenceFields(next, recurrence, {
+          seriesId: next.recurringId || next.id,
+        });
+        changed.push('recurrence');
+      }
+      return next;
+    };
+
+    if (targetIsSub) {
+      const subs = Array.isArray(nextItem.subtasks) ? [...nextItem.subtasks] : [];
+      const idx = subs.findIndex((s) => s?.id === subtaskId);
+      if (idx < 0) {
+        const err = new Error('Subtask not found on that todo.');
+        err.code = 'not_found';
+        throw err;
+      }
+      subs[idx] = patchTarget(subs[idx]);
+      nextItem = clampAllSubtaskDueDatesToParent({
+        ...nextItem,
+        subtasks: subs,
+      });
+    } else {
+      nextItem = patchTarget(nextItem);
+      if (changed.includes('dueDate')) {
+        nextItem = clampAllSubtaskDueDatesToParent(nextItem);
+      }
+    }
+
+    if (!changed.length) {
+      const err = new Error(
+        'Nothing to update. Pass text, assigneeEmails, pinned, dueDate, estimatedHours, estimatedExpense, expenseMarkupPercent, and/or recurrenceMode.',
+      );
+      err.code = 'bad_request';
+      throw err;
+    }
+
+    updatedPreview = nextItem;
+    const cycleData = { ...(cycles[live.cycleKey] || {}) };
+    const catTodo = cycleData[live.categoryKey] || { closed: false, items: [] };
+    const items = (Array.isArray(catTodo.items) ? catTodo.items : []).map((i) =>
+      i.id === live.item.id ? nextItem : i,
+    );
+    let nextCat = { ...catTodo, items };
+    if (!targetIsSub) {
+      if (nextItem.recurring) {
+        nextCat = upsertRecurringSeriesTemplate(nextCat, nextItem);
+      } else if (live.item.recurring && !nextItem.recurring) {
+        nextCat = removeRecurringSeriesTemplate(
+          nextCat,
+          live.item.recurringId || live.item.id,
+        );
+      }
+    }
+    cycleData[live.categoryKey] = nextCat;
+    cycles[live.cycleKey] = cycleData;
+    return cycles;
+  });
+
+  try {
+    await writeClientActivity({
+      clientId: client.id,
+      clientName: client.name || '',
+      type: 'todo_created',
+      title: 'Task updated (Perplexity)',
+      body: clip(updatedPreview.text, 500),
+      actorEmail,
+      source: 'system',
+      meta: {
+        source: 'perplexity_mcp',
+        todoId: found.item.id,
+        subtaskId: subtaskId || null,
+        changed,
+        categoryKey: found.categoryKey,
+        cycleStart: found.cycleStart,
+      },
+    });
+  } catch (err) {
+    console.warn('[mcp-write] activity update todo:', err?.message || err);
+  }
+
+  return {
+    ok: true,
+    clientId: client.id,
+    clientName: client.name,
+    todoId: found.item.id,
+    subtaskId: subtaskId || null,
+    categoryKey: found.categoryKey,
+    cycleStart: found.cycleStart,
+    changed,
+    item: todoItemPublicFields(updatedPreview),
   };
 }
 

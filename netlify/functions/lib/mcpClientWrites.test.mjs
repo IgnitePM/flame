@@ -53,7 +53,37 @@ describe('buildStaffTodoItem', () => {
     assert.equal(item.estimatedHours, 2);
     assert.deepEqual(item.assigneeEmails, ['alex@ignite.pm']);
     assert.equal(item.requestStatus, undefined);
+    assert.equal(item.recurring, false);
+    assert.equal(item.recurrence, null);
     assert.ok(item.dueDate > 0);
+  });
+
+  it('supports monthly recurrence + expense estimate', () => {
+    const item = buildStaffTodoItem({
+      text: 'Monthly report',
+      dueDate: '2026-03-15',
+      recurrenceMode: 'monthly',
+      estimatedExpense: 50,
+      expenseMarkupPercent: 20,
+      now: 2000,
+    });
+    assert.equal(item.recurring, true);
+    assert.equal(item.recurringId, item.id);
+    assert.equal(item.recurrence?.type, 'monthly_fixed_day');
+    assert.equal(item.recurrence?.dayOfMonth, new Date(item.dueDate).getDate());
+    assert.equal(item.estimatedExpense, 50);
+    assert.equal(item.expenseMarkupPercent, 20);
+  });
+
+  it('requires dueDate for recurring tasks', () => {
+    assert.throws(
+      () =>
+        buildStaffTodoItem({
+          text: 'Recurring',
+          recurrenceMode: 'weekly',
+        }),
+      /dueDate is required/i,
+    );
   });
 
   it('rejects blank text', () => {
