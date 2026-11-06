@@ -1040,7 +1040,10 @@ export default function App() {
     });
   }, [user?.email, adminDocReady, myAdminDoc]);
 
-  const canListAllAdmins = !!user?.email && (!!myAdminDoc || user.email === 'chris@ignitepm.com');
+  const canListAllAdmins =
+    !!user?.email &&
+    ((!!myAdminDoc && myAdminDoc.disabled !== true) ||
+      user.email === 'chris@ignitepm.com');
 
   useEffect(() => {
     if (!user?.email || !canListAllAdmins) {
@@ -1160,15 +1163,21 @@ export default function App() {
     });
   }, [user?.email, adminUsersFromCollection]);
 
-  // Roles & Access Logic (own admins/{email} doc is authoritative for role)
+  // Roles & Access Logic (own admins/{email} doc is authoritative for role).
+  // Soft-disabled profiles keep the doc for historical name resolution but
+  // must not retain staff access.
   const adminRecord = user && myAdminDoc ? myAdminDoc : null;
+  const adminRecordActive =
+    !!adminRecord && adminRecord.disabled !== true;
   const isUserAdmin =
     !!user &&
-    (user.email === 'chris@ignitepm.com' || !!adminRecord);
+    (user.email === 'chris@ignitepm.com' || adminRecordActive);
   const currentUserRole =
     user?.email === 'chris@ignitepm.com'
       ? 'admin'
-      : adminRecord?.role || (isUserAdmin ? 'admin' : null);
+      : adminRecordActive
+        ? adminRecord?.role || (isUserAdmin ? 'admin' : null)
+        : null;
 
   // Seed / refresh FX when missing or older than ~36h (daily cron is primary).
   // Only billing/admin can write settings/fxRates; prefer the Netlify function.
@@ -7114,25 +7123,40 @@ export default function App() {
         </div>
       )}
 
-      {/* Delete Confirmation Custom Modal */}
+      {/* Delete / deactivate confirmation */}
       {deleteConfirm && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[110] animate-in fade-in duration-200">
           <div className="bg-white rounded-[32px] w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 p-8 text-center space-y-6">
-            <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto border border-red-100">
+            <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto border ${
+              deleteConfirm.mode === 'deactivate'
+                ? 'bg-amber-50 text-amber-600 border-amber-100'
+                : 'bg-red-50 text-red-500 border-red-100'
+            }`}>
               <Trash2 className="w-8 h-8" />
             </div>
             <div>
-              <h3 className="font-black text-xl mb-2">Confirm permanent deletion</h3>
+              <h3 className="font-black text-xl mb-2">
+                {deleteConfirm.mode === 'deactivate'
+                  ? 'Deactivate this user?'
+                  : 'Confirm permanent deletion'}
+              </h3>
               <p className="text-sm text-slate-500 font-medium">
-                Are you sure you want to delete {deleteConfirm.title}?
+                {deleteConfirm.mode === 'deactivate'
+                  ? `Turn off access for ${deleteConfirm.title}? Their notes, comments, and timesheets stay in the system under their name.`
+                  : `Are you sure you want to delete ${deleteConfirm.title}?`}
               </p>
+              {deleteConfirm.mode === 'deactivate' && (
+                <p className="text-xs text-slate-400 font-medium mt-3 leading-snug">
+                  Tip: use Transfer work first if someone else is taking over their tasks and clients.
+                </p>
+              )}
               {deleteConfirm.collection === 'clients' && (
                 <p className="text-sm text-red-600 font-bold mt-3 leading-snug">
                   This permanently removes the client and all references in this app.
                   Only proceed if you are absolutely sure.
                 </p>
               )}
-              {deleteConfirm.collection !== 'clients' && (
+              {deleteConfirm.collection !== 'clients' && deleteConfirm.mode !== 'deactivate' && (
                 <p className="text-xs text-slate-400 font-medium mt-2">
                   This action cannot be undone.
                 </p>
@@ -7146,19 +7170,52 @@ export default function App() {
                   const ids = Array.isArray(deleteConfirm.ids)
                     ? deleteConfirm.ids
                     : [deleteConfirm.id].filter(Boolean);
-                  await Promise.all(
-                    ids.map((id) =>
-                      deleteDoc(doc(db, deleteConfirm.collection, id)).catch(() => {})
-                    )
-                  );
+                  if (deleteConfirm.mode === 'deactivate' && deleteConfirm.collection === 'admins') {
+                    const now = Date.now();
+                    await Promise.all(
+                      ids.map((id) =>
+                        updateDoc(doc(db, 'admins', id), {
+                          disabled: true,
+                          disabledAt: now,
+                          updatedAt: now,
+                        }).catch(() => {}),
+                      ),
+                    );
+                    if (deleteConfirm.email) {
+                      await setDoc(
+                        doc(db, 'admins', String(deleteConfirm.email).toLowerCase()),
+                        {
+                          email: String(deleteConfirm.email).toLowerCase(),
+                          disabled: true,
+                          disabledAt: now,
+                          updatedAt: now,
+                        },
+                        { merge: true },
+                      ).catch(() => {});
+                    }
+                    logAudit?.({
+                      action: 'staff_deactivate',
+                      email: deleteConfirm.email || ids[0],
+                    });
+                  } else {
+                    await Promise.all(
+                      ids.map((id) =>
+                        deleteDoc(doc(db, deleteConfirm.collection, id)).catch(() => {})
+                      )
+                    );
+                  }
                   if (deleteConfirm.collection === 'clients') {
                     setEditingClient(null);
                   }
                   setDeleteConfirm(null);
                 }}
-                className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-red-500/30 transition-all"
+                className={`flex-1 text-white font-bold py-4 rounded-2xl transition-all ${
+                  deleteConfirm.mode === 'deactivate'
+                    ? 'bg-amber-500 hover:bg-amber-600 shadow-lg shadow-amber-500/30'
+                    : 'bg-red-500 hover:bg-red-600 shadow-lg shadow-red-500/30'
+                }`}
               >
-                Delete permanently
+                {deleteConfirm.mode === 'deactivate' ? 'Deactivate' : 'Delete permanently'}
               </button>
             </div>
           </div>

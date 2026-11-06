@@ -31,9 +31,12 @@ import {
   Settings,
   ShoppingCart,
   Trash2,
+  UserMinus,
   Users,
   X,
 } from 'lucide-react';
+import StaffTransferModal from './StaffTransferModal.jsx';
+import { isAdminDisabled } from '../utils/staffDirectory.js';
 import PayrollView from './PayrollView.jsx';
 import TimeSpentAnalytics from './TimeSpentAnalytics.jsx';
 import SalesFunnelPanel from './sales/SalesFunnelPanel.jsx';
@@ -1991,6 +1994,7 @@ const AdminDashboard = ({
         features: a.features || {},
         displayName: String(a.displayName || '').trim(),
         hasCanonical: false,
+        disabled: false,
       };
     }
     acc[key].ids.push(a.id);
@@ -2000,6 +2004,9 @@ const AdminDashboard = ({
     if (a.id === key && a.features) acc[key].features = a.features;
     else if (a.features?.salesFunnel && !acc[key].features?.salesFunnel) {
       acc[key].features = { ...(acc[key].features || {}), ...a.features };
+    }
+    if (isAdminDisabled(a) || (a.id === key && a.disabled === true)) {
+      acc[key].disabled = true;
     }
     const named = String(a.displayName || '').trim();
     if (named && (a.id === key || !acc[key].displayName)) {
@@ -2016,8 +2023,26 @@ const AdminDashboard = ({
       features: g.features || {},
       displayName: g.displayName || '',
       hasCanonical: g.hasCanonical,
+      disabled: !!g.disabled,
     }))
-    .sort((a, b) => a.email.localeCompare(b.email));
+    .sort((a, b) => {
+      if (!!a.disabled !== !!b.disabled) return a.disabled ? 1 : -1;
+      return a.email.localeCompare(b.email);
+    });
+  const activeTransferTargets = [
+    {
+      email: 'chris@ignitepm.com',
+      displayName: 'Chris (Super Admin)',
+      ids: ['chris@ignitepm.com'],
+    },
+    ...dedupedAdminUsers
+      .filter((a) => !a.disabled)
+      .map((a) => ({
+        email: a.email,
+        displayName: a.displayName,
+        ids: a.ids,
+      })),
+  ];
   const [clientCycleOffsets, setClientCycleOffsets] = useState({});
   const [clientStatusFilter, setClientStatusFilter] = useState('all');
   const [clientSearchQuery, setClientSearchQuery] = useState('');
@@ -2112,13 +2137,17 @@ const AdminDashboard = ({
   };
   const [userClientAccessOpen, setUserClientAccessOpen] = useState({});
   const [userClientAccessBusy, setUserClientAccessBusy] = useState('');
+  const [staffTransferFrom, setStaffTransferFrom] = useState(null);
 
   const kioskStaffEmails = useMemo(
     () =>
       Array.from(
         new Set(
           (adminUsers || [])
-            .filter((u) => String(u?.role || '') === 'kiosk')
+            .filter(
+              (u) =>
+                String(u?.role || '') === 'kiosk' && !isAdminDisabled(u),
+            )
             .map((u) => adminEmailKey(u?.email))
             .filter(Boolean),
         ),
@@ -8788,6 +8817,7 @@ const AdminDashboard = ({
             <h3 className="font-black text-xl mb-2">Manage staff users</h3>
             <p className="text-slate-400 text-sm font-medium mb-6">
               Invite anyone by email (any domain). They get a set-password link and can sign in with email + password — Google is optional.
+              When someone leaves, use <span className="text-slate-600 font-bold">Transfer work</span> to move their tasks and clients to a replacement, then deactivate them — notes and history stay under their name.
             </p>
             <div className="flex flex-col gap-3">
               <div className="flex flex-col sm:flex-row gap-3">
@@ -8927,10 +8957,15 @@ const AdminDashboard = ({
               const pending = String(invite?.status || '').toLowerCase() === 'pending';
               const accepted =
                 String(invite?.status || '').toLowerCase() === 'accepted';
+              const isDisabled = !!a.disabled;
               return (
               <div
                 key={a.email}
-                className="flex flex-col gap-3 p-6 bg-slate-50 rounded-3xl group border-2 border-transparent hover:border-slate-200 transition-all"
+                className={`flex flex-col gap-3 p-6 rounded-3xl group border-2 transition-all ${
+                  isDisabled
+                    ? 'bg-slate-100/80 border-slate-200 opacity-90'
+                    : 'bg-slate-50 border-transparent hover:border-slate-200'
+                }`}
               >
                 <div className="flex justify-between items-start gap-3">
                 <div className="flex flex-col gap-2 flex-1 min-w-0 pr-2">
@@ -8945,9 +8980,16 @@ const AdminDashboard = ({
                     ) : (
                       a.email
                     )}
+                    {isDisabled ? (
+                      <span className="ml-2 inline-flex align-middle text-[9px] font-black uppercase tracking-widest text-amber-700 bg-amber-100 px-2 py-0.5 rounded-lg">
+                        Inactive
+                      </span>
+                    ) : null}
                   </span>
                   <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                    Invite: {inviteStatus}
+                    {isDisabled
+                      ? 'Deactivated — notes & history kept'
+                      : `Invite: ${inviteStatus}`}
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
                     <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
@@ -9059,22 +9101,83 @@ const AdminDashboard = ({
                     </label>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setDeleteConfirm({
-                      collection: 'admins',
-                      ids: a.ids,
-                      id: a.ids?.[0],
-                      title: `admin access for "${a.email}"`,
-                    })
-                  }
-                  className="text-slate-300 hover:text-red-500 transition-all p-2 shrink-0"
-                >
-                  <Trash2 className="w-5 h-5" />
-                </button>
+                {!isDisabled ? (
+                  <button
+                    type="button"
+                    title="Deactivate user (keeps notes & history)"
+                    onClick={() =>
+                      setDeleteConfirm({
+                        collection: 'admins',
+                        mode: 'deactivate',
+                        ids: a.ids,
+                        id: a.ids?.[0],
+                        email: emailKey,
+                        title: a.displayName
+                          ? `${a.displayName} (${a.email})`
+                          : a.email,
+                      })
+                    }
+                    className="text-slate-300 hover:text-amber-600 transition-all p-2 shrink-0"
+                  >
+                    <UserMinus className="w-5 h-5" />
+                  </button>
+                ) : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {!isDisabled ? (
+                  <button
+                    type="button"
+                    onClick={() => setStaffTransferFrom(a)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-black border border-orange-200 bg-orange-50 text-[#fd7414]"
+                  >
+                    Transfer work
+                  </button>
+                  ) : (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const now = Date.now();
+                        await Promise.all(
+                          (a.ids || []).map((id) =>
+                            updateDoc(doc('admins', id), {
+                              disabled: false,
+                              disabledAt: null,
+                              reactivatedAt: now,
+                              updatedAt: now,
+                            }),
+                          ),
+                        );
+                        await setDoc(
+                          doc('admins', emailKey),
+                          {
+                            email: emailKey,
+                            disabled: false,
+                            disabledAt: null,
+                            reactivatedAt: now,
+                            updatedAt: now,
+                          },
+                          { merge: true },
+                        );
+                        logAudit?.({
+                          action: 'staff_reactivate',
+                          email: emailKey,
+                        });
+                      } catch (err) {
+                        window.alert(
+                          `Could not reactivate ${emailKey}.\n\n${
+                            err?.message || String(err)
+                          }`,
+                        );
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-black bg-emerald-600 text-white"
+                  >
+                    Reactivate
+                  </button>
+                  )}
+                  {!isDisabled ? (
+                    <>
                   <button
                     type="button"
                     disabled={inviteBusy}
@@ -9169,8 +9272,10 @@ const AdminDashboard = ({
                       ? 'Hide client access'
                       : 'Client access'}
                   </button>
+                    </>
+                  ) : null}
                 </div>
-                {userClientAccessOpen[emailKey] ? (
+                {userClientAccessOpen[emailKey] && !isDisabled ? (
                   <div className="rounded-2xl border border-slate-200 bg-white p-3 space-y-2">
                     <p className="text-[10px] font-bold text-slate-400 leading-snug">
                       Workspace / kiosk visibility. Applies when this user&apos;s
@@ -9228,6 +9333,21 @@ const AdminDashboard = ({
               );
             })}
           </div>
+
+          <StaffTransferModal
+            open={!!staffTransferFrom}
+            onClose={() => setStaffTransferFrom(null)}
+            fromUser={staffTransferFrom}
+            targetOptions={activeTransferTargets}
+            clients={clients}
+            leads={salesLeads}
+            deals={salesDeals}
+            notifySettings={notifySettings}
+            updateNotifySettings={updateNotifySettings}
+            updateDoc={updateDoc}
+            doc={doc}
+            logAudit={logAudit}
+          />
         </div>
       )}
 
