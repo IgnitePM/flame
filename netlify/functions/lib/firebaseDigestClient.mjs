@@ -35,6 +35,7 @@ import {
   getDocs,
   getFirestore,
   query,
+  runTransaction,
   setDoc,
   where,
 } from 'firebase/firestore';
@@ -102,6 +103,27 @@ export async function fetchDoc(db, path) {
 /** Merge-write a document by full path (e.g. digest cursor). */
 export async function mergeDoc(db, path, data) {
   await setDoc(doc(db, path), data, { merge: true });
+}
+
+/**
+ * Read-modify-write a document inside a Firestore transaction so concurrent
+ * MCP writers (e.g. 11 parallel create_todo calls) do not clobber each other.
+ * `mutator(currentDoc)` returns a merge patch object (or null to skip write).
+ */
+export async function mergeDocTransactional(db, path, mutator) {
+  const ref = doc(db, path);
+  return runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(ref);
+    if (!snap.exists()) {
+      throw new Error(`Document not found: ${path}`);
+    }
+    const current = { id: snap.id, ...snap.data() };
+    const patch = await mutator(current);
+    if (patch && typeof patch === 'object' && Object.keys(patch).length > 0) {
+      transaction.set(ref, patch, { merge: true });
+    }
+    return { current, patch };
+  });
 }
 
 /**

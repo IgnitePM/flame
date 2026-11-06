@@ -38,6 +38,7 @@ import {
   fetchDoc,
   getDigestDb,
   mergeDoc,
+  mergeDocTransactional,
 } from './firebaseDigestClient.mjs';
 import { clip } from './mcpSanitize.mjs';
 import {
@@ -106,7 +107,12 @@ async function loadFreshClient(client) {
   return { ...raw, id: clientId, name: raw.name || client.name };
 }
 
-async function writeTodoCycles(client, cycles) {
+/**
+ * Transactionally mutate todoCycles on the real client doc.
+ * `mutator(cycles, freshClient)` must return the next todoCycles map.
+ * Concurrent MCP creates retry instead of overwriting each other.
+ */
+async function mutateTodoCycles(client, mutator) {
   const clientId = String(client?.id || '').trim();
   if (!clientId || clientId === 'undefined') {
     const err = new Error('Refusing to write todoCycles without a real client.id.');
@@ -114,11 +120,25 @@ async function writeTodoCycles(client, cycles) {
     throw err;
   }
   const db = await getDigestDb();
-  const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(client, cycles);
-  await mergeDoc(db, `clients/${clientId}`, {
-    todoCycles: cycles,
-    ...teamAccessPatch,
-  });
+  const { patch } = await mergeDocTransactional(
+    db,
+    `clients/${clientId}`,
+    (fresh) => {
+      const withId = { ...fresh, id: clientId };
+      const nextCycles = mutator({ ...(fresh.todoCycles || {}) }, withId);
+      if (!nextCycles || typeof nextCycles !== 'object') {
+        const err = new Error('todoCycles mutator must return an object.');
+        err.code = 'write_failed';
+        throw err;
+      }
+      const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(
+        withId,
+        nextCycles,
+      );
+      return { todoCycles: nextCycles, ...teamAccessPatch };
+    },
+  );
+  return patch?.todoCycles || null;
 }
 
 /** Confirm a newly written todo is readable on the real client doc. */
@@ -255,25 +275,24 @@ export async function createTodo(client, args = {}) {
     item.subtasks.push(buildStaffSubtask(item, s));
   }
 
-  const fresh = await loadFreshClient(client);
-  const cycles = { ...(fresh.todoCycles || {}) };
-  const cycleKey = String(cycleStart);
-  const cycleData = { ...(cycles[cycleKey] || {}) };
-  const catTodo = cycleData[categoryKey] || { closed: false, items: [] };
-  if (catTodo.closed) {
-    const err = new Error(
-      'That category is closed for this billing cycle. Unlock it in the CRM first.',
-    );
-    err.code = 'cycle_closed';
-    throw err;
-  }
-  const items = Array.isArray(catTodo.items) ? [...catTodo.items] : [];
-  items.push(item);
-  cycleData[categoryKey] = { ...catTodo, closed: false, items };
-  cycles[cycleKey] = cycleData;
-
-  await writeTodoCycles(fresh, cycles);
-  await assertTodoPersisted(fresh.id, item.id, {
+  await mutateTodoCycles(client, (cycles) => {
+    const cycleKey = String(cycleStart);
+    const cycleData = { ...(cycles[cycleKey] || {}) };
+    const catTodo = cycleData[categoryKey] || { closed: false, items: [] };
+    if (catTodo.closed) {
+      const err = new Error(
+        'That category is closed for this billing cycle. Unlock it in the CRM first.',
+      );
+      err.code = 'cycle_closed';
+      throw err;
+    }
+    const items = Array.isArray(catTodo.items) ? [...catTodo.items] : [];
+    items.push(item);
+    cycleData[categoryKey] = { ...catTodo, closed: false, items };
+    cycles[cycleKey] = cycleData;
+    return cycles;
+  });
+  await assertTodoPersisted(client.id, item.id, {
     cycleStart,
     categoryKey,
   });
@@ -344,17 +363,28 @@ export async function addSubtask(client, args = {}) {
   }
 
   const sub = buildStaffSubtask(found.item, args);
-  const cycles = { ...(fresh.todoCycles || {}) };
-  const cycleData = { ...(cycles[found.cycleKey] || {}) };
-  const catTodo = cycleData[found.categoryKey] || { closed: false, items: [] };
-  const items = addSubtaskToItems(
-    Array.isArray(catTodo.items) ? [...catTodo.items] : [],
-    found.item.id,
-    sub,
-  );
-  cycleData[found.categoryKey] = { ...catTodo, items };
-  cycles[found.cycleKey] = cycleData;
-  await writeTodoCycles(fresh, cycles);
+  await mutateTodoCycles(client, (cycles) => {
+    const live = findTodoInClient(
+      { ...client, todoCycles: cycles },
+      found.item.id,
+      { cycleStart: found.cycleStart, categoryKey: found.categoryKey },
+    );
+    if (!live) {
+      const err = new Error('Todo not found during write.');
+      err.code = 'not_found';
+      throw err;
+    }
+    const cycleData = { ...(cycles[live.cycleKey] || {}) };
+    const catTodo = cycleData[live.categoryKey] || { closed: false, items: [] };
+    const items = addSubtaskToItems(
+      Array.isArray(catTodo.items) ? [...catTodo.items] : [],
+      live.item.id,
+      sub,
+    );
+    cycleData[live.categoryKey] = { ...catTodo, items };
+    cycles[live.cycleKey] = cycleData;
+    return cycles;
+  });
 
   try {
     await writeClientActivity({
@@ -434,21 +464,31 @@ export async function addTodoComment(client, args = {}) {
     throw err;
   }
 
-  const cycles = { ...(fresh.todoCycles || {}) };
-  const cycleData = { ...(cycles[found.cycleKey] || {}) };
-  const catTodo = cycleData[found.categoryKey] || { closed: false, items: [] };
-  const items = (Array.isArray(catTodo.items) ? catTodo.items : []).map((row) =>
-    row.id === found.item.id ? appendTaskComment(row, comment) : row,
-  );
-  cycleData[found.categoryKey] = { ...catTodo, items };
-  cycles[found.cycleKey] = cycleData;
-
-  const synced = syncTaskCommentsAcrossCycles(
-    cycles,
-    found.categoryKey,
-    items,
-  );
-  await writeTodoCycles(fresh, synced.cycles);
+  await mutateTodoCycles(client, (cycles) => {
+    const live = findTodoInClient(
+      { ...client, todoCycles: cycles },
+      found.item.id,
+      { cycleStart: found.cycleStart, categoryKey: found.categoryKey },
+    );
+    if (!live) {
+      const err = new Error('Todo not found during write.');
+      err.code = 'not_found';
+      throw err;
+    }
+    const cycleData = { ...(cycles[live.cycleKey] || {}) };
+    const catTodo = cycleData[live.categoryKey] || { closed: false, items: [] };
+    const items = (Array.isArray(catTodo.items) ? catTodo.items : []).map((row) =>
+      row.id === live.item.id ? appendTaskComment(row, comment) : row,
+    );
+    cycleData[live.categoryKey] = { ...catTodo, items };
+    cycles[live.cycleKey] = cycleData;
+    const synced = syncTaskCommentsAcrossCycles(
+      cycles,
+      live.categoryKey,
+      items,
+    );
+    return synced.cycles;
+  });
 
   try {
     await writeClientActivity({
@@ -510,24 +550,35 @@ export async function completeTodo(client, args = {}) {
 
   const subtaskId = String(args.subtaskId || '').trim();
   if (subtaskId) {
-    const cycles = { ...(fresh.todoCycles || {}) };
-    const cycleData = { ...(cycles[found.cycleKey] || {}) };
-    const catTodo = cycleData[found.categoryKey] || { closed: false, items: [] };
     const hasSub = (found.item.subtasks || []).some((s) => s?.id === subtaskId);
     if (!hasSub) {
       const err = new Error('Subtask not found on that todo.');
       err.code = 'not_found';
       throw err;
     }
-    const items = setSubtaskDoneInItems(
-      Array.isArray(catTodo.items) ? [...catTodo.items] : [],
-      found.item.id,
-      subtaskId,
-      done,
-    );
-    cycleData[found.categoryKey] = { ...catTodo, items };
-    cycles[found.cycleKey] = cycleData;
-    await writeTodoCycles(fresh, cycles);
+    await mutateTodoCycles(client, (cycles) => {
+      const live = findTodoInClient(
+        { ...client, todoCycles: cycles },
+        found.item.id,
+        { cycleStart: found.cycleStart, categoryKey: found.categoryKey },
+      );
+      if (!live) {
+        const err = new Error('Todo not found during write.');
+        err.code = 'not_found';
+        throw err;
+      }
+      const cycleData = { ...(cycles[live.cycleKey] || {}) };
+      const catTodo = cycleData[live.categoryKey] || { closed: false, items: [] };
+      const items = setSubtaskDoneInItems(
+        Array.isArray(catTodo.items) ? [...catTodo.items] : [],
+        live.item.id,
+        subtaskId,
+        done,
+      );
+      cycleData[live.categoryKey] = { ...catTodo, items };
+      cycles[live.cycleKey] = cycleData;
+      return cycles;
+    });
     return {
       ok: true,
       clientId: client.id,
@@ -548,39 +599,48 @@ export async function completeTodo(client, args = {}) {
     throw err;
   }
 
-  let cycles = { ...(fresh.todoCycles || {}) };
-  if (done) {
-    let recurringSkipKey = '';
-    if (found.item.recurring) {
-      recurringSkipKey = recurringAnchorKey(
-        found.item.recurringId || found.item.id,
-        found.item.dueDate,
-      );
-    }
-    const { cycles: marked, touched } = markPrimaryTodoDoneAcrossCycles(
-      cycles,
-      found.categoryKey,
+  await mutateTodoCycles(client, (cycles) => {
+    const live = findTodoInClient(
+      { ...client, todoCycles: cycles },
       found.item.id,
-      true,
-      { recurringSkipKey },
+      { cycleStart: found.cycleStart, categoryKey: found.categoryKey },
     );
-    if (!touched) {
-      const err = new Error('Could not mark todo complete across cycles.');
-      err.code = 'write_failed';
+    if (!live) {
+      const err = new Error('Todo not found during write.');
+      err.code = 'not_found';
       throw err;
     }
-    cycles = marked;
-  } else {
-    const cycleData = { ...(cycles[found.cycleKey] || {}) };
-    const catTodo = cycleData[found.categoryKey] || { closed: false, items: [] };
+    if (done) {
+      let recurringSkipKey = '';
+      if (live.item.recurring) {
+        recurringSkipKey = recurringAnchorKey(
+          live.item.recurringId || live.item.id,
+          live.item.dueDate,
+        );
+      }
+      const { cycles: marked, touched } = markPrimaryTodoDoneAcrossCycles(
+        cycles,
+        live.categoryKey,
+        live.item.id,
+        true,
+        { recurringSkipKey },
+      );
+      if (!touched) {
+        const err = new Error('Could not mark todo complete across cycles.');
+        err.code = 'write_failed';
+        throw err;
+      }
+      return marked;
+    }
+    const cycleData = { ...(cycles[live.cycleKey] || {}) };
+    const catTodo = cycleData[live.categoryKey] || { closed: false, items: [] };
     const items = (Array.isArray(catTodo.items) ? catTodo.items : []).map((row) =>
-      row.id === found.item.id ? { ...row, done: false, doneAt: null } : row,
+      row.id === live.item.id ? { ...row, done: false, doneAt: null } : row,
     );
-    cycleData[found.categoryKey] = { ...catTodo, items };
-    cycles[found.cycleKey] = cycleData;
-  }
-
-  await writeTodoCycles(fresh, cycles);
+    cycleData[live.categoryKey] = { ...catTodo, items };
+    cycles[live.cycleKey] = cycleData;
+    return cycles;
+  });
 
   if (done) {
     try {
@@ -642,18 +702,36 @@ export async function updateTodoDueDate(client, args = {}) {
     throw err;
   }
 
-  let updated = { ...found.item, dueDate: nextDue };
-  updated = clampAllSubtaskDueDatesToParent(updated);
+  let updatedPreview = clampAllSubtaskDueDatesToParent({
+    ...found.item,
+    dueDate: nextDue,
+  });
 
-  const cycles = { ...(fresh.todoCycles || {}) };
-  const cycleData = { ...(cycles[found.cycleKey] || {}) };
-  const catTodo = cycleData[found.categoryKey] || { closed: false, items: [] };
-  const items = (Array.isArray(catTodo.items) ? catTodo.items : []).map((i) =>
-    i.id === found.item.id ? updated : i,
-  );
-  cycleData[found.categoryKey] = { ...catTodo, items };
-  cycles[found.cycleKey] = cycleData;
-  await writeTodoCycles(fresh, cycles);
+  await mutateTodoCycles(client, (cycles) => {
+    const live = findTodoInClient(
+      { ...client, todoCycles: cycles },
+      found.item.id,
+      { cycleStart: found.cycleStart, categoryKey: found.categoryKey },
+    );
+    if (!live) {
+      const err = new Error('Todo not found during write.');
+      err.code = 'not_found';
+      throw err;
+    }
+    const updated = clampAllSubtaskDueDatesToParent({
+      ...live.item,
+      dueDate: nextDue,
+    });
+    updatedPreview = updated;
+    const cycleData = { ...(cycles[live.cycleKey] || {}) };
+    const catTodo = cycleData[live.categoryKey] || { closed: false, items: [] };
+    const items = (Array.isArray(catTodo.items) ? catTodo.items : []).map((i) =>
+      i.id === live.item.id ? updated : i,
+    );
+    cycleData[live.categoryKey] = { ...catTodo, items };
+    cycles[live.cycleKey] = cycleData;
+    return cycles;
+  });
 
   try {
     await writeClientActivity({
@@ -680,7 +758,7 @@ export async function updateTodoDueDate(client, args = {}) {
     clientName: client.name,
     todoId: found.item.id,
     dueDate: nextDue,
-    subtasks: (updated.subtasks || []).map((s) => ({
+    subtasks: (updatedPreview.subtasks || []).map((s) => ({
       id: s.id,
       dueDate: s.dueDate,
     })),
