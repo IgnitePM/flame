@@ -10,6 +10,10 @@ import {
   clampSubtaskDueToParent,
   newSubtaskTemplate,
 } from '../../../src/utils/todoSubtasks.js';
+import {
+  applyRecurrenceFields,
+  resolveRecurrenceInput,
+} from '../../../src/utils/todoRecurrence.js';
 import { FALLBACK_FX_TO_CAD, getFxToCad } from '../../../src/utils/fxToCad.js';
 import {
   buildPerplexityExpenseDescription,
@@ -22,6 +26,35 @@ export const MAX_ASSIGNEES = 10;
 export const DEFAULT_MCP_ACTOR = 'perplexity-mcp@ignitepm.com';
 export const MAX_LOGGED_HOURS = 12;
 export const EXPENSE_MARKUP = 1.3;
+export const DEFAULT_TODO_EXPENSE_MARKUP_PERCENT = 30;
+
+export function normalizeTodoExpenseAmount(raw) {
+  if (raw == null || raw === '') return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round(n * 100) / 100;
+}
+
+export function normalizeTodoMarkupPercent(raw) {
+  if (raw == null || raw === '') return DEFAULT_TODO_EXPENSE_MARKUP_PERCENT;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_TODO_EXPENSE_MARKUP_PERCENT;
+  return Math.round(n * 100) / 100;
+}
+
+export function resolveTodoRecurrence(args = {}, dueDateMs = null) {
+  const hasMode =
+    args.recurrenceMode != null && String(args.recurrenceMode).trim() !== '';
+  const hasObj = args.recurrence != null && typeof args.recurrence === 'object';
+  if (!hasMode && !hasObj) {
+    return { recurrence: null, mode: 'none' };
+  }
+  return resolveRecurrenceInput({
+    recurrenceMode: hasMode ? args.recurrenceMode : undefined,
+    recurrence: hasObj ? args.recurrence : null,
+    dueDateMs,
+  });
+}
 
 export function todoCategoryKey(name) {
   return String(name ?? '')
@@ -114,7 +147,11 @@ export function buildStaffTodoItem({
   assigneeEmails = [],
   dueDate = null,
   estimatedHours = null,
+  estimatedExpense = null,
+  expenseMarkupPercent = null,
   pinned = false,
+  recurrenceMode = null,
+  recurrence = null,
   now = Date.now(),
 } = {}) {
   const body = String(text || '').trim();
@@ -138,20 +175,39 @@ export function buildStaffTodoItem({
     }
     hours = n;
   }
-  return {
-    id: `todo_${now}_${Math.random().toString(36).slice(2)}`,
+  const dueMs = parseDueDateMs(dueDate);
+  const { recurrence: resolvedRecurrence } = resolveTodoRecurrence(
+    { recurrenceMode, recurrence },
+    dueMs,
+  );
+  if (resolvedRecurrence && !dueMs) {
+    const err = new Error(
+      'dueDate is required when creating a recurring task (recurrenceMode / recurrence).',
+    );
+    err.code = 'bad_request';
+    throw err;
+  }
+  const id = `todo_${now}_${Math.random().toString(36).slice(2)}`;
+  const expense = normalizeTodoExpenseAmount(estimatedExpense);
+  const base = {
+    id,
     text: body,
     done: false,
     doneAt: null,
     pinned: !!pinned,
-    recurring: false,
-    recurringId: null,
-    dueDate: parseDueDateMs(dueDate),
+    dueDate: dueMs,
     assigneeEmails: normalizeAssigneeEmails(assigneeEmails),
-    recurrence: null,
     estimatedHours: hours,
+    estimatedExpense: expense,
+    expenseMarkupPercent:
+      expense != null
+        ? normalizeTodoMarkupPercent(expenseMarkupPercent)
+        : expenseMarkupPercent == null || expenseMarkupPercent === ''
+          ? null
+          : normalizeTodoMarkupPercent(expenseMarkupPercent),
     subtasks: [],
   };
+  return applyRecurrenceFields(base, resolvedRecurrence, { seriesId: id });
 }
 
 export function buildStaffSubtask(parentItem, args = {}, now = Date.now()) {
@@ -177,13 +233,24 @@ export function buildStaffSubtask(parentItem, args = {}, now = Date.now()) {
     estimatedHours = n;
   }
   const dueRaw = parseDueDateMs(args.dueDate);
-  return newSubtaskTemplate({
-    id: `sub_${now}_${Math.random().toString(36).slice(2, 9)}`,
+  const dueDate = clampSubtaskDueToParent(parentItem, dueRaw);
+  const { recurrence: resolvedRecurrence } = resolveTodoRecurrence(args, dueDate);
+  if (resolvedRecurrence && !dueDate) {
+    const err = new Error(
+      'dueDate is required when creating a recurring subtask.',
+    );
+    err.code = 'bad_request';
+    throw err;
+  }
+  const id = `sub_${now}_${Math.random().toString(36).slice(2, 9)}`;
+  const base = newSubtaskTemplate({
+    id,
     text,
     assigneeEmails: normalizeAssigneeEmails(args.assigneeEmails),
-    dueDate: clampSubtaskDueToParent(parentItem, dueRaw),
+    dueDate,
     estimatedHours,
   });
+  return applyRecurrenceFields(base, resolvedRecurrence, { seriesId: id });
 }
 
 /** Parse hours / minutes / start+end into duration ms (max 12h). */

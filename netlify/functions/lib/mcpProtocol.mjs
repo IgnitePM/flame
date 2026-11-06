@@ -4,21 +4,30 @@
 
 export const MCP_SERVER_INFO = {
   name: 'ignite-flame',
-  version: '1.3.0',
+  version: '1.4.0',
 };
 
 export const MCP_INSTRUCTIONS = [
   'Ignite Flame CRM — staff-only access to clients, retainers, todos, notes, time, expenses, and document links.',
   'Prefer search_clients before get_client when you only have a partial name.',
   'Use get_client_notes / create_client_note for staff internal notes (not in the client portal).',
-  'Use create_todo (optional subtasks + dueDate) and add_subtask / update_todo_due_date for task planning from conversations.',
-  'Use add_todo_comment to leave a note on a task. Use complete_todo to mark a task (or subtask via subtaskId) done; pass done=false to reopen.',
+  'Use create_todo for new tasks (assignees, dueDate, estimatedHours, estimatedExpense, pinned, recurrenceMode, subtasks).',
+  'Recurrence modes match the CRM: none, daily, weekly, biweekly, monthly, annual. Recurring tasks require a dueDate.',
+  'Use update_todo to change those same fields on an existing task (or subtask via subtaskId). update_todo_due_date still works for due-only edits.',
+  'Use add_subtask / add_todo_comment / complete_todo for subtasks, notes, and completion (subtaskId to complete a subtask; done=false to reopen).',
   'Parents with open subtasks cannot be completed until subtasks are done.',
   'Use log_time for completed manual time entries (max 12h). Use log_expense for CAD/USD costs. Use log_perplexity_credits for Computer credit usage (stored as expenses).',
   'Use link_document to attach a Drive file id/URL or bookmark a URL on the client (no raw file upload).',
   'Retainer category is required for time/expense/create_todo writes — match an enabled category from get_client.',
   'Never invent client IDs; never delete data.',
 ].join(' ');
+
+const TODO_RECURRENCE_PROP = {
+  type: 'string',
+  description:
+    'Recurrence schedule: none | daily | weekly | biweekly | monthly | annual (requires dueDate when not none)',
+  enum: ['none', 'daily', 'weekly', 'biweekly', 'monthly', 'annual'],
+};
 
 const TOOLS = [
   {
@@ -140,7 +149,7 @@ const TOOLS = [
   {
     name: 'create_todo',
     description:
-      'Create an open staff task on a client’s current (or specified) billing cycle under an enabled retainer category. Not a portal request — appears immediately as a normal CRM task.',
+      'Create an open staff task on a client’s current (or specified) billing cycle under an enabled retainer category. Supports the same Options as the CRM: assignees, due date, estimate hours/expense, pin, and recurrence (daily/weekly/biweekly/monthly/annual). Not a portal request — appears immediately as a normal CRM task.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -166,20 +175,35 @@ const TOOLS = [
         },
         dueDate: {
           type: 'string',
-          description: 'Optional due date (ISO string or ms)',
+          description:
+            'Optional due date (ISO string or ms). Required when recurrenceMode is not none.',
         },
         estimatedHours: {
           type: 'number',
           description: 'Optional estimate in hours',
         },
+        estimatedExpense: {
+          type: 'number',
+          description: 'Optional estimated expense in dollars (before markup)',
+        },
+        expenseMarkupPercent: {
+          type: 'number',
+          description: 'Markup % on estimated expense (default 30)',
+        },
         pinned: {
           type: 'boolean',
           description: 'Pin the task (default false)',
         },
+        recurrenceMode: TODO_RECURRENCE_PROP,
+        recurrence: {
+          type: 'object',
+          description:
+            'Advanced: raw recurrence object (type daily_fixed | weekly_weekday | biweekly_weekday | monthly_fixed_day | annual_fixed). Prefer recurrenceMode.',
+        },
         subtasks: {
           type: 'array',
           description:
-            'Optional subtasks to create with the parent (each: text, dueDate?, assigneeEmails?)',
+            'Optional subtasks (text, dueDate?, assigneeEmails?, estimatedHours?, recurrenceMode?)',
           items: {
             type: 'object',
             properties: {
@@ -187,6 +211,7 @@ const TOOLS = [
               dueDate: { type: 'string' },
               assigneeEmails: { type: 'array', items: { type: 'string' } },
               estimatedHours: { type: 'number' },
+              recurrenceMode: TODO_RECURRENCE_PROP,
             },
           },
         },
@@ -207,7 +232,7 @@ const TOOLS = [
   {
     name: 'add_subtask',
     description:
-      'Add a subtask (with optional due date) under an existing open todo.',
+      'Add a subtask (with optional due date, assignees, estimate, and recurrence) under an existing open todo.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -218,6 +243,7 @@ const TOOLS = [
         dueDate: { type: 'string' },
         assigneeEmails: { type: 'array', items: { type: 'string' } },
         estimatedHours: { type: 'number' },
+        recurrenceMode: TODO_RECURRENCE_PROP,
         categoryKey: { type: 'string' },
         cycleStart: { type: 'number' },
         actorEmail: { type: 'string' },
@@ -232,9 +258,52 @@ const TOOLS = [
     },
   },
   {
+    name: 'update_todo',
+    description:
+      'Update an existing task (or a subtask via subtaskId) with CRM Options fields: text, assignees, pinned, dueDate, estimatedHours, estimatedExpense, expenseMarkupPercent, recurrenceMode. Pass recurrenceMode "none" to clear recurrence.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        clientId: { type: 'string' },
+        name: { type: 'string' },
+        todoId: { type: 'string', description: 'Task id to update' },
+        subtaskId: {
+          type: 'string',
+          description: 'Optional — update this subtask instead of the parent',
+        },
+        text: { type: 'string' },
+        assigneeEmails: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Replace assignee list (empty array clears)',
+        },
+        pinned: { type: 'boolean' },
+        dueDate: {
+          type: 'string',
+          description: 'ISO date/ms, or null/"clear" to remove',
+        },
+        estimatedHours: { type: 'number' },
+        estimatedExpense: { type: 'number' },
+        expenseMarkupPercent: { type: 'number' },
+        recurrenceMode: TODO_RECURRENCE_PROP,
+        recurrence: { type: 'object' },
+        categoryKey: { type: 'string' },
+        cycleStart: { type: 'number' },
+        actorEmail: { type: 'string' },
+      },
+      required: ['todoId'],
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+      idempotentHint: false,
+    },
+  },
+  {
     name: 'update_todo_due_date',
     description:
-      'Set or clear a todo due date (subtask dues are clamped if the parent moves earlier).',
+      'Set or clear a todo due date (subtask dues are clamped if the parent moves earlier). Prefer update_todo when changing multiple fields.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -517,6 +586,11 @@ export async function callMcpTool(name, args = {}) {
     err.code = 'bad_request';
     throw err;
   }
+  if (tool === 'update_todo' && !args.todoId) {
+    const err = new Error('todoId is required for update_todo.');
+    err.code = 'bad_request';
+    throw err;
+  }
   if (
     tool === 'link_document' &&
     !String(args.url || '').trim() &&
@@ -600,6 +674,12 @@ export async function callMcpTool(name, args = {}) {
       const client = await requireClient(args);
       const writes = await import('./mcpClientWrites.mjs');
       const result = await writes.updateTodoDueDate(client, args);
+      return textResult(result);
+    }
+    case 'update_todo': {
+      const client = await requireClient(args);
+      const writes = await import('./mcpClientWrites.mjs');
+      const result = await writes.updateTodo(client, args);
       return textResult(result);
     }
     case 'log_time': {
