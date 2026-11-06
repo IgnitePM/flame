@@ -88,13 +88,57 @@ async function loadFxToCad(db) {
   }
 }
 
+/**
+ * Re-read the client doc for a fresh todoCycles snapshot.
+ * Always force `id` to the known client id (never trust a missing/stale id) so
+ * writes cannot land on `clients/undefined`.
+ */
+async function loadFreshClient(client) {
+  const clientId = String(client?.id || '').trim();
+  if (!clientId || clientId === 'undefined') {
+    const err = new Error('client.id is required.');
+    err.code = 'bad_request';
+    throw err;
+  }
+  const db = await getDigestDb();
+  const raw = await fetchDoc(db, `clients/${clientId}`);
+  if (!raw) return { ...client, id: clientId };
+  return { ...raw, id: clientId, name: raw.name || client.name };
+}
+
 async function writeTodoCycles(client, cycles) {
+  const clientId = String(client?.id || '').trim();
+  if (!clientId || clientId === 'undefined') {
+    const err = new Error('Refusing to write todoCycles without a real client.id.');
+    err.code = 'bad_request';
+    throw err;
+  }
   const db = await getDigestDb();
   const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(client, cycles);
-  await mergeDoc(db, `clients/${client.id}`, {
+  await mergeDoc(db, `clients/${clientId}`, {
     todoCycles: cycles,
     ...teamAccessPatch,
   });
+}
+
+/** Confirm a newly written todo is readable on the real client doc. */
+async function assertTodoPersisted(clientId, todoId, hints = {}) {
+  const db = await getDigestDb();
+  const raw = await fetchDoc(db, `clients/${clientId}`);
+  if (!raw) {
+    const err = new Error('Client disappeared after write.');
+    err.code = 'write_failed';
+    throw err;
+  }
+  const found = findTodoInClient({ ...raw, id: clientId }, todoId, hints);
+  if (!found) {
+    const err = new Error(
+      'Task write reported success but the item is missing on the client. Try again.',
+    );
+    err.code = 'write_failed';
+    throw err;
+  }
+  return found;
 }
 
 export async function createClientNote(client, args = {}) {
@@ -211,8 +255,7 @@ export async function createTodo(client, args = {}) {
     item.subtasks.push(buildStaffSubtask(item, s));
   }
 
-  const db = await getDigestDb();
-  const fresh = (await fetchDoc(db, `clients/${client.id}`)) || client;
+  const fresh = await loadFreshClient(client);
   const cycles = { ...(fresh.todoCycles || {}) };
   const cycleKey = String(cycleStart);
   const cycleData = { ...(cycles[cycleKey] || {}) };
@@ -230,6 +273,10 @@ export async function createTodo(client, args = {}) {
   cycles[cycleKey] = cycleData;
 
   await writeTodoCycles(fresh, cycles);
+  await assertTodoPersisted(fresh.id, item.id, {
+    cycleStart,
+    categoryKey,
+  });
 
   try {
     await writeClientActivity({
@@ -280,8 +327,7 @@ export async function createTodo(client, args = {}) {
 export async function addSubtask(client, args = {}) {
   assertActiveClient(client);
   const actorEmail = resolveMcpActorEmail(args.actorEmail);
-  const db = await getDigestDb();
-  const fresh = (await fetchDoc(db, `clients/${client.id}`)) || client;
+  const fresh = await loadFreshClient(client);
   const found = findTodoInClient(fresh, args.todoId, {
     cycleStart: args.cycleStart,
     categoryKey: args.categoryKey,
@@ -363,8 +409,7 @@ export async function addTodoComment(client, args = {}) {
     throw err;
   }
 
-  const db = await getDigestDb();
-  const fresh = (await fetchDoc(db, `clients/${client.id}`)) || client;
+  const fresh = await loadFreshClient(client);
   const found = findTodoInClient(fresh, args.todoId, {
     cycleStart: args.cycleStart,
     categoryKey: args.categoryKey,
@@ -452,8 +497,7 @@ export async function completeTodo(client, args = {}) {
     String(args.action || '').toLowerCase() === 'uncomplete';
   const done = !uncomplete;
 
-  const db = await getDigestDb();
-  const fresh = (await fetchDoc(db, `clients/${client.id}`)) || client;
+  const fresh = await loadFreshClient(client);
   const found = findTodoInClient(fresh, args.todoId, {
     cycleStart: args.cycleStart,
     categoryKey: args.categoryKey,
@@ -587,8 +631,7 @@ export async function updateTodoDueDate(client, args = {}) {
     throw err;
   }
 
-  const db = await getDigestDb();
-  const fresh = (await fetchDoc(db, `clients/${client.id}`)) || client;
+  const fresh = await loadFreshClient(client);
   const found = findTodoInClient(fresh, args.todoId, {
     cycleStart: args.cycleStart,
     categoryKey: args.categoryKey,
@@ -857,8 +900,7 @@ export async function linkDocument(client, args = {}) {
     throw err;
   }
 
-  const db = await getDigestDb();
-  const fresh = (await fetchDoc(db, `clients/${client.id}`)) || client;
+  const fresh = await loadFreshClient(client);
 
   let linkedTodoId = String(args.todoId || '').trim() || null;
   let linkedTodoText = null;

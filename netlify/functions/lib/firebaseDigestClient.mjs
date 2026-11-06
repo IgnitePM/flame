@@ -89,10 +89,14 @@ export async function fetchCollection(db, name, { where: whereClauses = [] } = {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
-/** Fetch a single document by full path, e.g. 'settings/notifications'. */
+/**
+ * Fetch a single document by full path, e.g. 'settings/notifications'.
+ * Includes `id` (same as fetchCollection) so callers never write to
+ * `collection/undefined` after hydrating a fresh snapshot.
+ */
 export async function fetchDoc(db, path) {
   const snap = await getDoc(doc(db, path));
-  return snap.exists() ? snap.data() : null;
+  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
 }
 
 /** Merge-write a document by full path (e.g. digest cursor). */
