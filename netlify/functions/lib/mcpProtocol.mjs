@@ -4,7 +4,7 @@
 
 export const MCP_SERVER_INFO = {
   name: 'ignite-flame',
-  version: '1.2.0',
+  version: '1.3.0',
 };
 
 export const MCP_INSTRUCTIONS = [
@@ -12,9 +12,11 @@ export const MCP_INSTRUCTIONS = [
   'Prefer search_clients before get_client when you only have a partial name.',
   'Use get_client_notes / create_client_note for staff internal notes (not in the client portal).',
   'Use create_todo (optional subtasks + dueDate) and add_subtask / update_todo_due_date for task planning from conversations.',
+  'Use add_todo_comment to leave a note on a task. Use complete_todo to mark a task (or subtask via subtaskId) done; pass done=false to reopen.',
+  'Parents with open subtasks cannot be completed until subtasks are done.',
   'Use log_time for completed manual time entries (max 12h). Use log_expense for CAD/USD costs. Use log_perplexity_credits for Computer credit usage (stored as expenses).',
   'Use link_document to attach a Drive file id/URL or bookmark a URL on the client (no raw file upload).',
-  'Retainer category is required for time/expense/todo writes — match an enabled category from get_client.',
+  'Retainer category is required for time/expense/create_todo writes — match an enabled category from get_client.',
   'Never invent client IDs; never delete data.',
 ].join(' ');
 
@@ -375,6 +377,66 @@ const TOOLS = [
       idempotentHint: false,
     },
   },
+  {
+    name: 'add_todo_comment',
+    description:
+      'Add a staff comment/note on an existing task (synced across billing cycles for the same task id).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        clientId: { type: 'string' },
+        name: { type: 'string' },
+        todoId: { type: 'string', description: 'Task id from list_open_todos' },
+        text: { type: 'string', description: 'Comment body' },
+        categoryKey: { type: 'string' },
+        cycleStart: { type: 'number' },
+        authorName: { type: 'string' },
+        actorEmail: { type: 'string' },
+      },
+      required: ['todoId', 'text'],
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+      idempotentHint: false,
+    },
+  },
+  {
+    name: 'complete_todo',
+    description:
+      'Mark a primary task complete across cycles (or reopen with done=false). Pass subtaskId to complete/reopen a single subtask. Primary complete requires all subtasks done.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        clientId: { type: 'string' },
+        name: { type: 'string' },
+        todoId: { type: 'string' },
+        done: {
+          type: 'boolean',
+          description: 'true (default) to complete, false to reopen',
+        },
+        uncomplete: {
+          type: 'boolean',
+          description: 'Alias for done=false',
+        },
+        subtaskId: {
+          type: 'string',
+          description: 'If set, toggle only this subtask',
+        },
+        categoryKey: { type: 'string' },
+        cycleStart: { type: 'number' },
+        actorEmail: { type: 'string' },
+      },
+      required: ['todoId'],
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+      idempotentHint: false,
+    },
+  },
 ];
 
 function textResult(payload, isError = false) {
@@ -434,6 +496,19 @@ export async function callMcpTool(name, args = {}) {
   }
   if (tool === 'add_subtask' && (!args.todoId || !String(args.text || '').trim())) {
     const err = new Error('todoId and text are required for add_subtask.');
+    err.code = 'bad_request';
+    throw err;
+  }
+  if (
+    tool === 'add_todo_comment' &&
+    (!args.todoId || !String(args.text || '').trim())
+  ) {
+    const err = new Error('todoId and text are required for add_todo_comment.');
+    err.code = 'bad_request';
+    throw err;
+  }
+  if (tool === 'complete_todo' && !args.todoId) {
+    const err = new Error('todoId is required for complete_todo.');
     err.code = 'bad_request';
     throw err;
   }
@@ -549,6 +624,18 @@ export async function callMcpTool(name, args = {}) {
       const client = await requireClient(args);
       const writes = await import('./mcpClientWrites.mjs');
       const result = await writes.linkDocument(client, args);
+      return textResult(result);
+    }
+    case 'add_todo_comment': {
+      const client = await requireClient(args);
+      const writes = await import('./mcpClientWrites.mjs');
+      const result = await writes.addTodoComment(client, args);
+      return textResult(result);
+    }
+    case 'complete_todo': {
+      const client = await requireClient(args);
+      const writes = await import('./mcpClientWrites.mjs');
+      const result = await writes.completeTodo(client, args);
       return textResult(result);
     }
     default: {

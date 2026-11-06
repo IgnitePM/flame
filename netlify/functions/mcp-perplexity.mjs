@@ -88,6 +88,8 @@ export default async (req) => {
           'log_expense',
           'log_perplexity_credits',
           'link_document',
+          'add_todo_comment',
+          'complete_todo',
         ],
         readOnly: false,
         canWrite: [
@@ -99,6 +101,8 @@ export default async (req) => {
           'log_expense',
           'log_perplexity_credits',
           'link_document',
+          'add_todo_comment',
+          'complete_todo',
         ],
       }),
       { status: 200, headers: baseHeaders },

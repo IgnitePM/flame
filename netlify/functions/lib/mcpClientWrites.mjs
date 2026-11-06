@@ -1,7 +1,7 @@
 /**
  * Staff write helpers for the Perplexity MCP connector.
- * Creates notes, todos/subtasks, time, expenses/credits, and document links.
- * No deletes, no portal requests, no raw file uploads.
+ * Creates notes, todos/subtasks/comments, completion, time, expenses/credits,
+ * and document links. No deletes, no portal requests, no raw file uploads.
  */
 
 import { getBillingPeriod } from '../../../src/utils/billingEngine.js';
@@ -16,10 +16,21 @@ import {
 } from '../../../src/utils/clientDocuments.js';
 import { FALLBACK_FX_TO_CAD, getFxToCad } from '../../../src/utils/fxToCad.js';
 import { buildPerplexityExpenseDescription } from '../../../src/utils/perplexityCredits.js';
+import {
+  markPrimaryTodoDoneAcrossCycles,
+  recurringAnchorKey,
+} from '../../../src/utils/recurringTodoMaterialize.js';
+import {
+  appendTaskComment,
+  buildTaskComment,
+  syncTaskCommentsAcrossCycles,
+} from '../../../src/utils/taskComments.js';
 import { buildTeamAccessMergeForTodoAssignees } from '../../../src/utils/teamClientAccess.js';
 import {
   addSubtaskToItems,
+  canMarkParentTodoDone,
   clampAllSubtaskDueDatesToParent,
+  setSubtaskDoneInItems,
 } from '../../../src/utils/todoSubtasks.js';
 import { writeClientActivity } from './clientActivity.mjs';
 import {
@@ -30,6 +41,7 @@ import {
 } from './firebaseDigestClient.mjs';
 import { clip } from './mcpSanitize.mjs';
 import {
+  MAX_TODO_TEXT,
   buildStaffSubtask,
   buildStaffTodoItem,
   computeExpenseAmounts,
@@ -333,6 +345,231 @@ export async function addSubtask(client, args = {}) {
       assigneeEmails: sub.assigneeEmails,
       estimatedHours: sub.estimatedHours,
     },
+  };
+}
+
+export async function addTodoComment(client, args = {}) {
+  assertActiveClient(client);
+  const actorEmail = resolveMcpActorEmail(args.actorEmail);
+  const text = String(args.text || '').trim();
+  if (!text) {
+    const err = new Error('Comment text is required.');
+    err.code = 'bad_request';
+    throw err;
+  }
+  if (text.length > MAX_TODO_TEXT) {
+    const err = new Error(`Comment text exceeds ${MAX_TODO_TEXT} characters.`);
+    err.code = 'too_long';
+    throw err;
+  }
+
+  const db = await getDigestDb();
+  const fresh = (await fetchDoc(db, `clients/${client.id}`)) || client;
+  const found = findTodoInClient(fresh, args.todoId, {
+    cycleStart: args.cycleStart,
+    categoryKey: args.categoryKey,
+  });
+  if (!found) {
+    const err = new Error('Todo not found. Pass todoId from list_open_todos.');
+    err.code = 'not_found';
+    throw err;
+  }
+
+  const portalEmails = Array.isArray(fresh.clientEmails) ? fresh.clientEmails : [];
+  const comment = buildTaskComment({
+    text,
+    authorEmail: actorEmail,
+    authorName: String(args.authorName || '').trim() || actorEmail.split('@')[0] || 'Perplexity',
+    clientEmails: portalEmails,
+    clientName: fresh.name || '',
+  });
+  if (!comment) {
+    const err = new Error('Comment text is required.');
+    err.code = 'bad_request';
+    throw err;
+  }
+
+  const cycles = { ...(fresh.todoCycles || {}) };
+  const cycleData = { ...(cycles[found.cycleKey] || {}) };
+  const catTodo = cycleData[found.categoryKey] || { closed: false, items: [] };
+  const items = (Array.isArray(catTodo.items) ? catTodo.items : []).map((row) =>
+    row.id === found.item.id ? appendTaskComment(row, comment) : row,
+  );
+  cycleData[found.categoryKey] = { ...catTodo, items };
+  cycles[found.cycleKey] = cycleData;
+
+  const synced = syncTaskCommentsAcrossCycles(
+    cycles,
+    found.categoryKey,
+    items,
+  );
+  await writeTodoCycles(fresh, synced.cycles);
+
+  try {
+    await writeClientActivity({
+      clientId: client.id,
+      clientName: client.name || '',
+      type: 'todo_created',
+      title: 'Task comment added (Perplexity)',
+      body: clip(comment.text, 500),
+      actorEmail,
+      source: 'system',
+      meta: {
+        source: 'perplexity_mcp',
+        todoId: found.item.id,
+        commentId: comment.id,
+        categoryKey: found.categoryKey,
+        cycleStart: found.cycleStart,
+      },
+    });
+  } catch (err) {
+    console.warn('[mcp-write] activity comment:', err?.message || err);
+  }
+
+  return {
+    ok: true,
+    clientId: client.id,
+    clientName: client.name,
+    todoId: found.item.id,
+    categoryKey: found.categoryKey,
+    cycleStart: found.cycleStart,
+    comment: {
+      id: comment.id,
+      text: comment.text,
+      authorEmail: comment.authorEmail,
+      authorName: comment.authorName,
+      createdAt: comment.createdAt,
+    },
+  };
+}
+
+export async function completeTodo(client, args = {}) {
+  assertActiveClient(client);
+  const actorEmail = resolveMcpActorEmail(args.actorEmail);
+  const uncomplete =
+    args.done === false ||
+    args.uncomplete === true ||
+    String(args.action || '').toLowerCase() === 'uncomplete';
+  const done = !uncomplete;
+
+  const db = await getDigestDb();
+  const fresh = (await fetchDoc(db, `clients/${client.id}`)) || client;
+  const found = findTodoInClient(fresh, args.todoId, {
+    cycleStart: args.cycleStart,
+    categoryKey: args.categoryKey,
+  });
+  if (!found) {
+    const err = new Error('Todo not found. Pass todoId from list_open_todos.');
+    err.code = 'not_found';
+    throw err;
+  }
+
+  const subtaskId = String(args.subtaskId || '').trim();
+  if (subtaskId) {
+    const cycles = { ...(fresh.todoCycles || {}) };
+    const cycleData = { ...(cycles[found.cycleKey] || {}) };
+    const catTodo = cycleData[found.categoryKey] || { closed: false, items: [] };
+    const hasSub = (found.item.subtasks || []).some((s) => s?.id === subtaskId);
+    if (!hasSub) {
+      const err = new Error('Subtask not found on that todo.');
+      err.code = 'not_found';
+      throw err;
+    }
+    const items = setSubtaskDoneInItems(
+      Array.isArray(catTodo.items) ? [...catTodo.items] : [],
+      found.item.id,
+      subtaskId,
+      done,
+    );
+    cycleData[found.categoryKey] = { ...catTodo, items };
+    cycles[found.cycleKey] = cycleData;
+    await writeTodoCycles(fresh, cycles);
+    return {
+      ok: true,
+      clientId: client.id,
+      clientName: client.name,
+      todoId: found.item.id,
+      subtaskId,
+      done,
+      scope: 'subtask',
+    };
+  }
+
+  if (done && !canMarkParentTodoDone(found.item)) {
+    const open = (found.item.subtasks || []).filter((s) => !s?.done).length;
+    const err = new Error(
+      `Complete every sub-task first (${open} still open), or pass subtaskId to complete a subtask.`,
+    );
+    err.code = 'subtasks_open';
+    throw err;
+  }
+
+  let cycles = { ...(fresh.todoCycles || {}) };
+  if (done) {
+    let recurringSkipKey = '';
+    if (found.item.recurring) {
+      recurringSkipKey = recurringAnchorKey(
+        found.item.recurringId || found.item.id,
+        found.item.dueDate,
+      );
+    }
+    const { cycles: marked, touched } = markPrimaryTodoDoneAcrossCycles(
+      cycles,
+      found.categoryKey,
+      found.item.id,
+      true,
+      { recurringSkipKey },
+    );
+    if (!touched) {
+      const err = new Error('Could not mark todo complete across cycles.');
+      err.code = 'write_failed';
+      throw err;
+    }
+    cycles = marked;
+  } else {
+    const cycleData = { ...(cycles[found.cycleKey] || {}) };
+    const catTodo = cycleData[found.categoryKey] || { closed: false, items: [] };
+    const items = (Array.isArray(catTodo.items) ? catTodo.items : []).map((row) =>
+      row.id === found.item.id ? { ...row, done: false, doneAt: null } : row,
+    );
+    cycleData[found.categoryKey] = { ...catTodo, items };
+    cycles[found.cycleKey] = cycleData;
+  }
+
+  await writeTodoCycles(fresh, cycles);
+
+  if (done) {
+    try {
+      await writeClientActivity({
+        clientId: client.id,
+        clientName: client.name || '',
+        type: 'task_completed',
+        title:
+          String(found.item.text || 'Task completed').trim() || 'Task completed',
+        body: `Category: ${found.categoryKey}`,
+        actorEmail,
+        source: 'system',
+        meta: {
+          source: 'perplexity_mcp',
+          todoId: found.item.id,
+          categoryKey: found.categoryKey,
+          cycleStart: found.cycleStart,
+        },
+      });
+    } catch (err) {
+      console.warn('[mcp-write] activity complete:', err?.message || err);
+    }
+  }
+
+  return {
+    ok: true,
+    clientId: client.id,
+    clientName: client.name,
+    todoId: found.item.id,
+    categoryKey: found.categoryKey,
+    cycleStart: found.cycleStart,
+    done,
+    scope: 'primary',
   };
 }
 
