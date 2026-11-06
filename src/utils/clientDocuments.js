@@ -1,4 +1,8 @@
-import { doc, getDoc, setDoc } from '../firebase.js';
+/**
+ * Pure document/attachment helpers live here. Do NOT import ../firebase.js at
+ * module top-level — Netlify MCP write tools import these helpers, and
+ * ../firebase.js reads import.meta.env (Vite-only), which crashes on the server.
+ */
 
 export const MAX_CLIENT_FILE_BYTES = 25 * 1024 * 1024;
 export const MAX_TODO_ATTACHMENTS = 10;
@@ -190,12 +194,15 @@ export function validateClientUploadFile(file) {
 /**
  * Storage rules require admins/{emailLower}. Ensure the doc exists before upload
  * so kiosk staff and new @ignitepm.com sign-ins are not blocked by a race.
+ *
+ * Lazy-loads firebase/firestore so pure helpers above stay safe for Netlify.
  */
 export async function ensureStaffAdminDocForStorage(db, userEmail) {
   const emailKey = String(userEmail || '').trim().toLowerCase();
   if (!emailKey) {
     throw new Error('You must be signed in to upload files.');
   }
+  const { doc, getDoc, setDoc } = await import('firebase/firestore');
   const adminRef = doc(db, 'admins', emailKey);
   const snap = await getDoc(adminRef);
   if (snap.exists()) return;

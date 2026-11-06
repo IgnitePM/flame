@@ -36,7 +36,10 @@ import {
   deleteObject,
 } from 'firebase/storage';
 
-// Centralized Firebase configuration and initialization
+// Centralized Firebase configuration and initialization (browser / Vite only).
+// Netlify functions must not import this module — use firebaseDigestClient.mjs
+// (process.env) instead. Pure helpers that Netlify imports (e.g. clientDocuments
+// record builders) must not pull this file in at module top-level.
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
