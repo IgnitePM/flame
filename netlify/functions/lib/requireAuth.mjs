@@ -59,16 +59,18 @@ export async function verifyIdToken(headers) {
 }
 
 /**
- * Role string from admins/{email}. Returns '' when no doc exists and null when
- * the lookup itself could not run, so callers can tell "not staff" apart from
- * "could not check".
+ * Role string from admins/{email}. Returns '' when no doc exists (or the
+ * profile is soft-disabled) and null when the lookup itself could not run,
+ * so callers can tell "not staff" apart from "could not check".
  */
 async function lookupRole(email) {
   try {
     const { getDigestDb, fetchDoc } = await import('./firebaseDigestClient.mjs');
     const db = await getDigestDb();
     const adminDoc = await fetchDoc(db, `admins/${email}`);
-    return typeof adminDoc?.role === 'string' ? adminDoc.role : '';
+    if (!adminDoc) return '';
+    if (adminDoc.disabled === true) return '';
+    return typeof adminDoc.role === 'string' ? adminDoc.role : '';
   } catch (err) {
     console.error('[requireAuth] role lookup failed:', err?.message || err);
     return null;

@@ -7,6 +7,12 @@ export function staffHandle(email) {
   return local || '';
 }
 
+/** Soft-deactivated staff keep an admins doc so historical notes still resolve. */
+export function isAdminDisabled(adminOrDoc) {
+  if (!adminOrDoc || typeof adminOrDoc !== 'object') return false;
+  return adminOrDoc.disabled === true || adminOrDoc.active === false;
+}
+
 export function staffDisplayName(adminOrEmail) {
   if (adminOrEmail && typeof adminOrEmail === 'object') {
     const named = String(
@@ -35,11 +41,18 @@ export function personDisplayName(personOrEmail, fallback = '') {
   return String(fallback || '').trim() || staffHandle(email) || email || 'User';
 }
 
-export function collectStaffEmails(adminUsers = [], extra = []) {
+/**
+ * Active staff emails for assignee / mention pickers.
+ * Disabled profiles are omitted so departed staff are not re-assigned work,
+ * but their admins docs remain for display-name lookups on old notes.
+ */
+export function collectStaffEmails(adminUsers = [], extra = [], { includeDisabled = false } = {}) {
   return Array.from(
     new Set(
       [
-        ...(adminUsers || []).map((a) => normalizeStaffEmail(a?.email || a?.id)),
+        ...(adminUsers || [])
+          .filter((a) => includeDisabled || !isAdminDisabled(a))
+          .map((a) => normalizeStaffEmail(a?.email || a?.id)),
         ...(extra || []).map((e) => normalizeStaffEmail(e)),
       ].filter(Boolean),
     ),
