@@ -67,6 +67,7 @@ export default async (req) => {
     try {
       const admins = await fetchCollection(db, 'admins');
       staffEmails = admins
+        .filter((a) => a && a.disabled !== true && a.active !== false)
         .map((a) => String(a.email || a.id || '').trim().toLowerCase())
         .filter((e) => e.includes('@'));
     } catch (err) {

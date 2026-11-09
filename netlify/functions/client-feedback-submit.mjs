@@ -89,7 +89,7 @@ export default async (req) => {
     const title = subject || `${kindLabel} from portal`;
 
     let emailResult = { sent: 0 };
-    const notifyEmails = collectClientStaffNotifyEmails(client);
+    const notifyEmails = await collectClientStaffNotifyEmails(client);
     try {
       emailResult = await notifyStaffPortalFeedback({
         client,

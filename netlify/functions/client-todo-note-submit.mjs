@@ -134,7 +134,7 @@ export default async (req) => {
       console.warn('[client-todo-note-submit] message:', err?.message || err);
     }
 
-    const notifyEmails = collectClientStaffNotifyEmails(client, [
+    const notifyEmails = await collectClientStaffNotifyEmails(client, [
       ...(Array.isArray(item.assigneeEmails) ? item.assigneeEmails : []),
     ]);
 

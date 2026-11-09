@@ -66,17 +66,23 @@ function resolveRecipients(settings, adminUsers = []) {
     .map((e) => String(e || '').trim().toLowerCase())
     .filter(Boolean);
 
-  // If no explicit list, email all staff with an admins/{email} doc
+  const activeEmails = new Set(
+    (adminUsers || [])
+      .filter((a) => a && a.disabled !== true && a.active !== false)
+      .map((a) => String(a.email || a.id || '').trim().toLowerCase())
+      .filter((e) => e.includes('@')),
+  );
+
+  // If no explicit list, email active staff with an admins/{email} doc
   // (except the digest bot itself).
   if (!fromList.length) {
     const bot = String(process.env.DIGEST_BOT_EMAIL || '')
       .trim()
       .toLowerCase();
-    return (adminUsers || [])
-      .map((a) => String(a.email || a.id || '').trim().toLowerCase())
-      .filter((e) => e && e !== bot && e.includes('@'));
+    return [...activeEmails].filter((e) => e && e !== bot);
   }
-  return [...new Set(fromList)];
+  // Configured digest list may still include departed people — skip inactive.
+  return [...new Set(fromList.filter((e) => activeEmails.has(e)))];
 }
 
 function adminByEmail(adminUsers = []) {

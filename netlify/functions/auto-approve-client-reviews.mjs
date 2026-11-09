@@ -112,7 +112,7 @@ async function autoApproveOne({
     console.warn('[auto-approve-client-reviews] message:', err?.message || err);
   }
 
-  const notifyEmails = collectClientStaffNotifyEmails(client, [
+  const notifyEmails = await collectClientStaffNotifyEmails(client, [
     current.approvalRequestedByEmail,
     ...(Array.isArray(current.assigneeEmails) ? current.assigneeEmails : []),
   ]);

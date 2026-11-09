@@ -9,7 +9,10 @@ import {
 } from './lib/firebaseDigestClient.mjs';
 import { writeClientActivity } from './lib/clientActivity.mjs';
 import { sendDigestEmail } from './lib/mailer.mjs';
-import { appBaseUrl } from './lib/clientMessaging.mjs';
+import {
+  appBaseUrl,
+  collectClientStaffNotifyEmails,
+} from './lib/clientMessaging.mjs';
 import { getBillingPeriod } from '../../src/utils/billingEngine.js';
 import { getEnabledRetainerCategoryNames } from '../../src/utils/retainerCategories.js';
 
@@ -130,16 +133,12 @@ export default async (req) => {
 
     await mergeDoc(db, `clients/${clientId}`, { todoCycles: cycles });
 
-    const team = Array.isArray(client.teamMemberAccessEmails)
-      ? client.teamMemberAccessEmails
-          .map((e) => String(e || '').trim().toLowerCase())
-          .filter((e) => e.includes('@'))
-      : [];
+    const team = await collectClientStaffNotifyEmails(client);
     if (team.length) {
       try {
         const href = `${appBaseUrl()}/clients/${clientId}?tab=tasks`;
         await sendDigestEmail({
-          to: [...new Set(team)],
+          to: team,
           subject: `New task request — ${client.name || 'Client'}`,
           text: `${caller.email} requested a task:\n\n${text}\n\nOpen: ${href}`,
           html: `<p><strong>${caller.email}</strong> requested a task on <strong>${client.name || 'Client'}</strong>:</p><p>${text.replace(/</g, '&lt;')}</p><p><a href="${href}">Review in CRM</a></p>`,

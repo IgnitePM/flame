@@ -39,6 +39,7 @@ export default async (req) => {
     const db = await getDigestDb();
     const admins = await fetchCollection(db, 'admins');
     const people = admins
+      .filter((a) => a && a.disabled !== true && a.active !== false)
       .map((a) => {
         const email = String(a.email || a.id || '')
           .trim()

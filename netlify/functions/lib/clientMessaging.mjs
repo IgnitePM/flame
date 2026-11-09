@@ -4,7 +4,16 @@
 
 import { sendDigestEmail } from './mailer.mjs';
 import { writeClientActivity } from './clientActivity.mjs';
-import { fetchDoc, getDigestDb, mergeDoc } from './firebaseDigestClient.mjs';
+import {
+  fetchCollection,
+  fetchDoc,
+  getDigestDb,
+  mergeDoc,
+} from './firebaseDigestClient.mjs';
+import {
+  filterToActiveStaffEmails,
+  resolveClientAlertStaffEmails,
+} from './activeStaff.mjs';
 
 export function appBaseUrl() {
   return String(
@@ -47,17 +56,20 @@ function portalEmails(client) {
   ];
 }
 
-function staffNotifyEmails(client) {
-  const team = Array.isArray(client?.teamMemberAccessEmails)
-    ? client.teamMemberAccessEmails
-    : [];
-  return [
-    ...new Set(
-      team
-        .map((e) => String(e || '').trim().toLowerCase())
-        .filter((e) => e.includes('@')),
-    ),
-  ];
+async function loadAdminUsers() {
+  try {
+    const db = await getDigestDb();
+    return await fetchCollection(db, 'admins');
+  } catch (err) {
+    console.warn('[clientMessaging] load admins:', err?.message || err);
+    return [];
+  }
+}
+
+/** Active staff for client-scoped alerts (drops disabled; avoids all-kiosk spam). */
+async function staffNotifyEmails(client, extra = []) {
+  const admins = await loadAdminUsers();
+  return resolveClientAlertStaffEmails(client, admins, extra);
 }
 
 function escapeHtml(s) {
@@ -108,7 +120,7 @@ export async function notifyPortalNewMessage({ client, messageBody, authorName }
 }
 
 export async function notifyStaffClientMessage({ client, messageBody, authorEmail }) {
-  const to = staffNotifyEmails(client);
+  const to = await staffNotifyEmails(client);
   if (!to.length) return { sent: 0, skipped: 'no_staff_emails' };
   const href = `${appBaseUrl()}/clients/${client.id}?tab=messages`;
   const { text, html } = emailShell({
@@ -148,7 +160,7 @@ export async function notifyPortalReviewSent({ client, title, description }) {
 }
 
 export async function notifyStaffReviewDecision({ client, title, status, note, byEmail }) {
-  const to = staffNotifyEmails(client);
+  const to = await staffNotifyEmails(client);
   if (!to.length) return { sent: 0, skipped: 'no_staff_emails' };
   const label = status === 'approved' ? 'Approved' : 'Revisions requested';
   const href = `${appBaseUrl()}/clients/${client.id}?tab=approvals`;
@@ -235,13 +247,8 @@ export async function notifyStaffTodoReviewRequested({
   byEmail,
   reviewerEmails = [],
 }) {
-  const to = [
-    ...new Set(
-      (reviewerEmails || [])
-        .map((e) => String(e || '').trim().toLowerCase())
-        .filter((e) => e.includes('@')),
-    ),
-  ];
+  const admins = await loadAdminUsers();
+  const to = filterToActiveStaffEmails(reviewerEmails, admins);
   if (!to.length) return { sent: 0, skipped: 'no_reviewers' };
   const href = `${appBaseUrl()}/clients/${client.id}?tab=tasks`;
   const { text, html } = emailShell({
@@ -270,14 +277,7 @@ export async function notifyStaffTodoApprovalDecision({
   byEmail,
   notifyEmails = [],
 }) {
-  const fallback = staffNotifyEmails(client);
-  const to = [
-    ...new Set(
-      [...(notifyEmails || []), ...fallback]
-        .map((e) => String(e || '').trim().toLowerCase())
-        .filter((e) => e.includes('@')),
-    ),
-  ];
+  const to = await staffNotifyEmails(client, notifyEmails);
   if (!to.length) return { sent: 0, skipped: 'no_staff_emails' };
   const label = status === 'approved' ? 'Approved' : 'Revisions requested';
   const href = `${appBaseUrl()}/clients/${client.id}?tab=tasks`;
@@ -305,13 +305,8 @@ export async function notifyStaffMentions({
   authorName,
   mentionedEmails = [],
 }) {
-  const to = [
-    ...new Set(
-      (mentionedEmails || [])
-        .map((e) => String(e || '').trim().toLowerCase())
-        .filter((e) => e.includes('@')),
-    ),
-  ];
+  const admins = await loadAdminUsers();
+  const to = filterToActiveStaffEmails(mentionedEmails, admins);
   if (!to.length) return { sent: 0, skipped: 'no_mentions' };
   const href = `${appBaseUrl()}/clients/${client.id}?tab=messages`;
   const { text, html } = emailShell({
@@ -400,15 +395,17 @@ export async function writeStaffInboxNotifications({
   return { written };
 }
 
-/** Staff emails that typically get client-scoped alerts. */
-export function collectClientStaffNotifyEmails(client, extra = []) {
-  return [
-    ...new Set(
-      [...staffNotifyEmails(client), ...(extra || [])]
-        .map((e) => String(e || '').trim().toLowerCase())
-        .filter((e) => e.includes('@')),
-    ),
-  ];
+/**
+ * Staff emails that typically get client-scoped alerts.
+ * Pass `adminUsers` when already loaded to avoid an extra Firestore read.
+ */
+export async function collectClientStaffNotifyEmails(
+  client,
+  extra = [],
+  adminUsers = null,
+) {
+  const admins = adminUsers || (await loadAdminUsers());
+  return resolveClientAlertStaffEmails(client, admins, extra);
 }
 
 export async function createReviewDoc(fields) {
@@ -445,14 +442,7 @@ export async function notifyStaffPortalFeedback({
   byEmail,
   notifyEmails = [],
 }) {
-  const fallback = staffNotifyEmails(client);
-  const to = [
-    ...new Set(
-      [...(notifyEmails || []), ...fallback]
-        .map((e) => String(e || '').trim().toLowerCase())
-        .filter((e) => e.includes('@')),
-    ),
-  ];
+  const to = await staffNotifyEmails(client, notifyEmails);
   if (!to.length) return { sent: 0, skipped: 'no_staff_emails' };
   const kind = type === 'bug' ? 'Bug report' : 'Feedback';
   const href = `${appBaseUrl()}/clients/${client.id}`;
@@ -481,14 +471,7 @@ export async function notifyStaffPortalTodoNote({
   byEmail,
   notifyEmails = [],
 }) {
-  const fallback = staffNotifyEmails(client);
-  const to = [
-    ...new Set(
-      [...(notifyEmails || []), ...fallback]
-        .map((e) => String(e || '').trim().toLowerCase())
-        .filter((e) => e.includes('@')),
-    ),
-  ];
+  const to = await staffNotifyEmails(client, notifyEmails);
   if (!to.length) return { sent: 0, skipped: 'no_staff_emails' };
   const href = `${appBaseUrl()}/clients/${client.id}`;
   const { text, html } = emailShell({
