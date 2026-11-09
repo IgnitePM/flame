@@ -223,14 +223,14 @@ service cloud.firestore {
       allow create: if isAnyStaff()
         && request.resource.data.recipientEmail is string
         && request.resource.data.recipientEmail != '';
-      // Admins may reassign recipientEmail during staff transfer/offboarding.
+      // Billing/admin may reassign recipientEmail during staff transfer.
       // Everyone else may only dismiss their own inbox items.
-      allow update: if isAdmin() ||
+      allow update: if isBilling() ||
         (isAnyStaff()
           && resource.data.recipientEmail == emailLower()
           && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['dismissed', 'dismissedAt']));
-      allow delete: if isAdmin() ||
+      allow delete: if isBilling() ||
         (isAnyStaff() && resource.data.recipientEmail == emailLower());
     }
 

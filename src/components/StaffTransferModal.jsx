@@ -19,9 +19,15 @@ import {
 
 const BATCH_LIMIT = 400;
 
+function errMessage(err) {
+  return err?.message || String(err || 'Unknown error');
+}
+
 /**
  * Transfer active work (tasks, client access, sales ownership, inbox, digests)
  * from one staff email to another. Notes and historical attribution stay put.
+ *
+ * Re-running is safe: it rewrites emails in place and does not create duplicate tasks.
  */
 export default function StaffTransferModal({
   open,
@@ -76,6 +82,40 @@ export default function StaffTransferModal({
 
   if (!open || !fromEmail) return null;
 
+  const scrubDepartedFromClients = async (goneEmail) => {
+    const em = String(goneEmail || '')
+      .trim()
+      .toLowerCase();
+    if (!em) return 0;
+    let scrubbed = 0;
+    for (const c of clients || []) {
+      const raw = c?.teamMemberAccessEmails;
+      if (!Array.isArray(raw) || !c?.id) continue;
+      if (
+        !raw.some(
+          (e) =>
+            String(e || '')
+              .trim()
+              .toLowerCase() === em,
+        )
+      ) {
+        continue;
+      }
+      const next = raw
+        .map((e) => String(e || '').trim().toLowerCase())
+        .filter((e) => e && e !== em);
+      try {
+        await update(docRef('clients', c.id), {
+          teamMemberAccessEmails: next,
+        });
+        scrubbed += 1;
+      } catch {
+        /* best-effort */
+      }
+    }
+    return scrubbed;
+  };
+
   const runTransfer = async () => {
     if (busy) return;
     if (plan.errors.length) {
@@ -84,87 +124,163 @@ export default function StaffTransferModal({
     }
     setBusy(true);
     setError('');
-    try {
-      let notificationCount = 0;
+    const warnings = [];
+    let clientsOk = 0;
+    let leadsOk = 0;
+    let dealsOk = 0;
+    let notificationCount = 0;
+    let deactivated = false;
 
+    try {
+      // 1) Client task / access rewrites (core transfer — must succeed)
       for (const row of plan.clientPatches) {
         await update(docRef('clients', row.clientId), row.patch);
+        clientsOk += 1;
       }
+
+      // 2) Sales ownership — optional if Sales Funnel rules block the caller
       for (const row of plan.leadPatches) {
-        await update(docRef('leads', row.id), row.patch);
+        try {
+          await update(docRef('leads', row.id), row.patch);
+          leadsOk += 1;
+        } catch (err) {
+          warnings.push(`Lead ownership: ${errMessage(err)}`);
+        }
       }
       for (const row of plan.dealPatches) {
-        await update(docRef('deals', row.id), row.patch);
+        try {
+          await update(docRef('deals', row.id), row.patch);
+          dealsOk += 1;
+        } catch (err) {
+          warnings.push(`Deal ownership: ${errMessage(err)}`);
+        }
       }
 
+      // 3) Digest recipients
       if (plan.digestChanged && typeof updateNotifySettings === 'function') {
-        await updateNotifySettings({
-          emailDigestRecipients: plan.digestRecipients,
-        });
+        try {
+          await updateNotifySettings({
+            emailDigestRecipients: plan.digestRecipients,
+          });
+        } catch (err) {
+          warnings.push(`Digest list: ${errMessage(err)}`);
+        }
       }
 
-      // Reassign open inbox items (admin may rewrite recipientEmail).
-      const notifSnap = await getDocs(
-        query(
-          collection(db, 'notifications'),
-          where('recipientEmail', '==', fromEmail),
-        ),
-      );
-      const notifDocs = notifSnap.docs;
-      notificationCount = notifDocs.length;
-      for (let i = 0; i < notifDocs.length; i += BATCH_LIMIT) {
-        const chunk = notifDocs.slice(i, i + BATCH_LIMIT);
-        const batch = writeBatch(db);
-        chunk.forEach((d) => {
-          batch.update(d.ref, { recipientEmail: plan.toEmail });
-        });
-        await batch.commit();
-      }
-
-      if (deactivateAfter) {
-        const now = Date.now();
-        const deactivatePatch = {
-          disabled: true,
-          disabledAt: now,
-          updatedAt: now,
-          transferredToEmail: plan.toEmail,
-        };
-        const ids = Array.isArray(fromUser?.ids) ? fromUser.ids : [];
-        await Promise.all(
-          ids.map((id) =>
-            update(docRef('admins', id), deactivatePatch).catch(() => {}),
+      // 4) Inbox reassignment — best-effort (rules may block non-admin)
+      try {
+        const notifSnap = await getDocs(
+          query(
+            collection(db, 'notifications'),
+            where('recipientEmail', '==', fromEmail),
           ),
         );
-        // Always merge the canonical email-keyed doc used by security rules.
-        await setDoc(
-          docRef('admins', fromEmail),
-          { email: fromEmail, ...deactivatePatch },
-          { merge: true },
+        const notifDocs = notifSnap.docs;
+        notificationCount = notifDocs.length;
+        for (let i = 0; i < notifDocs.length; i += BATCH_LIMIT) {
+          const chunk = notifDocs.slice(i, i + BATCH_LIMIT);
+          const batch = writeBatch(db);
+          chunk.forEach((d) => {
+            batch.update(d.ref, { recipientEmail: plan.toEmail });
+          });
+          await batch.commit();
+        }
+      } catch (err) {
+        warnings.push(
+          `Inbox notifications could not be moved (${errMessage(err)}). Task assignments were still transferred.`,
         );
+        notificationCount = 0;
+      }
+
+      // 5) Deactivate + scrub ACLs — separate from transfer so a rules miss
+      //    does not look like a failed transfer.
+      if (deactivateAfter) {
+        try {
+          const now = Date.now();
+          const deactivatePatch = {
+            disabled: true,
+            disabledAt: now,
+            updatedAt: now,
+            transferredToEmail: plan.toEmail,
+          };
+          const ids = Array.isArray(fromUser?.ids) ? fromUser.ids : [];
+          await Promise.all(
+            ids.map((id) =>
+              update(docRef('admins', id), deactivatePatch).catch(() => {}),
+            ),
+          );
+          await setDoc(
+            docRef('admins', fromEmail),
+            { email: fromEmail, ...deactivatePatch },
+            { merge: true },
+          );
+          await scrubDepartedFromClients(fromEmail);
+          deactivated = true;
+        } catch (err) {
+          warnings.push(
+            `Could not deactivate ${fromLabel} (${errMessage(err)}). Use the Deactivate button on their Users card.`,
+          );
+        }
       }
 
       logAudit?.({
         action: 'staff_transfer',
         fromEmail: plan.fromEmail,
         toEmail: plan.toEmail,
-        summary: plan.summary,
+        summary: {
+          ...plan.summary,
+          clientsWritten: clientsOk,
+          leadsWritten: leadsOk,
+          dealsWritten: dealsOk,
+        },
         notifications: notificationCount,
-        deactivated: deactivateAfter,
+        deactivated,
+        warnings,
       });
 
-      window.alert(
-        `Transferred from ${fromLabel} to ${plan.toEmail}.\n\n${summarizeTransferPlan(
-          plan,
+      const summaryBits = [
+        summarizeTransferPlan(
+          {
+            ...plan,
+            summary: {
+              ...plan.summary,
+              clients: clientsOk || plan.summary.clients,
+              leads: leadsOk,
+              deals: dealsOk,
+            },
+          },
           notificationCount,
-        )}${
-          deactivateAfter
-            ? `\n\n${fromLabel} was deactivated. Their notes and history still show under their name.`
-            : ''
-        }`,
+        ),
+      ];
+      if (deactivateAfter) {
+        summaryBits.push(
+          deactivated
+            ? `${fromLabel} was deactivated. Notes and history still show under their name.`
+            : `${fromLabel} was NOT deactivated — use Deactivate on their Users card.`,
+        );
+      }
+      if (warnings.length) {
+        summaryBits.push(`Notes:\n- ${warnings.join('\n- ')}`);
+      }
+      summaryBits.push(
+        'Re-running transfer does not duplicate tasks; it only rewrites remaining assignments.',
       );
+
+      window.alert(
+        `Transferred from ${fromLabel} to ${plan.toEmail}.\n\n${summaryBits.join('\n\n')}`,
+      );
+
+      if (warnings.length && !deactivated && deactivateAfter) {
+        setError(warnings[warnings.length - 1]);
+        return;
+      }
       onClose?.();
     } catch (err) {
-      setError(err?.message || String(err));
+      setError(
+        clientsOk > 0
+          ? `Some work transferred (${clientsOk} client${clientsOk === 1 ? '' : 's'}), then failed: ${errMessage(err)}`
+          : errMessage(err),
+      );
     } finally {
       setBusy(false);
     }
@@ -184,7 +300,8 @@ export default function StaffTransferModal({
                 Move active assignments from{' '}
                 <span className="text-slate-700 font-bold">{fromLabel}</span> to a
                 replacement. Notes, comments, and timesheets stay attributed to{' '}
-                {fromLabel}.
+                {fromLabel}. Safe to run more than once — it will not duplicate
+                tasks.
               </p>
             </div>
           </div>
@@ -231,8 +348,8 @@ export default function StaffTransferModal({
                 : summarizeTransferPlan(plan)}
               {!plan.errors.length && plan.total === 0 ? (
                 <span className="block text-xs text-slate-400 mt-1">
-                  You can still deactivate them so they lose access while keeping
-                  their history.
+                  Nothing left to reassign (already transferred, or they had no
+                  active work). You can still deactivate them.
                 </span>
               ) : null}
             </div>
@@ -274,7 +391,11 @@ export default function StaffTransferModal({
               onClick={runTransfer}
               className="flex-1 bg-[#fd7414] hover:brightness-95 text-white font-bold py-3.5 rounded-2xl transition-all disabled:opacity-40"
             >
-              {busy ? 'Transferring…' : 'Transfer'}
+              {busy
+                ? 'Transferring…'
+                : plan.total === 0 && deactivateAfter
+                  ? 'Deactivate'
+                  : 'Transfer'}
             </button>
           </div>
         </div>
