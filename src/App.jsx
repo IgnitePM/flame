@@ -7172,6 +7172,11 @@ export default function App() {
                     : [deleteConfirm.id].filter(Boolean);
                   if (deleteConfirm.mode === 'deactivate' && deleteConfirm.collection === 'admins') {
                     const now = Date.now();
+                    const goneEmail = String(
+                      deleteConfirm.email || '',
+                    )
+                      .trim()
+                      .toLowerCase();
                     await Promise.all(
                       ids.map((id) =>
                         updateDoc(doc(db, 'admins', id), {
@@ -7181,21 +7186,70 @@ export default function App() {
                         }).catch(() => {}),
                       ),
                     );
-                    if (deleteConfirm.email) {
+                    if (goneEmail) {
                       await setDoc(
-                        doc(db, 'admins', String(deleteConfirm.email).toLowerCase()),
+                        doc(db, 'admins', goneEmail),
                         {
-                          email: String(deleteConfirm.email).toLowerCase(),
+                          email: goneEmail,
                           disabled: true,
                           disabledAt: now,
                           updatedAt: now,
                         },
                         { merge: true },
                       ).catch(() => {});
+                      // Drop them from client workspace ACLs + digest list so
+                      // mailers stop attempting delivery to departed addresses.
+                      const clientScrubs = (clients || [])
+                        .filter((c) => {
+                          const raw = c?.teamMemberAccessEmails;
+                          if (!Array.isArray(raw)) return false;
+                          return raw.some(
+                            (e) =>
+                              String(e || '')
+                                .trim()
+                                .toLowerCase() === goneEmail,
+                          );
+                        })
+                        .map((c) => {
+                          const next = (c.teamMemberAccessEmails || [])
+                            .map((e) => String(e || '').trim().toLowerCase())
+                            .filter((e) => e && e !== goneEmail);
+                          return updateDoc(doc(db, 'clients', c.id), {
+                            teamMemberAccessEmails: next,
+                          }).catch(() => {});
+                        });
+                      await Promise.all(clientScrubs);
+                      const digest = Array.isArray(
+                        notifySettings?.emailDigestRecipients,
+                      )
+                        ? notifySettings.emailDigestRecipients
+                        : [];
+                      if (
+                        digest.some(
+                          (e) =>
+                            String(e || '')
+                              .trim()
+                              .toLowerCase() === goneEmail,
+                        )
+                      ) {
+                        await setDoc(
+                          doc(db, 'settings', 'notifications'),
+                          {
+                            emailDigestRecipients: digest
+                              .map((e) =>
+                                String(e || '')
+                                  .trim()
+                                  .toLowerCase(),
+                              )
+                              .filter((e) => e && e !== goneEmail),
+                          },
+                          { merge: true },
+                        ).catch(() => {});
+                      }
                     }
                     logAudit?.({
                       action: 'staff_deactivate',
-                      email: deleteConfirm.email || ids[0],
+                      email: goneEmail || ids[0],
                     });
                   } else {
                     await Promise.all(

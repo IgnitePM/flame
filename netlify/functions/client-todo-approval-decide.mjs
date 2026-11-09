@@ -202,7 +202,7 @@ export default async (req) => {
     }
 
     let emailResult = { sent: 0 };
-    const notifyEmails = collectClientStaffNotifyEmails(client, [
+    const notifyEmails = await collectClientStaffNotifyEmails(client, [
       item.approvalRequestedByEmail,
       ...(Array.isArray(item.assigneeEmails) ? item.assigneeEmails : []),
       ...(Array.isArray(item.approvalReviewerEmails)
