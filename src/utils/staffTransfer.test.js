@@ -161,4 +161,36 @@ describe('planStaffTransfer', () => {
     });
     assert.ok(plan.errors.length);
   });
+
+  it('is idempotent — a second plan finds nothing left to move', () => {
+    const client = {
+      id: 'c1',
+      teamMemberAccessEmails: ['julius@ignitepm.com'],
+      todoCycles: {
+        a: {
+          cat: {
+            items: [{ id: '1', assigneeEmails: ['julius@ignitepm.com'] }],
+          },
+        },
+      },
+    };
+    const first = planStaffTransfer({
+      fromEmail: 'julius@ignitepm.com',
+      toEmail: 'chris.basalo@ignitepm.com',
+      clients: [client],
+    });
+    assert.equal(first.clientPatches.length, 1);
+    // Apply the patch the same way the modal writes it.
+    const after = {
+      ...client,
+      ...first.clientPatches[0].patch,
+    };
+    const second = planStaffTransfer({
+      fromEmail: 'julius@ignitepm.com',
+      toEmail: 'chris.basalo@ignitepm.com',
+      clients: [after],
+    });
+    assert.equal(second.total, 0);
+    assert.equal(second.clientPatches.length, 0);
+  });
 });
