@@ -6,10 +6,14 @@
 import { isClientActiveForWork } from '../../../src/utils/clientActiveForWork.js';
 import {
   buildStrategyReminderMessageBody,
+  buildStrategyReminderSubject,
   isTorontoFirstOfMonth,
+  resolveStrategyAgencyName,
   resolveStrategyBookingUrl,
   strategyReminderMonthKey,
   strategyReminderMonthLabel,
+  strategyReminderMonthName,
+  torontoParts,
 } from '../../../src/utils/strategySessionBooking.js';
 import {
   appBaseUrl,
@@ -84,7 +88,10 @@ export async function runStrategySessionReminders(opts = {}) {
   }
 
   const bookingUrl = resolveStrategyBookingUrl(settings);
+  const agencyName = resolveStrategyAgencyName(settings);
   const portalHref = `${appBaseUrl()}?tab=dashboard`;
+  const monthName = strategyReminderMonthName(now);
+  const year = String(torontoParts(now).year);
   const clients = await fetchCollection(db, 'clients');
 
   const eligible = (clients || []).filter((c) => {
@@ -113,11 +120,18 @@ export async function runStrategySessionReminders(opts = {}) {
       results.skippedNoEmail += 1;
       continue;
     }
-    const body = buildStrategyReminderMessageBody({
+    const personalize = {
+      settings,
       clientName: client.name || '',
       monthLabel,
+      monthName,
+      year,
       bookingUrl,
-    });
+      portalUrl: portalHref,
+      agencyName,
+    };
+    const body = buildStrategyReminderMessageBody(personalize);
+    const subject = buildStrategyReminderSubject(personalize);
 
     if (dryRun) {
       results.messaged += 1;
@@ -132,7 +146,7 @@ export async function runStrategySessionReminders(opts = {}) {
         body,
         authorType: 'staff',
         authorEmail: SYSTEM_EMAIL,
-        authorName: 'Ignite PM',
+        authorName: agencyName,
         attachments: [],
         createdAt: now.getTime(),
         systemKind: 'strategy_session_reminder',
@@ -158,6 +172,8 @@ export async function runStrategySessionReminders(opts = {}) {
         bookingUrl,
         portalHref,
         messageBody: body,
+        subject,
+        agencyName,
       });
       if (sent?.sent > 0) {
         results.emailed += 1;

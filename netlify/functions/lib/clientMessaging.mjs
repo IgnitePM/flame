@@ -126,10 +126,13 @@ export async function notifyStrategySessionReminder({
   bookingUrl,
   portalHref,
   messageBody,
+  subject,
+  agencyName,
 }) {
   const to = portalEmails(client);
   if (!to.length) return { sent: 0, skipped: 'no_portal_emails' };
   const month = String(monthLabel || '').trim() || 'this month';
+  const agency = String(agencyName || '').trim() || 'Ignite PM';
   const href =
     String(portalHref || '').trim() || `${appBaseUrl()}?tab=dashboard`;
   const direct = String(bookingUrl || '').trim();
@@ -141,16 +144,19 @@ export async function notifyStrategySessionReminder({
     ]
       .filter(Boolean)
       .join('\n\n');
+  const emailSubject =
+    String(subject || '').trim() ||
+    `Book your ${month} Strategy & Review session — ${client.name || agency}`;
   const { text, html } = emailShell({
-    eyebrow: 'Ignite PM · Strategy & Review',
-    title: `Book your ${month} Strategy & Review session`,
+    eyebrow: `${agency} · Strategy & Review`,
+    title: emailSubject,
     bodyText: body,
     ctaLabel: 'Open portal to book',
     ctaHref: href,
   });
   await sendDigestEmail({
     to,
-    subject: `Book your ${month} Strategy & Review session — ${client.name || 'Ignite'}`,
+    subject: emailSubject,
     text,
     html,
   });
