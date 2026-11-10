@@ -2634,7 +2634,7 @@ const EmployeeKiosk = ({
                       </div>
                       <button
                         type="button"
-                        onClick={handleStopTask}
+                        onClick={() => handleStopTask(activeTask)}
                         className="w-full bg-black hover:bg-slate-900 text-white p-5 rounded-2xl font-black text-lg mb-6 shadow-xl flex items-center justify-center gap-3 transition-all active:scale-95"
                       >
                         <Pause className="w-5 h-5 fill-current" /> Pause Task

@@ -1769,10 +1769,13 @@ export default function App() {
   }, [user, location.pathname, location.search, navigate, clients]);
 
   const handleStopTask = async (taskArg = null) => {
-    const task =
-      (taskArg && typeof taskArg === 'object' ? taskArg : null) ||
-      activeTask ||
-      null;
+    // Ignore React click/keyboard events mistakenly passed as onClick={handleStopTask}.
+    const looksLikeTask =
+      taskArg &&
+      typeof taskArg === 'object' &&
+      typeof taskArg.id === 'string' &&
+      (taskArg.clientName || taskArg.projectName || taskArg.status);
+    const task = looksLikeTask ? taskArg : activeTask || null;
     if (!task?.id) return;
     const endTime = Date.now();
     const segment = endTime - (task.lastResumeTime || task.clockInTime);
