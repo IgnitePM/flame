@@ -95,15 +95,158 @@ export const formatTime = (ms) => {
 };
 
 // Dynamic Billing Period & Global Carryover Logic.
+// Cycle keys are always America/Toronto midnights (DST-aware) so the browser
+// CRM and Netlify MCP/API share the same map keys regardless of host TZ.
+export const BILLING_TIME_ZONE = 'America/Toronto';
+
 // billingDay 29-31 is clamped to the last day of short months so cycle
 // boundaries never roll into the wrong month (e.g. Feb 31 → Mar 3).
 const clampBillingDay = (y, m, d) => {
-  const norm = new Date(y, m, 1); // normalize month overflow/underflow
-  const daysInMonth = new Date(norm.getFullYear(), norm.getMonth() + 1, 0).getDate();
+  const norm = new Date(Date.UTC(y, m, 1)); // normalize month overflow/underflow
+  const daysInMonth = new Date(
+    Date.UTC(norm.getUTCFullYear(), norm.getUTCMonth() + 1, 0),
+  ).getUTCDate();
   return Math.min(d, daysInMonth);
 };
 
-/** Start timestamp of the billing cycle that begins on billingDay in year/month. */
+/** Offset (ms) such that localWallUtcMs - offset = instant in `timeZone`. */
+function getTimeZoneOffsetMs(timeZone, instantMs) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  });
+  const parts = {};
+  for (const p of dtf.formatToParts(new Date(instantMs))) {
+    if (p.type !== 'literal') parts[p.type] = p.value;
+  }
+  const asUTC = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+    Number(parts.second),
+  );
+  return asUTC - instantMs;
+}
+
+/** Calendar Y/M/D in an IANA zone for an instant (month is 0-based). */
+export function zonedYmd(timeZone, instantMs = Date.now()) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  });
+  const parts = {};
+  for (const p of dtf.formatToParts(new Date(instantMs))) {
+    if (p.type !== 'literal') parts[p.type] = p.value;
+  }
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month) - 1,
+    day: Number(parts.day),
+  };
+}
+
+/**
+ * UTC timestamp for a wall-clock date/time in `timeZone` (DST-aware).
+ * monthIndex is 0-based.
+ */
+export function zonedWallTimeToUtcMs(
+  timeZone,
+  year,
+  monthIndex,
+  day,
+  hour = 0,
+  minute = 0,
+  second = 0,
+  ms = 0,
+) {
+  const utcGuess = Date.UTC(year, monthIndex, day, hour, minute, second, ms);
+  const offset1 = getTimeZoneOffsetMs(timeZone, utcGuess);
+  let utc = utcGuess - offset1;
+  const offset2 = getTimeZoneOffsetMs(timeZone, utc);
+  if (offset2 !== offset1) utc = utcGuess - offset2;
+  return utc;
+}
+
+/** True when `ms` is exactly 00:00:00.000 UTC. */
+export function isExactUtcMidnight(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n)) return false;
+  const d = new Date(n);
+  return (
+    d.getUTCHours() === 0 &&
+    d.getUTCMinutes() === 0 &&
+    d.getUTCSeconds() === 0 &&
+    d.getUTCMilliseconds() === 0
+  );
+}
+
+/** True when `ms` is exactly 00:00:00.000 America/Toronto. */
+export function isTorontoMidnightMs(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n)) return false;
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: BILLING_TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  });
+  const parts = {};
+  for (const p of dtf.formatToParts(new Date(n))) {
+    if (p.type !== 'literal') parts[p.type] = p.value;
+  }
+  return (
+    Number(parts.hour) === 0 &&
+    Number(parts.minute) === 0 &&
+    Number(parts.second) === 0 &&
+    n % 1000 === 0
+  );
+}
+
+/**
+ * Map a UTC-midnight cycle key to the matching Toronto-midnight key
+ * (same calendar Y-M-D). Returns null when input is not UTC midnight.
+ */
+export function utcMidnightKeyToTorontoMidnightKey(utcMs) {
+  if (!isExactUtcMidnight(utcMs)) return null;
+  const d = new Date(Number(utcMs));
+  return zonedWallTimeToUtcMs(
+    BILLING_TIME_ZONE,
+    d.getUTCFullYear(),
+    d.getUTCMonth(),
+    d.getUTCDate(),
+    0,
+    0,
+    0,
+    0,
+  );
+}
+
+/**
+ * True when `cycleKeyMs` looks like a legacy Netlify UTC-midnight billing
+ * cycle key for this client's billingDay (and is not already Toronto midnight).
+ */
+export function isLegacyUtcBillingCycleKey(cycleKeyMs, billingDay = 1) {
+  const n = Number(cycleKeyMs);
+  if (!isExactUtcMidnight(n) || isTorontoMidnightMs(n)) return false;
+  const d = new Date(n);
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth();
+  const day = d.getUTCDate();
+  return day === clampBillingDay(y, m, Number(billingDay) || 1);
+}
+
+/** Start timestamp of the billing cycle that begins on billingDay in year/month (Toronto midnight). */
 export const billingCycleStartAt = (billingDay, year, month) => {
   let y = year;
   let m = month;
@@ -115,27 +258,36 @@ export const billingCycleStartAt = (billingDay, year, month) => {
     m -= 12;
     y++;
   }
-  return new Date(y, m, clampBillingDay(y, m, billingDay), 0, 0, 0, 0).getTime();
+  const day = clampBillingDay(y, m, billingDay);
+  return zonedWallTimeToUtcMs(BILLING_TIME_ZONE, y, m, day, 0, 0, 0, 0);
 };
 
 /** Next cycle start after `cycleStartMs` (exclusive end of that cycle). */
 export const nextBillingCycleStart = (billingDay, cycleStartMs) => {
-  const d = new Date(cycleStartMs);
-  return billingCycleStartAt(billingDay, d.getFullYear(), d.getMonth() + 1);
+  const { year, month } = zonedYmd(BILLING_TIME_ZONE, cycleStartMs);
+  return billingCycleStartAt(billingDay, year, month + 1);
 };
 
 /** Previous cycle start before `cycleStartMs`. */
 export const prevBillingCycleStart = (billingDay, cycleStartMs) => {
-  const d = new Date(cycleStartMs);
-  return billingCycleStartAt(billingDay, d.getFullYear(), d.getMonth() - 1);
+  const { year, month } = zonedYmd(BILLING_TIME_ZONE, cycleStartMs);
+  return billingCycleStartAt(billingDay, year, month - 1);
 };
 
-export const getBillingPeriod = (billingDay = 1, offsetMonths = 0) => {
-  const now = new Date();
-  let currentMonth = now.getMonth();
-  let currentYear = now.getFullYear();
+/**
+ * Current (or offset) billing window using America/Toronto calendar days.
+ * `nowMs` is injectable for tests.
+ */
+export const getBillingPeriod = (
+  billingDay = 1,
+  offsetMonths = 0,
+  nowMs = Date.now(),
+) => {
+  const { year, month, day } = zonedYmd(BILLING_TIME_ZONE, nowMs);
+  let currentMonth = month;
+  let currentYear = year;
 
-  if (now.getDate() < clampBillingDay(currentYear, currentMonth, billingDay)) {
+  if (day < clampBillingDay(currentYear, currentMonth, billingDay)) {
     currentMonth--;
   }
   currentMonth += offsetMonths;

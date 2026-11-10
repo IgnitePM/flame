@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "test": "node --test src/utils/*.test.js netlify/functions/lib/*.test.mjs",
     "migrate:backfill-shift-ids": "node scripts/backfill-task-shift-ids.mjs",
-    "migrate:backfill-shift-ids:apply": "node scripts/backfill-task-shift-ids.mjs --apply"
+    "migrate:backfill-shift-ids:apply": "node scripts/backfill-task-shift-ids.mjs --apply",
+    "migrate:utc-todo-cycle-keys": "node scripts/migrate-utc-todo-cycle-keys.mjs",
+    "migrate:utc-todo-cycle-keys:apply": "node scripts/migrate-utc-todo-cycle-keys.mjs --apply"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.1",
