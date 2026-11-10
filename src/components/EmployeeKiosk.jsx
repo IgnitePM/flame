@@ -74,10 +74,23 @@ import TaskApprovalModal, {
   TodoApprovalBadge,
 } from './TaskApprovalModal.jsx';
 import ClientMessagesPanel from './ClientMessagesPanel.jsx';
+import KioskWorkspaceTabs from './KioskWorkspaceTabs.jsx';
 import {
   filterClientsForTeamMember,
   teamMemberCanViewClient,
 } from '../utils/teamClientAccess.js';
+import {
+  MAX_KIOSK_WORKSPACES,
+  billingTargetMatchesActiveTask,
+  createWorkspace,
+  findWorkspaceIndex,
+  liveDurationForTask,
+  loadWorkspacesFromStorage,
+  removeWorkspace,
+  saveWorkspacesToStorage,
+  upsertWorkspace,
+  updateWorkspace,
+} from '../utils/kioskWorkspaces.js';
 
 /** Hours-tracked vs estimated-hours bar for a custom project (kiosk panels). */
 const KioskProjectProgressCard = ({ project, stats, className = '' }) => {
@@ -133,8 +146,10 @@ const EmployeeKiosk = ({
   user,
   activeShift,
   activeTask,
+  activeTasks = [],
   liveDuration,
   liveTaskDuration,
+  liveTaskDurationsById = {},
   clients,
   selectableRetainers,
   GENERAL_LABEL,
@@ -197,6 +212,30 @@ const EmployeeKiosk = ({
     if (match?.id) openClientPage(match.id);
   };
   const expenseFx = fxToCad || FALLBACK_FX_TO_CAD;
+  const workspaceUserKey = String(
+    staffEmail || user?.email || user?.uid || 'anon',
+  )
+    .trim()
+    .toLowerCase();
+  const [workspaces, setWorkspaces] = React.useState(() => {
+    if (typeof window === 'undefined') return [createWorkspace()];
+    const loaded = loadWorkspacesFromStorage(
+      window.localStorage,
+      workspaceUserKey,
+    );
+    return loaded?.workspaces?.length
+      ? loaded.workspaces
+      : [createWorkspace()];
+  });
+  const [activeWorkspaceId, setActiveWorkspaceId] = React.useState(() => {
+    if (typeof window === 'undefined') return null;
+    const loaded = loadWorkspacesFromStorage(
+      window.localStorage,
+      workspaceUserKey,
+    );
+    return loaded?.activeId || loaded?.workspaces?.[0]?.id || null;
+  });
+  const applyingWorkspaceRef = React.useRef(false);
   const [clientSearch, setClientSearch] = React.useState('');
   const [socialAdAmount, setSocialAdAmount] = React.useState('');
   const [socialAdDescription, setSocialAdDescription] = React.useState('');
@@ -1015,10 +1054,205 @@ const EmployeeKiosk = ({
     );
   };
 
-  // When a task is actively running, use the active task's client/category
-  // so the retainer progress bar doesn't lag behind when switching tasks.
-  const effectiveClientName = activeTask?.clientName || selectedClient;
+  // Browse context follows the selected workspace tab — not the running timer —
+  // so you can flip between clients while AI (or anything else) is in flight.
+  const effectiveClientName = selectedClient;
   const selectedClientObj = clientsFull?.find((c) => c.name === effectiveClientName);
+
+  const billingTargetForActiveTask = React.useCallback(
+    (task) => {
+      if (!task) return '';
+      if (task.projectId) return `project_${task.projectId}`;
+      if (
+        task.projectName === GENERAL_LABEL ||
+        task.projectName === 'General / Unclassified'
+      ) {
+        return 'retainer_GENERAL_UNCLASSIFIED';
+      }
+      if (task.projectName) return `retainer_${task.projectName}`;
+      return '';
+    },
+    [GENERAL_LABEL],
+  );
+
+  const runningTasks = React.useMemo(
+    () =>
+      Array.isArray(activeTasks)
+        ? activeTasks
+        : activeTask
+          ? [activeTask]
+          : [],
+    [activeTasks, activeTask],
+  );
+  const viewingActiveTask = Boolean(
+    activeTask &&
+      selectedClient &&
+      activeTask.clientName === selectedClient &&
+      (!selectedBillingTarget ||
+        billingTargetMatchesActiveTask(activeTask, selectedBillingTarget)),
+  );
+  const otherRunningTasks = runningTasks.filter(
+    (t) => !activeTask || t.id !== activeTask.id,
+  );
+
+  const applyWorkspace = React.useCallback(
+    (ws) => {
+      if (!ws) return;
+      applyingWorkspaceRef.current = true;
+      setActiveWorkspaceId(ws.id);
+      setSelectedClient(ws.clientName || '');
+      setSelectedBillingTarget(ws.billingTarget || '');
+      setClientSearch('');
+      window.setTimeout(() => {
+        applyingWorkspaceRef.current = false;
+      }, 0);
+    },
+    [setSelectedClient, setSelectedBillingTarget],
+  );
+
+  const focusTimingWorkspace = React.useCallback(
+    (task = null) => {
+      const target = task || otherRunningTasks[0] || activeTask;
+      if (!target?.clientName) return;
+      const billingTarget = billingTargetForActiveTask(target);
+      const { workspaces: next, activeId } = upsertWorkspace(workspaces, {
+        clientName: target.clientName,
+        billingTarget,
+      });
+      setWorkspaces(next);
+      const ws = next.find((w) => w.id === activeId);
+      if (ws) applyWorkspace(ws);
+    },
+    [
+      activeTask,
+      applyWorkspace,
+      billingTargetForActiveTask,
+      otherRunningTasks,
+      workspaces,
+    ],
+  );
+
+  const restoredWorkspaceKeyRef = React.useRef('');
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const loaded = loadWorkspacesFromStorage(
+      window.localStorage,
+      workspaceUserKey,
+    );
+    if (!loaded?.workspaces?.length) return;
+    setWorkspaces(loaded.workspaces);
+    setActiveWorkspaceId(loaded.activeId || loaded.workspaces[0].id);
+    // Re-allow one restore pass when the signed-in user changes.
+    if (restoredWorkspaceKeyRef.current !== workspaceUserKey) {
+      restoredWorkspaceKeyRef.current = '';
+    }
+  }, [workspaceUserKey]);
+
+  // After reload, re-open the last active client tab into the picker.
+  React.useEffect(() => {
+    if (restoredWorkspaceKeyRef.current === workspaceUserKey) return;
+    if (!workspaces.length) return;
+    restoredWorkspaceKeyRef.current = workspaceUserKey;
+    if (selectedClient) return;
+    const ws =
+      workspaces.find((w) => w.id === activeWorkspaceId) || workspaces[0];
+    if (ws && (ws.clientName || ws.billingTarget)) {
+      applyWorkspace(ws);
+    }
+  }, [
+    workspaceUserKey,
+    workspaces,
+    activeWorkspaceId,
+    selectedClient,
+    applyWorkspace,
+  ]);
+
+  React.useEffect(() => {
+    if (!activeWorkspaceId && workspaces[0]?.id) {
+      setActiveWorkspaceId(workspaces[0].id);
+    }
+  }, [activeWorkspaceId, workspaces]);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    saveWorkspacesToStorage(window.localStorage, workspaceUserKey, {
+      workspaces,
+      activeId: activeWorkspaceId,
+    });
+  }, [workspaces, activeWorkspaceId, workspaceUserKey]);
+
+  // Keep the active tab in sync with the client/category picker (and deeplinks).
+  React.useEffect(() => {
+    if (applyingWorkspaceRef.current) return;
+    setWorkspaces((prev) => {
+      if (selectedClient && selectedBillingTarget) {
+        const existingIdx = findWorkspaceIndex(prev, {
+          clientName: selectedClient,
+          billingTarget: selectedBillingTarget,
+        });
+        if (existingIdx >= 0) {
+          const existingId = prev[existingIdx].id;
+          if (existingId !== activeWorkspaceId) {
+            queueMicrotask(() => setActiveWorkspaceId(existingId));
+          }
+          return prev;
+        }
+      }
+      const id = activeWorkspaceId || prev[0]?.id;
+      if (!id) {
+        if (selectedClient || selectedBillingTarget) {
+          const ws = createWorkspace({
+            clientName: selectedClient || '',
+            billingTarget: selectedBillingTarget || '',
+          });
+          queueMicrotask(() => setActiveWorkspaceId(ws.id));
+          return [ws];
+        }
+        return prev.length ? prev : [createWorkspace()];
+      }
+      const cur = prev.find((w) => w.id === id);
+      if (
+        cur &&
+        cur.clientName === (selectedClient || '') &&
+        cur.billingTarget === (selectedBillingTarget || '')
+      ) {
+        return prev;
+      }
+      return updateWorkspace(prev, id, {
+        clientName: selectedClient || '',
+        billingTarget: selectedBillingTarget || '',
+      });
+    });
+  }, [selectedClient, selectedBillingTarget, activeWorkspaceId]);
+
+  // Pin a tab for every running timer without forcing navigation away from
+  // whatever client the user is currently browsing.
+  React.useEffect(() => {
+    if (!runningTasks.length) return;
+    setWorkspaces((prev) => {
+      let next = prev;
+      let changed = false;
+      for (const task of runningTasks) {
+        if (!task?.clientName) continue;
+        const billingTarget = billingTargetForActiveTask(task);
+        if (!billingTarget) continue;
+        if (
+          findWorkspaceIndex(next, {
+            clientName: task.clientName,
+            billingTarget,
+          }) >= 0
+        ) {
+          continue;
+        }
+        next = upsertWorkspace(next, {
+          clientName: task.clientName,
+          billingTarget,
+        }).workspaces;
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [runningTasks, billingTargetForActiveTask]);
 
   React.useEffect(() => {
     if (!selectedClientObj?.id) setClientMessagesOpen(false);
@@ -1056,9 +1290,9 @@ const EmployeeKiosk = ({
     : null;
 
   const selectedRetainerCategory = (() => {
-    // If we're actively working a retainer category (projectId is null), show progress/to-dos.
-    // If we're actively working a custom project (projectId is truthy), hide retainer UI.
-    if (activeTask) {
+    // When the open tab is the one being timed, prefer the live task fields
+    // so progress UI stays in sync. Otherwise follow the tab's billing target.
+    if (viewingActiveTask && activeTask) {
       if (activeTask.projectId) return null;
       return resolveClientCategoryName(activeTask.projectName) || null;
     }
@@ -1071,7 +1305,7 @@ const EmployeeKiosk = ({
   // panels the retainer categories use.
   const selectedProject = (() => {
     const list = projects || [];
-    if (activeTask) {
+    if (viewingActiveTask && activeTask) {
       return activeTask.projectId
         ? list.find((p) => p.id === activeTask.projectId) || null
         : null;
@@ -1759,6 +1993,39 @@ const EmployeeKiosk = ({
                 </div>
               </div>
 
+              {activeShift.status !== 'break' ? (
+                <div className="space-y-3">
+                  <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    Client tabs
+                  </div>
+                  <KioskWorkspaceTabs
+                    workspaces={workspaces}
+                    activeId={activeWorkspaceId}
+                    activeTask={activeTask}
+                    activeTasks={runningTasks}
+                    generalLabel={GENERAL_LABEL}
+                    onSelect={(id) => {
+                      const ws = workspaces.find((w) => w.id === id);
+                      if (ws) applyWorkspace(ws);
+                    }}
+                    onClose={(id) => {
+                      const next = removeWorkspace(workspaces, id);
+                      setWorkspaces(next);
+                      if (id === activeWorkspaceId) {
+                        applyWorkspace(next[0]);
+                      }
+                    }}
+                    onAdd={() => {
+                      const ws = createWorkspace();
+                      setWorkspaces((prev) =>
+                        [...prev, ws].slice(-MAX_KIOSK_WORKSPACES),
+                      );
+                      applyWorkspace(ws);
+                    }}
+                  />
+                </div>
+              ) : null}
+
               {activeShift.status === 'break' ? (
                 <div className="bg-blue-50 p-10 rounded-[32px] border border-blue-200 text-center animate-in zoom-in-95 duration-500">
                   <Coffee className="w-12 h-12 text-blue-500 mx-auto mb-4" />
@@ -1777,12 +2044,58 @@ const EmployeeKiosk = ({
                 </div>
               ) : (
                 <>
-                  {!activeTask ? (
+                  {otherRunningTasks.length > 0 ? (
+                    <div className="space-y-2">
+                      <div className="text-[10px] font-black uppercase tracking-widest text-[#fd7414]">
+                        {otherRunningTasks.length === 1
+                          ? 'Also timing'
+                          : `Also timing (${otherRunningTasks.length})`}
+                      </div>
+                      {otherRunningTasks.map((task) => (
+                        <div
+                          key={task.id}
+                          className="flex flex-col sm:flex-row sm:items-center gap-3 bg-orange-50 border border-orange-200 rounded-2xl px-4 py-3"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-black text-slate-900 truncate">
+                              {task.clientName}
+                              {task.projectName ? ` · ${task.projectName}` : ''}
+                            </div>
+                            <div className="font-mono text-lg font-black text-slate-800">
+                              {formatTime(
+                                liveTaskDurationsById[task.id] ??
+                                  liveDurationForTask(task),
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => focusTimingWorkspace(task)}
+                              className="px-3 py-2 rounded-xl bg-white border border-orange-200 text-[10px] font-black uppercase tracking-widest text-slate-700 hover:border-[#fd7414] hover:text-[#fd7414]"
+                            >
+                              Open tab
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleStopTask(task)}
+                              className="px-3 py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest hover:bg-slate-800"
+                            >
+                              Pause
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  {!viewingActiveTask ? (
                     <div className="bg-white p-6 rounded-[24px] border border-slate-200 shadow-sm space-y-4 animate-in slide-in-from-bottom-4">
                       <div className="flex items-center gap-2 mb-2 text-[#fd7414]">
                         <Activity className="w-5 h-5" />
                         <h3 className="font-black text-sm uppercase tracking-wider">
-                          Start a Task
+                          {runningTasks.length
+                            ? 'Start another timer'
+                            : 'Start a Task'}
                         </h3>
                       </div>
                       <div className="space-y-4">
@@ -1875,8 +2188,15 @@ const EmployeeKiosk = ({
                         disabled={!selectedClient || !selectedBillingTarget}
                         className="w-full bg-black text-white p-5 rounded-2xl font-black text-lg disabled:opacity-30 hover:bg-slate-800 transition-all shadow-lg mt-2"
                       >
-                        Begin Work Block
+                        {runningTasks.length
+                          ? 'Start timer here too'
+                          : 'Begin Work Block'}
                       </button>
+                      {runningTasks.length ? (
+                        <p className="text-[11px] text-slate-500 font-medium text-center">
+                          Other client timers keep running in parallel.
+                        </p>
+                      ) : null}
 
                       {selectedClientObj && selectedTodoCategoryLabel && (
                         <div className="mt-4 bg-white border border-slate-200 rounded-[24px] p-4 space-y-3">

@@ -112,6 +112,10 @@ import { buildTeamAccessMergeForTodoAssignees } from './utils/teamClientAccess.j
 import { portalUserEmailsForClient } from './utils/clientAssignees.js';
 import { isClientActiveForWork } from './utils/clientActiveForWork.js';
 import {
+  findActiveTaskForSelection,
+  liveDurationForTask,
+} from './utils/kioskWorkspaces.js';
+import {
   normalizePortalEmail,
   normalizePortalEmailList,
   portalInviteStatusLabel,
@@ -546,12 +550,13 @@ export default function App() {
   const recurringTodoReconcileInFlightRef = useRef(false);
   const policyWritePendingRef = useRef({});
   const policyWriteTimerRef = useRef(null);
-  const [activeTaskNotes, setActiveTaskNotes] = useState('');
+  const [activeTaskNotesById, setActiveTaskNotesById] = useState({});
+  const [liveTaskDurationsById, setLiveTaskDurationsById] = useState({});
 
   const idleShutdownRef = useRef({
-    activeTask: null,
+    activeTasks: [],
     activeShift: null,
-    activeTaskNotes: '',
+    activeTaskNotesById: {},
   });
   const idleAutoClockOutLockRef = useRef(false);
   const [idleClockOutNotice, setIdleClockOutNotice] = useState(null);
@@ -1431,11 +1436,72 @@ export default function App() {
     new Set([...activeTaskTypes, 'Social Ad Budget']),
   );
   const activeShift = timesheets.find(t => t.userId === user?.uid && (t.status === 'active' || t.status === 'break'));
-  const activeTask = activeShift ? taskLogs.find(t => t.shiftId === activeShift.id && t.status === 'active') : null;
+  const activeTasks = useMemo(
+    () =>
+      activeShift
+        ? taskLogs.filter(
+            (t) => t.shiftId === activeShift.id && t.status === 'active',
+          )
+        : [],
+    [activeShift, taskLogs],
+  );
+  // Focused timer = the one matching the open client tab (may be null while
+  // other client timers keep running in parallel).
+  const activeTask = useMemo(
+    () =>
+      findActiveTaskForSelection(activeTasks, {
+        clientName: selectedClient,
+        billingTarget: selectedBillingTarget,
+        generalLabel: 'General / Unclassified',
+      }),
+    [activeTasks, selectedClient, selectedBillingTarget],
+  );
 
   useEffect(() => {
-    idleShutdownRef.current = { activeTask, activeShift, activeTaskNotes };
-  }, [activeTask, activeShift, activeTaskNotes]);
+    setActiveTaskNotesById((prev) => {
+      const next = { ...prev };
+      const ids = new Set(activeTasks.map((t) => t.id));
+      let changed = false;
+      for (const t of activeTasks) {
+        if (!(t.id in next)) {
+          next[t.id] = t.notes || '';
+          changed = true;
+        }
+      }
+      for (const id of Object.keys(next)) {
+        if (!ids.has(id)) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [activeTasks]);
+
+  const activeTaskNotes = activeTask
+    ? (activeTaskNotesById[activeTask.id] ?? activeTask.notes ?? '')
+    : '';
+  const setActiveTaskNotes = useCallback(
+    (valueOrFn) => {
+      if (!activeTask?.id) return;
+      setActiveTaskNotesById((prev) => {
+        const cur = prev[activeTask.id] ?? '';
+        const nextVal =
+          typeof valueOrFn === 'function' ? valueOrFn(cur) : valueOrFn;
+        if (nextVal === cur) return prev;
+        return { ...prev, [activeTask.id]: nextVal };
+      });
+    },
+    [activeTask?.id],
+  );
+
+  useEffect(() => {
+    idleShutdownRef.current = {
+      activeTasks,
+      activeShift,
+      activeTaskNotesById,
+    };
+  }, [activeTasks, activeShift, activeTaskNotesById]);
 
   // Active Billing Targets — match by clientId when available (clientName can drift).
   // Admin-created / started projects are `active`; portal-approved ones are `approved`.
@@ -1477,10 +1543,10 @@ export default function App() {
     if (!selectedClient || !clients?.length) return;
     const c = clients.find((x) => x.name === selectedClient);
     if (c && isClientActiveForWork(c)) return;
-    if (activeTask?.clientName === selectedClient) return;
+    if (activeTasks.some((t) => t.clientName === selectedClient)) return;
     setSelectedClient('');
     setSelectedBillingTarget('');
-  }, [clients, selectedClient, activeTask?.clientName]);
+  }, [clients, selectedClient, activeTasks]);
   const selectableRetainers = selectedClientObj
     ? Object.keys(selectedClientObj.retainers || {}).map((name) => ({
         name,
@@ -1493,17 +1559,39 @@ export default function App() {
 
   useEffect(() => {
     let interval;
-    if (activeShift || activeTask) {
-      interval = setInterval(() => {
+    if (activeShift || activeTasks.length) {
+      const tick = () => {
         if (activeShift) {
           if (activeShift.status === 'active') setLiveDuration((activeShift.totalSavedDuration || 0) + (Date.now() - (activeShift.lastResumeTime || activeShift.clockInTime)));
           else setLiveDuration(activeShift.totalSavedDuration || 0);
         }
-        if (activeTask) setLiveTaskDuration((activeTask.totalSavedDuration || 0) + (Date.now() - (activeTask.lastResumeTime || activeTask.clockInTime)));
-      }, 1000);
+        if (activeTasks.length) {
+          const now = Date.now();
+          const next = {};
+          for (const t of activeTasks) {
+            next[t.id] = liveDurationForTask(t, now);
+          }
+          setLiveTaskDurationsById(next);
+          setLiveTaskDuration(
+            activeTask ? liveDurationForTask(activeTask, now) : 0,
+          );
+        } else {
+          setLiveTaskDurationsById({});
+          setLiveTaskDuration(0);
+        }
+      };
+      tick();
+      interval = setInterval(tick, 1000);
     }
-    return () => { clearInterval(interval); if (!activeShift) setLiveDuration(0); if (!activeTask) setLiveTaskDuration(0); };
-  }, [activeShift, activeTask]);
+    return () => {
+      clearInterval(interval);
+      if (!activeShift) setLiveDuration(0);
+      if (!activeTasks.length) {
+        setLiveTaskDuration(0);
+        setLiveTaskDurationsById({});
+      }
+    };
+  }, [activeShift, activeTasks, activeTask]);
 
   // Auth Methods
   const loginWithGoogle = async () => {
@@ -1680,25 +1768,63 @@ export default function App() {
     navigate('/kiosk', { replace: true });
   }, [user, location.pathname, location.search, navigate, clients]);
 
-  const handleStopTask = async () => {
-    if (!activeTask) return;
+  const handleStopTask = async (taskArg = null) => {
+    const task =
+      (taskArg && typeof taskArg === 'object' ? taskArg : null) ||
+      activeTask ||
+      null;
+    if (!task?.id) return;
     const endTime = Date.now();
-    const segment = endTime - (activeTask.lastResumeTime || activeTask.clockInTime);
-    const newTotal = (activeTask.totalSavedDuration || 0) + segment;
-    await updateDoc(doc(db, 'taskLogs', activeTask.id), { clockOutTime: endTime, status: 'completed', totalSavedDuration: newTotal, duration: newTotal, notes: activeTaskNotes });
-    notifyTextMentions({
-      text: activeTaskNotes,
-      title: activeTask.projectName
-        ? `Work notes · ${activeTask.projectName}`
-        : 'Work notes',
-      clientId: activeTask.clientId || null,
-      clientName: activeTask.clientName || null,
+    const segment = endTime - (task.lastResumeTime || task.clockInTime);
+    const newTotal = (task.totalSavedDuration || 0) + segment;
+    const notes = String(
+      activeTaskNotesById[task.id] ?? task.notes ?? '',
+    );
+    await updateDoc(doc(db, 'taskLogs', task.id), {
+      clockOutTime: endTime,
+      status: 'completed',
+      totalSavedDuration: newTotal,
+      duration: newTotal,
+      notes,
     });
-    setActiveTaskNotes('');
+    notifyTextMentions({
+      text: notes,
+      title: task.projectName
+        ? `Work notes · ${task.projectName}`
+        : 'Work notes',
+      clientId: task.clientId || null,
+      clientName: task.clientName || null,
+    });
+    setActiveTaskNotesById((prev) => {
+      if (!(task.id in prev)) return prev;
+      const next = { ...prev };
+      delete next[task.id];
+      return next;
+    });
+  };
+
+  const handleStopAllActiveTasks = async () => {
+    const running = [...activeTasks];
+    for (const task of running) {
+      await handleStopTask(task);
+    }
   };
 
   const handleResumeTask = async (task) => {
-    if (activeTask) await handleStopTask();
+    // Keep other client timers running — resume is additive.
+    const already = findActiveTaskForSelection(activeTasks, {
+      clientName: task.clientName,
+      billingTarget: task.projectId
+        ? `project_${task.projectId}`
+        : task.projectName === GENERAL_LABEL ||
+            task.projectName === 'General / Unclassified'
+          ? 'retainer_GENERAL_UNCLASSIFIED'
+          : task.projectName
+            ? `retainer_${task.projectName}`
+            : '',
+      generalLabel: GENERAL_LABEL,
+    });
+    if (already) return;
     await updateDoc(doc(db, 'taskLogs', task.id), {
       status: 'active',
       lastResumeTime: Date.now(),
@@ -1706,7 +1832,10 @@ export default function App() {
       shiftId: activeShift?.id || task.shiftId,
       userId: user?.uid || task.userId,
     });
-    setActiveTaskNotes(task.notes || '');
+    setActiveTaskNotesById((prev) => ({
+      ...prev,
+      [task.id]: task.notes || '',
+    }));
   };
 
   const handleStartTask = async () => {
@@ -1724,6 +1853,17 @@ export default function App() {
     else if (isGeneral) projName = GENERAL_LABEL;
     else projName = selectedBillingTarget.replace('retainer_', '');
 
+    // Already timing this client + category — nothing to start.
+    if (
+      findActiveTaskForSelection(activeTasks, {
+        clientName: selectedClient,
+        billingTarget: selectedBillingTarget,
+        generalLabel: GENERAL_LABEL,
+      })
+    ) {
+      return;
+    }
+
     const matchesPausedForSelection = (t) => {
       if (t.shiftId !== activeShift.id || t.status !== 'completed') return false;
       if (t.clientName !== selectedClient) return false;
@@ -1737,10 +1877,6 @@ export default function App() {
       pausedCandidates.sort((a, b) => (b.clockOutTime || 0) - (a.clockOutTime || 0));
       await handleResumeTask(pausedCandidates[0]);
       return;
-    }
-
-    if (activeTask) {
-      await handleStopTask();
     }
 
     const startClient = clients.find((x) => x.name === selectedClient);
@@ -1759,7 +1895,6 @@ export default function App() {
       status: 'active',
       notes: '',
     });
-    setActiveTaskNotes('');
     } finally {
       taskStartInFlightRef.current = false;
     }
@@ -1779,7 +1914,13 @@ export default function App() {
       return;
     }
     kioskAutostartClockInAttemptedRef.current = false;
-    if (activeTask) {
+    if (
+      findActiveTaskForSelection(activeTasks, {
+        clientName: selectedClient,
+        billingTarget: selectedBillingTarget,
+        generalLabel: GENERAL_LABEL,
+      })
+    ) {
       setKioskAutostartPending(false);
       return;
     }
@@ -1794,12 +1935,12 @@ export default function App() {
     selectedClient,
     selectedBillingTarget,
     activeShift,
-    activeTask,
+    activeTasks,
   ]);
 
   const handleTakeBreak = async () => {
     if (!activeShift) return;
-    if (activeTask) await handleStopTask();
+    await handleStopAllActiveTasks();
     const endTime = Date.now();
     const segment = endTime - (activeShift.lastResumeTime || activeShift.clockInTime);
     await updateDoc(doc(db, 'timesheets', activeShift.id), { status: 'break', totalSavedDuration: (activeShift.totalSavedDuration || 0) + segment, lastResumeTime: endTime });
@@ -1812,11 +1953,21 @@ export default function App() {
 
   const handleClockOut = async () => {
     if (!activeShift) return;
-    if (policy.requireClockOutNote && (!activeTaskNotes || activeTaskNotes.trim() === '')) {
-      window.alert('Please add a brief note before clocking out.');
-      return;
+    if (policy.requireClockOutNote && activeTasks.length) {
+      const missing = activeTasks.some((t) => {
+        const notes = String(
+          activeTaskNotesById[t.id] ?? t.notes ?? '',
+        ).trim();
+        return !notes;
+      });
+      if (missing) {
+        window.alert(
+          'Please add a brief note on each running timer before clocking out.',
+        );
+        return;
+      }
     }
-    if (activeTask) await handleStopTask();
+    await handleStopAllActiveTasks();
     const endTime = Date.now();
     let newTotal = activeShift.totalSavedDuration || 0;
     if (activeShift.status === 'active') newTotal += endTime - (activeShift.lastResumeTime || activeShift.clockInTime);
@@ -1918,8 +2069,11 @@ export default function App() {
   const handleIdleAutoClockOut = useCallback(async ({ endTime: endTimeArg, source = 'confirm_expired' } = {}) => {
     if (idleAutoClockOutLockRef.current) return;
     idleAutoClockOutLockRef.current = true;
-    const { activeTask: task, activeShift: shift, activeTaskNotes: notes } =
-      idleShutdownRef.current;
+    const {
+      activeTasks: runningTasks = [],
+      activeShift: shift,
+      activeTaskNotesById: notesById = {},
+    } = idleShutdownRef.current;
     const IDLE_TAG =
       '[Clock stopped automatically: session was idle — Ignite PM]';
     // Backdate the clock-out to when the idle deadline expired (e.g. the
@@ -1931,16 +2085,20 @@ export default function App() {
     let shiftUpdateError = null;
     let shiftDurationMs = null;
     let taskDurationMs = null;
+    const primaryTask = runningTasks[0] || null;
     try {
-      if (task?.id) {
+      for (const task of runningTasks) {
+        if (!task?.id) continue;
         try {
           const segment = Math.max(
             0,
             endTime - (task.lastResumeTime || task.clockInTime),
           );
           const newTotal = (task.totalSavedDuration || 0) + segment;
-          taskDurationMs = newTotal;
-          const base = String(notes || '').trim() || String(task.notes || '').trim();
+          taskDurationMs = (taskDurationMs || 0) + newTotal;
+          const base =
+            String(notesById[task.id] || '').trim() ||
+            String(task.notes || '').trim();
           const finalNotes = base ? `${base}\n\n${IDLE_TAG}` : IDLE_TAG;
           await updateDoc(doc(db, 'taskLogs', task.id), {
             clockOutTime: endTime,
@@ -1952,10 +2110,12 @@ export default function App() {
             autoStoppedAt: endTime,
             autoStoppedSource: source || 'client',
           });
-          setActiveTaskNotes('');
         } catch (err) {
           console.error('Idle auto clock-out: task update failed:', err);
         }
+      }
+      if (runningTasks.length) {
+        setActiveTaskNotesById({});
       }
       if (shift?.id) {
         try {
@@ -1978,13 +2138,17 @@ export default function App() {
             shiftNote: IDLE_TAG,
           });
           seenIdleNoticeShiftIdsRef.current.add(shift.id);
+          const taskLabel =
+            runningTasks.length > 1
+              ? `${runningTasks.length} client timers`
+              : primaryTask
+                ? `${primaryTask.clientName || 'Client'} · ${primaryTask.projectName || 'Task'}`
+                : null;
           setIdleClockOutNotice({
             shiftId: shift.id,
             endTime,
             shiftDurationMs: newTotal,
-            taskLabel: task
-              ? `${task.clientName || 'Client'} · ${task.projectName || 'Task'}`
-              : null,
+            taskLabel,
             taskDurationMs,
             source: source === 'deep_idle' ? 'deep_idle' : 'client',
           });
@@ -1995,17 +2159,17 @@ export default function App() {
                 recipientEmail: recipient,
                 type: NOTIFICATION_TYPES.FORGOT_CLOCK_OUT,
                 title: 'You were auto clocked out after being idle',
-                body: task?.clientName
-                  ? `Your ${task.projectName || 'task'} on ${task.clientName} was stopped so idle time was not billed. Ended at ${new Date(endTime).toLocaleString()}.`
+                body: runningTasks.length
+                  ? `Your ${runningTasks.length} running timer${runningTasks.length === 1 ? '' : 's'} were stopped so idle time was not billed. Ended at ${new Date(endTime).toLocaleString()}.`
                   : `Your shift was ended automatically at ${new Date(endTime).toLocaleString()}. Check Timesheets if hours need correcting.`,
                 actorEmail: recipient,
                 actorName: staffDisplayName({
                   email: user?.email,
                   displayName: user?.displayName,
                 }),
-                clientId: task?.clientId || null,
-                clientName: task?.clientName || null,
-                itemId: task?.id || null,
+                clientId: primaryTask?.clientId || null,
+                clientName: primaryTask?.clientName || null,
+                itemId: primaryTask?.id || null,
               }),
             ]).catch(() => {});
           }
@@ -3907,8 +4071,10 @@ export default function App() {
     user,
     activeShift,
     activeTask,
+    activeTasks,
     liveDuration,
     liveTaskDuration,
+    liveTaskDurationsById,
     clients: clients
       .filter(isClientActiveForWork)
       .filter((c) =>
