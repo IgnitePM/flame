@@ -225,9 +225,8 @@ function buildRetainerWatchouts({
 
 /**
  * Walk every stored billing cycle, not only "current".
- * Netlify runs in UTC while cycle keys are written from the browser's local
- * timezone (America/Toronto), so getBillingPeriod() on the server often misses
- * the map key and returns an empty virtual cycle — which looked like "no tasks".
+ * getBillingPeriod() is America/Toronto-keyed; still walk every stored map key
+ * so digests include open work parked on legacy/off-cycle keys.
  */
 function forEachClientTodoState(clients, visit) {
   for (const client of clients || []) {
