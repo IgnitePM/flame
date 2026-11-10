@@ -9,10 +9,17 @@ import {
   normalizeGa4PropertyId,
 } from './lib/ga4OAuth.mjs';
 import { wantsForceRefresh, withAnalyticsCache } from './lib/analyticsReportCache.mjs';
+import {
+  defaultCompareDates,
+  uniqueSortedCheckDates,
+} from '../../src/utils/keywordRankCompare.js';
 
 /**
  * Portal/staff SEO report proxy for SE Ranking Project API + optional GA4.
  * POST { clientId, dateFrom?: YYYY-MM-DD, dateTo?: YYYY-MM-DD }
+ *
+ * Keyword rankings include compact per-keyword check history so the portal can
+ * compare any two check dates client-side without refetching SE Ranking.
  */
 
 const SE_API = 'https://api.seranking.com/v1/project-management';
@@ -308,9 +315,11 @@ export default async (req) => {
       dateTo,
       forceRefresh,
       build: async () => {
-    // Pull enough history for week-over-week even near the start of a billing cycle.
+    // Pull enough history for week-over-week + keyword date compare (up to ~90d).
     const historyFrom = addDaysYmd(dateFrom, -14);
-    const positionsFrom = historyFrom;
+    const positionsFromCandidate = addDaysYmd(dateTo, -90);
+    const positionsFrom =
+      positionsFromCandidate < historyFrom ? positionsFromCandidate : historyFrom;
 
     const [
       summary,
@@ -318,6 +327,7 @@ export default async (req) => {
       avgPosHistory,
       keywords,
       positionsGroups,
+      checkpointsResult,
       gscResult,
       potentialResult,
       backlinksResult,
@@ -344,6 +354,7 @@ export default async (req) => {
         with_serp_features: 1,
         with_content_score: 1,
       }),
+      seGetSoft(apiKey, '/sites/positions/checkpoints', { site_id: siteId }),
       seGetSoft(apiKey, '/analytics/gsc/queries', { site_id: siteId }),
       seGetSoft(apiKey, '/analytics/seo-potential', { site_id: siteId }),
       seGetSoft(apiKey, '/backlinks/stats', { site_id: siteId }),
@@ -386,6 +397,13 @@ export default async (req) => {
           wowDelta = priorPos - currentPos;
         }
         const serp = summarizeSerpFeatures(kw.features);
+        const checks = (Array.isArray(kw.positions) ? kw.positions : [])
+          .map((p) => ({
+            date: String(p?.date || ''),
+            pos: Number(p?.pos) || 0,
+          }))
+          .filter((p) => p.date)
+          .sort((a, b) => a.date.localeCompare(b.date));
         keywordRows.push({
           id: String(kw.id),
           name: nameById.get(String(kw.id)) || `Keyword ${kw.id}`,
@@ -410,6 +428,7 @@ export default async (req) => {
           serpFeatures: serp.labels,
           date: String(latest.date || ''),
           siteEngineId: engineId ?? null,
+          checks,
         });
       }
     }
@@ -433,6 +452,21 @@ export default async (req) => {
         return ap - bp;
       })
       .slice(0, 75);
+
+    const checkpoints =
+      checkpointsResult.ok && checkpointsResult.data && typeof checkpointsResult.data === 'object'
+        ? {
+            current: String(checkpointsResult.data.current || '').trim() || null,
+            day_ago: String(checkpointsResult.data.day_ago || '').trim() || null,
+            '7days': String(checkpointsResult.data['7days'] || '').trim() || null,
+            '30days': String(checkpointsResult.data['30days'] || '').trim() || null,
+            '90days': String(checkpointsResult.data['90days'] || '').trim() || null,
+            '180days': String(checkpointsResult.data['180days'] || '').trim() || null,
+            first: String(checkpointsResult.data.first || '').trim() || null,
+          }
+        : {};
+    const checkDates = uniqueSortedCheckDates(keywordTable);
+    const keywordCompareDefaults = defaultCompareDates(checkDates, checkpoints);
 
     const wowImproved = keywordTable.filter((k) => (k.wowDelta ?? 0) > 0).length;
     const wowDeclined = keywordTable.filter((k) => (k.wowDelta ?? 0) < 0).length;
@@ -603,6 +637,13 @@ export default async (req) => {
           },
       keywords: keywordTable,
       keywordCount: keywordTable.length,
+      checkDates,
+      checkpoints,
+      keywordCompare: {
+        ...keywordCompareDefaults,
+        positionsFrom,
+        positionsTo: dateTo,
+      },
       fetchedAt: Date.now(),
       fetchedBy: caller.email,
     };
