@@ -76,8 +76,9 @@ export function defaultCompareDates(checkDates = [], checkpoints = {}) {
  */
 export function applyKeywordDateCompare(row, baselineDate, compareDate) {
   const checks = Array.isArray(row?.checks) ? row.checks : [];
-  const current = pickCheckNearDate(checks, compareDate);
-  const baseline = pickCheckNearDate(checks, baselineDate);
+  // Calendar picks may fall between weekly SE Ranking checks — allow a week.
+  const current = pickCheckNearDate(checks, compareDate, 7);
+  const baseline = pickCheckNearDate(checks, baselineDate, 7);
   const currentPos = current ? Number(current.pos) || 0 : 0;
   const baselinePos = baseline ? Number(baseline.pos) || 0 : null;
   let compareDelta = null;
@@ -123,8 +124,18 @@ export const COMPARE_PRESETS = [
   { id: 'wow', label: 'Week over week', checkpoint: '7days', days: -7 },
   { id: 'mom', label: 'Month over month', checkpoint: '30days', days: -30 },
   { id: 'qoq', label: '90 days ago', checkpoint: '90days', days: -90 },
+  { id: 'yoy', label: '1 year ago', checkpoint: '180days', days: -365 },
   { id: 'start', label: 'vs range start', checkpoint: null, days: null },
 ];
+
+/** Clamp a calendar YMD into [min, max] when bounds are present. */
+export function clampYmd(ymdStr, minYmd = '', maxYmd = '') {
+  let next = String(ymdStr || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(next)) return '';
+  if (minYmd && next < minYmd) next = minYmd;
+  if (maxYmd && next > maxYmd) next = maxYmd;
+  return next;
+}
 
 export function resolveComparePreset(
   presetId,
@@ -146,6 +157,20 @@ export function resolveComparePreset(
       )?.date ||
       dates[0] ||
       '';
+    return { baselineDate: baseline, compareDate };
+  }
+
+  if (presetId === 'yoy') {
+    const target = addDaysYmd(compareDate, -365);
+    const fromFirst = String(checkpoints.first || '').trim();
+    const baseline =
+      pickCheckNearDate(
+        dates.map((date) => ({ date })),
+        target,
+        14,
+      )?.date ||
+      (fromFirst && fromFirst <= target ? fromFirst : '') ||
+      (dates.length ? dates[0] : '');
     return { baselineDate: baseline, compareDate };
   }
 

@@ -17,7 +17,9 @@ import { authedFetch } from '../utils/authedFetch.js';
 import {
   COMPARE_PRESETS,
   applyKeywordDateCompare,
+  clampYmd,
   defaultCompareDates,
+  pickCheckNearDate,
   resolveComparePreset,
   summarizeCompareMoves,
   uniqueSortedCheckDates,
@@ -284,6 +286,29 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
     [comparedKeywords],
   );
 
+  const calendarBounds = useMemo(() => {
+    const min =
+      report?.keywordCompare?.positionsFrom ||
+      (checkDates.length ? checkDates[0] : '') ||
+      '';
+    const max =
+      report?.keywordCompare?.positionsTo ||
+      (checkDates.length ? checkDates[checkDates.length - 1] : '') ||
+      range.to ||
+      '';
+    return { min, max };
+  }, [report?.keywordCompare, checkDates, range.to]);
+
+  const snappedCompare = useMemo(() => {
+    const checks = checkDates.map((date) => ({ date }));
+    const base = pickCheckNearDate(checks, baselineDate, 7);
+    const cur = pickCheckNearDate(checks, compareDate, 7);
+    return {
+      baselineDate: base?.date || '',
+      compareDate: cur?.date || '',
+    };
+  }, [checkDates, baselineDate, compareDate]);
+
   const applyComparePreset = (presetId) => {
     setComparePreset(presetId);
     const next = resolveComparePreset(presetId, {
@@ -291,8 +316,18 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
       checkpoints: report?.checkpoints || {},
       rangeFrom: report?.dateFrom || range.from,
     });
-    if (next.baselineDate) setBaselineDate(next.baselineDate);
-    if (next.compareDate) setCompareDate(next.compareDate);
+    if (next.baselineDate) {
+      setBaselineDate(
+        clampYmd(next.baselineDate, calendarBounds.min, calendarBounds.max) ||
+          next.baselineDate,
+      );
+    }
+    if (next.compareDate) {
+      setCompareDate(
+        clampYmd(next.compareDate, calendarBounds.min, calendarBounds.max) ||
+          next.compareDate,
+      );
+    }
   };
 
   const tabBar = (
@@ -771,8 +806,8 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
                 </div>
                 <h3 className="font-black text-slate-900 mt-1">Keyword rankings</h3>
                 <p className="text-xs text-slate-500 font-medium mt-0.5">
-                  Pick two SE Ranking check dates to compare positions · top{' '}
-                  {comparedKeywords.length}
+                  Use the calendars to pick any dates · we match the nearest SE Ranking
+                  checks · top {comparedKeywords.length}
                 </p>
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -796,47 +831,69 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                 Baseline date
-                <select
+                <input
+                  type="date"
                   value={baselineDate}
+                  min={calendarBounds.min || undefined}
+                  max={calendarBounds.max || undefined}
                   onChange={(e) => {
                     setComparePreset('custom');
-                    setBaselineDate(e.target.value);
+                    setBaselineDate(
+                      clampYmd(
+                        e.target.value,
+                        calendarBounds.min,
+                        calendarBounds.max,
+                      ),
+                    );
                   }}
-                  disabled={!checkDates.length}
+                  disabled={!calendarBounds.min && !calendarBounds.max}
                   className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-[#fd7414] disabled:opacity-50"
-                >
-                  {!checkDates.length ? (
-                    <option value="">No check dates</option>
-                  ) : null}
-                  {checkDates.map((d) => (
-                    <option key={`b-${d}`} value={d}>
-                      {formatDay(d)} ({d})
-                    </option>
-                  ))}
-                </select>
+                />
               </label>
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                 Compare date
-                <select
+                <input
+                  type="date"
                   value={compareDate}
+                  min={calendarBounds.min || undefined}
+                  max={calendarBounds.max || undefined}
                   onChange={(e) => {
                     setComparePreset('custom');
-                    setCompareDate(e.target.value);
+                    setCompareDate(
+                      clampYmd(
+                        e.target.value,
+                        calendarBounds.min,
+                        calendarBounds.max,
+                      ),
+                    );
                   }}
-                  disabled={!checkDates.length}
+                  disabled={!calendarBounds.min && !calendarBounds.max}
                   className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-[#fd7414] disabled:opacity-50"
-                >
-                  {!checkDates.length ? (
-                    <option value="">No check dates</option>
-                  ) : null}
-                  {checkDates.map((d) => (
-                    <option key={`c-${d}`} value={d}>
-                      {formatDay(d)} ({d})
-                    </option>
-                  ))}
-                </select>
+                />
               </label>
             </div>
+
+            {snappedCompare.baselineDate || snappedCompare.compareDate ? (
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                Nearest checks used:{' '}
+                <span className="text-slate-600">
+                  {formatDay(snappedCompare.baselineDate) || '—'}
+                  {snappedCompare.baselineDate
+                    ? ` (${snappedCompare.baselineDate})`
+                    : ''}{' '}
+                  → {formatDay(snappedCompare.compareDate) || '—'}
+                  {snappedCompare.compareDate
+                    ? ` (${snappedCompare.compareDate})`
+                    : ''}
+                </span>
+                {calendarBounds.min ? (
+                  <span className="block sm:inline sm:before:content-['·_'] mt-1 sm:mt-0">
+                    History available from {formatDay(calendarBounds.min)} (
+                    {calendarBounds.min})
+                  </span>
+                ) : null}
+              </p>
+            ) : null}
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <StatCard
@@ -856,8 +913,8 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
                 label="No data"
                 value={compareSummary.missing}
                 hint={
-                  baselineDate && compareDate
-                    ? `${formatDay(baselineDate)} → ${formatDay(compareDate)}`
+                  snappedCompare.baselineDate && snappedCompare.compareDate
+                    ? `${formatDay(snappedCompare.baselineDate)} → ${formatDay(snappedCompare.compareDate)}`
                     : undefined
                 }
               />
