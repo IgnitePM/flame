@@ -145,6 +145,7 @@ import TaskNotesSection from './TaskNotesSection.jsx';
 import MentionTextarea from './MentionTextarea.jsx';
 import SlackNotificationsCard from './SlackNotificationsCard.jsx';
 import EmailDigestCard from './EmailDigestCard.jsx';
+import StrategySessionRemindersCard from './StrategySessionRemindersCard.jsx';
 import FxRatesCard from './FxRatesCard.jsx';
 import GmailConnectCard from './GmailConnectCard.jsx';
 import DriveConnectCard from './DriveConnectCard.jsx';
@@ -8719,6 +8720,11 @@ const AdminDashboard = ({
           />
 
           <EmailDigestCard
+            notifySettings={notifySettings}
+            updateNotifySettings={updateNotifySettings}
+          />
+
+          <StrategySessionRemindersCard
             notifySettings={notifySettings}
             updateNotifySettings={updateNotifySettings}
           />
