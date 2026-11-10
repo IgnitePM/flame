@@ -163,6 +163,8 @@ const ClientPortal = ({
   const [messagesLastReadAt, setMessagesLastReadAt] = useState(0);
   const [messagesReadReady, setMessagesReadReady] = useState(false);
   const [needsReadSeed, setNeedsReadSeed] = useState(false);
+  const [focusTodoItemId, setFocusTodoItemId] = useState('');
+  const [focusTodoCategoryKey, setFocusTodoCategoryKey] = useState('');
 
   const portalEmail = String(
     user?.email || auth?.currentUser?.email || '',
@@ -373,6 +375,72 @@ const ClientPortal = ({
     setPortalSection(fromUrl);
   }, [searchParams, clientProfile, portalSection]);
 
+  // Deep-link task Notes from mention emails: ?tab=dashboard&itemId=&categoryKey=
+  useEffect(() => {
+    const itemId = String(searchParams.get('itemId') || '').trim();
+    const categoryKey = String(searchParams.get('categoryKey') || '').trim();
+    const cycleStartRaw = searchParams.get('cycleStart');
+    if (!itemId || !clientProfile?.id) return;
+
+    setFocusTodoItemId(itemId);
+    setFocusTodoCategoryKey(categoryKey);
+    setPortalSection('dashboard');
+
+    const billingDay = clientProfile.billingDay || 1;
+    const cycles = clientProfile.todoCycles || {};
+    let matchedOffset = null;
+
+    if (cycleStartRaw != null && cycleStartRaw !== '') {
+      const targetStart = Number(cycleStartRaw);
+      if (Number.isFinite(targetStart)) {
+        for (let o = 0; o >= -36; o -= 1) {
+          const p = getBillingPeriod(billingDay, o);
+          if (p.start === targetStart) {
+            matchedOffset = o;
+            break;
+          }
+        }
+      }
+    }
+
+    if (matchedOffset == null) {
+      for (let o = 0; o >= -36; o -= 1) {
+        const p = getBillingPeriod(billingDay, o);
+        const cycleData = cycles[String(p.start)] || {};
+        const keys = categoryKey
+          ? [categoryKey]
+          : Object.keys(cycleData);
+        const found = keys.some((k) =>
+          (Array.isArray(cycleData[k]?.items) ? cycleData[k].items : []).some(
+            (it) => it?.id === itemId,
+          ),
+        );
+        if (found) {
+          matchedOffset = o;
+          break;
+        }
+      }
+    }
+
+    if (matchedOffset != null && typeof setPortalOffset === 'function') {
+      setPortalOffset(matchedOffset);
+    }
+
+    // Clear deep-link params so refresh doesn't keep re-jumping.
+    const next = new URLSearchParams(searchParams);
+    next.delete('itemId');
+    next.delete('categoryKey');
+    next.delete('cycleStart');
+    if (!next.get('tab')) next.set('tab', 'dashboard');
+    setSearchParams(next, { replace: true });
+  }, [
+    searchParams,
+    clientProfile,
+    getBillingPeriod,
+    setPortalOffset,
+    setSearchParams,
+  ]);
+
   const minPortalOffset = (() => {
     if (!clientProfile.clientStartDate) return -1e9;
     let o = 0;
@@ -568,6 +636,22 @@ const ClientPortal = ({
             mode="portal"
             userEmail={user?.email || auth?.currentUser?.email || ''}
             userName={portalDisplayName}
+            onOpenTaskNotes={(ctx) => {
+              const itemId = String(ctx?.itemId || '').trim();
+              const categoryKey = String(ctx?.categoryKey || '').trim();
+              if (!itemId) return;
+              const params = new URLSearchParams();
+              params.set('tab', 'dashboard');
+              params.set('itemId', itemId);
+              if (categoryKey) params.set('categoryKey', categoryKey);
+              if (
+                ctx?.cycleStart != null &&
+                Number.isFinite(Number(ctx.cycleStart))
+              ) {
+                params.set('cycleStart', String(ctx.cycleStart));
+              }
+              setSearchParams(params);
+            }}
           />
         ) : null}
 
@@ -1050,6 +1134,18 @@ const ClientPortal = ({
                             cycleStart={mStart}
                             categoryKey={catKey}
                             user={user}
+                            highlighted={
+                              !!focusTodoItemId &&
+                              focusTodoItemId === item.id &&
+                              (!focusTodoCategoryKey ||
+                                focusTodoCategoryKey === catKey)
+                            }
+                            forceNotesOpen={
+                              !!focusTodoItemId &&
+                              focusTodoItemId === item.id &&
+                              (!focusTodoCategoryKey ||
+                                focusTodoCategoryKey === catKey)
+                            }
                           />
                         ))}
                       </ul>

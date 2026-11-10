@@ -18,6 +18,7 @@ import {
 } from '../utils/clientDrive.js';
 import MentionTextarea from './MentionTextarea.jsx';
 import { staffHandle } from '../utils/staffDirectory.js';
+import { taskReplyContextFromMessage } from '../utils/portalTaskMessageReply.js';
 
 function formatWhen(ms) {
   const n = Number(ms || 0);
@@ -66,6 +67,7 @@ export default function ClientMessagesPanel({
   staffEmails = [],
   adminUsers = [],
   focusMessageId = null,
+  onOpenTaskNotes = null,
 }) {
   const clientId = client?.id;
   const [messages, setMessages] = useState([]);
@@ -79,6 +81,7 @@ export default function ClientMessagesPanel({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [driveFiles, setDriveFiles] = useState([]);
   const [portalStaffEmails, setPortalStaffEmails] = useState([]);
+  const [replyTask, setReplyTask] = useState(null);
   const bottomRef = useRef(null);
   const focusRef = useRef(null);
 
@@ -237,6 +240,32 @@ export default function ClientMessagesPanel({
     setBusy(true);
     setBanner('');
     try {
+      // Portal replies to task-note tags go onto the task Notes thread.
+      if (mode === 'portal' && replyTask?.itemId && replyTask?.categoryKey) {
+        const payload = {
+          clientId,
+          categoryKey: replyTask.categoryKey,
+          itemId: replyTask.itemId,
+          text: body.trim(),
+          authorName: userName || userEmail,
+        };
+        if (Number.isFinite(replyTask.cycleStart)) {
+          payload.cycleStart = replyTask.cycleStart;
+        }
+        const resp = await authedFetch(
+          '/.netlify/functions/client-todo-note-submit',
+          payload,
+        );
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.error || 'Send failed');
+        setBody('');
+        setAttachments([]);
+        setBanner(
+          `Sent on task “${replyTask.taskTitle}” — Ignite was notified.`,
+        );
+        return;
+      }
+
       const resp = await authedFetch('/.netlify/functions/client-message-send', {
         clientId,
         body: body.trim(),
@@ -299,6 +328,9 @@ export default function ClientMessagesPanel({
               (mode === 'staff' && m.authorType === 'staff') ||
               (mode === 'portal' && m.authorType === 'client');
             const focused = focusMessageId && m.id === focusMessageId;
+            const taskCtx = taskReplyContextFromMessage(m);
+            const replyActive =
+              replyTask?.messageId && replyTask.messageId === m.id;
             return (
               <div
                 key={m.id}
@@ -308,7 +340,9 @@ export default function ClientMessagesPanel({
               >
                 <div
                   className={`max-w-[85%] rounded-2xl px-3 py-2 ${
-                    focused ? 'ring-2 ring-offset-2 ring-[#fd7414] ' : ''
+                    focused || replyActive
+                      ? 'ring-2 ring-offset-2 ring-[#fd7414] '
+                      : ''
                   }${
                     mine
                       ? 'bg-[#fd7414] text-white'
@@ -322,6 +356,7 @@ export default function ClientMessagesPanel({
                   >
                     {m.authorName || m.authorEmail || m.authorType} ·{' '}
                     {formatWhen(m.createdAt)}
+                    {taskCtx ? ' · Task note' : ''}
                   </div>
                   <MessageBody text={m.body} mine={mine} />
                   {Array.isArray(m.attachments) && m.attachments.length > 0 ? (
@@ -342,6 +377,39 @@ export default function ClientMessagesPanel({
                         </li>
                       ))}
                     </ul>
+                  ) : null}
+                  {mode === 'portal' && taskCtx ? (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReplyTask(taskCtx);
+                          setBanner(
+                            `Replying on task “${taskCtx.taskTitle}” — this stays in the task Notes thread.`,
+                          );
+                        }}
+                        className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-lg ${
+                          mine
+                            ? 'bg-white/20 text-white hover:bg-white/30'
+                            : 'bg-white text-[#fd7414] border border-orange-200 hover:border-[#fd7414]'
+                        }`}
+                      >
+                        {replyActive ? 'Replying here…' : 'Reply on this task'}
+                      </button>
+                      {typeof onOpenTaskNotes === 'function' ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenTaskNotes(taskCtx)}
+                          className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-lg ${
+                            mine
+                              ? 'bg-white/10 text-white/90 hover:bg-white/20'
+                              : 'bg-slate-200/70 text-slate-700 hover:bg-slate-200'
+                          }`}
+                        >
+                          Open task
+                        </button>
+                      ) : null}
+                    </div>
                   ) : null}
                 </div>
               </div>
@@ -374,6 +442,27 @@ export default function ClientMessagesPanel({
         </div>
       ) : null}
 
+      {mode === 'portal' && replyTask ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-orange-200 bg-orange-50 px-3 py-2">
+          <p className="text-[11px] font-bold text-slate-700">
+            Replying on task{' '}
+            <span className="text-[#fd7414]">{replyTask.taskTitle}</span>
+            {' '}
+            (saves to task Notes, not general messages)
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setReplyTask(null);
+              setBanner('');
+            }}
+            className="text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-800"
+          >
+            Cancel
+          </button>
+        </div>
+      ) : null}
+
       <MentionTextarea
         value={body}
         onChange={setBody}
@@ -383,7 +472,9 @@ export default function ClientMessagesPanel({
         placeholder={
           mode === 'staff'
             ? 'Message the client… Use @name to tag a teammate'
-            : 'Message the Ignite team… Use @name to tag someone'
+            : replyTask
+              ? `Reply on “${replyTask.taskTitle}”…`
+              : 'Message the Ignite team… Use @name to tag someone'
         }
         textareaClassName="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-[#fd7414]"
       />
@@ -443,7 +534,11 @@ export default function ClientMessagesPanel({
           className="ml-auto inline-flex items-center gap-2 rounded-xl bg-black px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white disabled:opacity-40"
         >
           <Send className="w-3.5 h-3.5" />
-          {busy ? 'Sending…' : 'Send'}
+          {busy
+            ? 'Sending…'
+            : replyTask
+              ? 'Send on task'
+              : 'Send'}
         </button>
       </div>
 
