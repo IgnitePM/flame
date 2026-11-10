@@ -26,6 +26,12 @@ import KioskClientTodoItem from './KioskClientTodoItem.jsx';
 import AssigneeChoiceList from './AssigneeChoiceList.jsx';
 import KioskNotificationsPanel from './KioskNotificationsPanel.jsx';
 import KioskCalendarPanel from './KioskCalendarPanel.jsx';
+import {
+  findTodoLocationInClient,
+  resolveKioskNotificationTarget,
+} from '../utils/kioskNotificationNav.js';
+import { NOTIFICATION_TYPES } from '../utils/notifications.js';
+import { isTodoAwaitingStaffApproval } from '../utils/todoApproval.js';
 import TaskNotesSection from './TaskNotesSection.jsx';
 import MentionTextarea from './MentionTextarea.jsx';
 import ClientProfileSummary from './ClientProfileSummary.jsx';
@@ -232,6 +238,8 @@ const EmployeeKiosk = ({
   const [aiSummary, setAiSummary] = React.useState(null);
   const [aiLoading, setAiLoading] = React.useState(false);
   const [clientMessagesOpen, setClientMessagesOpen] = React.useState(false);
+  const [focusMessageId, setFocusMessageId] = React.useState(null);
+  const [focusTodoId, setFocusTodoId] = React.useState(null);
   const [aiError, setAiError] = React.useState('');
   const [personalOptionsItemId, setPersonalOptionsItemId] = React.useState(null);
   const [personalOptionsTitle, setPersonalOptionsTitle] = React.useState('');
@@ -1988,6 +1996,9 @@ const EmployeeKiosk = ({
                                     }
                                     canDragReorder={rowCanDragReorder}
                                     showPriorCycleBadge={rowCtx.isPriorCycle}
+                                    highlighted={
+                                      !!focusTodoId && focusTodoId === row.item.id
+                                    }
                                     getUrgencyClass={getUrgencyClass}
                                     user={user}
                                     staffEmail={meLower}
@@ -2433,6 +2444,9 @@ const EmployeeKiosk = ({
                                     }
                                     canDragReorder={rowCanDragReorder}
                                     showPriorCycleBadge={rowCtx.isPriorCycle}
+                                    highlighted={
+                                      !!focusTodoId && focusTodoId === row.item.id
+                                    }
                                     getUrgencyClass={getUrgencyClass}
                                     user={user}
                                     staffEmail={meLower}
@@ -3127,9 +3141,69 @@ const EmployeeKiosk = ({
             onDismiss={dismissNotification}
             onDismissAll={dismissAllNotifications}
             onOpenRelated={(n) => {
-              if (n?.clientName) {
-                setSelectedClient(n.clientName);
-                setKioskSideTab('client');
+              const target = resolveKioskNotificationTarget(n, {
+                clients: clientsFull || [],
+                projects,
+                todoCategoryKeyFn: todoCategoryKey,
+              });
+              if (target.kind === 'personal') {
+                setKioskSideTab('personal');
+                setClientMessagesOpen(false);
+                setFocusMessageId(null);
+                setFocusTodoId(null);
+                return;
+              }
+              if (target.kind === 'client_admin' && target.clientId && navigateToClient) {
+                navigateToClient(target.clientId);
+                return;
+              }
+              if (!target.clientName && !target.clientId) return;
+
+              if (target.clientName) setSelectedClient(target.clientName);
+              setKioskSideTab('client');
+
+              if (target.kind === 'messages') {
+                setFocusTodoId(null);
+                setFocusMessageId(target.messageId || null);
+                setClientMessagesOpen(true);
+                return;
+              }
+
+              setClientMessagesOpen(false);
+              setFocusMessageId(null);
+              if (target.billingTarget) {
+                setSelectedBillingTarget(target.billingTarget);
+              }
+              setFocusTodoId(target.itemId || null);
+
+              if (
+                n?.type === NOTIFICATION_TYPES.TODO_APPROVAL &&
+                target.clientId &&
+                target.itemId
+              ) {
+                const clientObj =
+                  (clientsFull || []).find((c) => c.id === target.clientId) ||
+                  null;
+                const location = clientObj
+                  ? findTodoLocationInClient(clientObj, {
+                      itemId: target.itemId,
+                      categoryKey: target.categoryKey,
+                    })
+                  : null;
+                if (
+                  location?.item &&
+                  isTodoAwaitingStaffApproval(location.item)
+                ) {
+                  window.setTimeout(() => {
+                    openTaskApprovalForItem(
+                      clientObj,
+                      location.cycleStart,
+                      location.categoryKey,
+                      location.item,
+                      'decide',
+                    );
+                  }, 0);
+                }
               }
             }}
             aiSummary={aiSummary}
@@ -4284,7 +4358,10 @@ const EmployeeKiosk = ({
               </div>
               <button
                 type="button"
-                onClick={() => setClientMessagesOpen(false)}
+                onClick={() => {
+                  setClientMessagesOpen(false);
+                  setFocusMessageId(null);
+                }}
                 className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-500 hover:bg-slate-100 shrink-0"
               >
                 Close
@@ -4298,6 +4375,7 @@ const EmployeeKiosk = ({
                 userName={user?.displayName || user?.email || staffEmail || ''}
                 staffEmails={staffEmails}
                 adminUsers={adminUsers}
+                focusMessageId={focusMessageId}
               />
             </div>
           </div>

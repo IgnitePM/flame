@@ -248,10 +248,20 @@ export default function KioskClientTodoItem({
   showPriorCycleBadge = false,
   staffEmails = [],
   adminUsers = [],
+  highlighted = false,
 }) {
   const meLower = String(staffEmail || user?.email || '').trim().toLowerCase();
   const rowRef = React.useRef(null);
   const [subtaskComposerOpen, setSubtaskComposerOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!highlighted || !rowRef.current) return undefined;
+    const el = rowRef.current;
+    const t = window.setTimeout(() => {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [highlighted, item?.id]);
   const [subtaskText, setSubtaskText] = React.useState('');
   const [subtaskDue, setSubtaskDue] = React.useState('');
   const [isDragging, setIsDragging] = React.useState(false);
@@ -471,11 +481,16 @@ export default function KioskClientTodoItem({
   return (
     <li
       ref={rowRef}
+      data-todo-id={item?.id || undefined}
       className={`relative flex flex-col gap-2 rounded-xl min-w-0 max-w-full overflow-hidden transition-all duration-150 p-1 ${
         assigneeMenuOpen ? 'z-[120]' : 'z-0'
       } ${isDragging ? 'kiosk-todo-row-dragging' : ''} ${
         dropHint === 'reorder' ? 'kiosk-todo-drop-reorder' : ''
-      } ${dropHint === 'nest' ? 'kiosk-todo-drop-nest' : ''} ${getUrgencyClass(item)}`}
+      } ${dropHint === 'nest' ? 'kiosk-todo-drop-nest' : ''} ${
+        highlighted
+          ? 'ring-2 ring-[#fd7414] ring-offset-2 bg-orange-50/80'
+          : ''
+      } ${getUrgencyClass(item)}`}
       onDragOver={canDragReorder ? handlePrimaryDragOver : undefined}
       onDragLeave={(e) => {
         if (e.currentTarget.contains(e.relatedTarget)) return;
