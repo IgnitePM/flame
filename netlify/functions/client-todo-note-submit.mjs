@@ -129,6 +129,11 @@ export default async (req) => {
         attachments: [],
         createdAt: now,
         systemKind: 'portal_todo_note',
+        itemId,
+        categoryKey,
+        cycleStart,
+        commentId: comment.id || null,
+        taskTitle: title,
       });
     } catch (err) {
       console.warn('[client-todo-note-submit] message:', err?.message || err);

@@ -43,6 +43,13 @@ export default async (req) => {
   const clientId = String(body.clientId || '').trim();
   const taskTitle = String(body.taskTitle || 'Task').trim() || 'Task';
   const commentText = String(body.commentText || '').trim();
+  const itemId = String(body.itemId || '').trim() || null;
+  const categoryKey = String(body.categoryKey || '').trim() || null;
+  const cycleStart =
+    body.cycleStart != null && body.cycleStart !== ''
+      ? Number(body.cycleStart)
+      : null;
+  const commentId = String(body.commentId || '').trim() || null;
   const mentionedEmails = Array.isArray(body.mentionedEmails)
     ? body.mentionedEmails
     : [];
@@ -78,6 +85,9 @@ export default async (req) => {
         commentText,
         authorName,
         mentionedEmails,
+        itemId,
+        categoryKey,
+        cycleStart: Number.isFinite(cycleStart) ? cycleStart : null,
       });
     } catch (err) {
       console.warn('[client-todo-note-mention] email:', err?.message || err);
@@ -94,6 +104,11 @@ export default async (req) => {
         attachments: [],
         createdAt: Date.now(),
         systemKind: 'todo_note_mention',
+        itemId,
+        categoryKey,
+        cycleStart: Number.isFinite(cycleStart) ? cycleStart : null,
+        commentId,
+        taskTitle,
       });
     } catch (err) {
       console.warn('[client-todo-note-mention] message:', err?.message || err);
@@ -109,10 +124,10 @@ export default async (req) => {
         actorEmail: caller.email,
         source: 'system',
         meta: {
-          itemId: body.itemId || null,
-          categoryKey: body.categoryKey || null,
-          cycleStart: body.cycleStart || null,
-          commentId: body.commentId || null,
+          itemId,
+          categoryKey,
+          cycleStart: Number.isFinite(cycleStart) ? cycleStart : null,
+          commentId,
           mentionedEmails,
         },
       });

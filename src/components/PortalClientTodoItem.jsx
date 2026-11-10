@@ -44,14 +44,20 @@ export default function PortalClientTodoItem({
   cycleStart,
   categoryKey,
   user,
+  highlighted = false,
+  forceNotesOpen = false,
 }) {
   const comments = getTaskComments(item);
   const [notesOpen, setNotesOpen] = React.useState(
-    () => comments.length > 0 || Boolean(item?.attachments?.length),
+    () =>
+      forceNotesOpen ||
+      comments.length > 0 ||
+      Boolean(item?.attachments?.length),
   );
   const [draft, setDraft] = React.useState('');
   const [saving, setSaving] = React.useState(false);
   const [localComments, setLocalComments] = React.useState(comments);
+  const cardRef = React.useRef(null);
 
   const prevCommentCountRef = React.useRef(comments.length);
   React.useEffect(() => {
@@ -63,6 +69,18 @@ export default function PortalClientTodoItem({
     }
     prevCommentCountRef.current = next.length;
   }, [item]);
+
+  React.useEffect(() => {
+    if (forceNotesOpen) setNotesOpen(true);
+  }, [forceNotesOpen]);
+
+  React.useEffect(() => {
+    if (!highlighted || !cardRef.current) return undefined;
+    const t = window.setTimeout(() => {
+      cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 160);
+    return () => window.clearTimeout(t);
+  }, [highlighted, item?.id]);
 
   const postNote = async () => {
     if (saving || !draft.trim() || !client?.id) return;
@@ -94,9 +112,13 @@ export default function PortalClientTodoItem({
 
   return (
     <li
-      className={`rounded-xl border border-slate-200 bg-white p-4 space-y-3 shadow-sm ${
-        item.done ? 'opacity-70' : ''
-      }`}
+      ref={cardRef}
+      data-todo-item-id={item?.id || ''}
+      className={`rounded-xl border bg-white p-4 space-y-3 shadow-sm ${
+        highlighted
+          ? 'border-[#fd7414] ring-2 ring-[#fd7414]/30'
+          : 'border-slate-200'
+      } ${item.done ? 'opacity-70' : ''}`}
     >
       <div className="space-y-2">
         <p

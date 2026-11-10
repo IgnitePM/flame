@@ -252,6 +252,9 @@ export async function notifyPortalTodoNoteMention({
   commentText,
   authorName,
   mentionedEmails = [],
+  itemId = null,
+  categoryKey = null,
+  cycleStart = null,
 }) {
   const allowed = new Set(portalEmails(client));
   const to = [
@@ -262,17 +265,22 @@ export async function notifyPortalTodoNoteMention({
     ),
   ];
   if (!to.length) return { sent: 0, skipped: 'no_matching_portal_emails' };
-  // Land on Messages — task-note @mentions are mirrored into the shared inbox
-  // so clients can read the note even when the task lives on another cycle.
-  const href = `${appBaseUrl()}?tab=messages`;
+  // Prefer the task Notes thread so clients reply on the task, not general Messages.
+  const params = new URLSearchParams({ tab: 'dashboard' });
+  if (itemId) params.set('itemId', String(itemId));
+  if (categoryKey) params.set('categoryKey', String(categoryKey));
+  if (cycleStart != null && cycleStart !== '') {
+    params.set('cycleStart', String(cycleStart));
+  }
+  const href = `${appBaseUrl()}?${params.toString()}`;
   const title = String(taskTitle || 'Task').trim() || 'Task';
   const { text, html } = emailShell({
     eyebrow: 'Ignite PM · Task note',
     title: `You were tagged on: ${title}`,
     bodyText: `${authorName || 'Ignite'} tagged you on ${
       client.name || 'your account'
-    }:\n\n${commentText || '(no note text)'}`,
-    ctaLabel: 'Open Messages',
+    }:\n\n${commentText || '(no note text)'}\n\nReply on the task Notes thread so the conversation stays with this work.`,
+    ctaLabel: 'Open task to reply',
     ctaHref: href,
   });
   await sendDigestEmail({
