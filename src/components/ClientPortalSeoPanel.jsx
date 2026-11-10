@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArrowDownRight,
   ArrowUpRight,
+  CalendarRange,
   LayoutDashboard,
   LineChart,
   Loader2,
@@ -13,6 +14,14 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { authedFetch } from '../utils/authedFetch.js';
+import {
+  COMPARE_PRESETS,
+  applyKeywordDateCompare,
+  defaultCompareDates,
+  resolveComparePreset,
+  summarizeCompareMoves,
+  uniqueSortedCheckDates,
+} from '../utils/keywordRankCompare.js';
 
 const SEO_TABS = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -165,6 +174,9 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
   const [gbpLoading, setGbpLoading] = useState(true);
   const [gbpError, setGbpError] = useState('');
   const [gbpReport, setGbpReport] = useState(null);
+  const [comparePreset, setComparePreset] = useState('wow');
+  const [baselineDate, setBaselineDate] = useState('');
+  const [compareDate, setCompareDate] = useState('');
 
   const range = useMemo(() => {
     const from = dateFromMs
@@ -223,6 +235,65 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
     loadGbp();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client?.id, range.from, range.to]);
+
+  useEffect(() => {
+    if (!report) return;
+    const dates =
+      Array.isArray(report.checkDates) && report.checkDates.length
+        ? report.checkDates
+        : uniqueSortedCheckDates(report.keywords || []);
+    const defaults =
+      report.keywordCompare?.baselineDate && report.keywordCompare?.compareDate
+        ? {
+            baselineDate: report.keywordCompare.baselineDate,
+            compareDate: report.keywordCompare.compareDate,
+          }
+        : defaultCompareDates(dates, report.checkpoints || {});
+    setComparePreset('wow');
+    setBaselineDate(defaults.baselineDate || '');
+    setCompareDate(defaults.compareDate || '');
+  }, [report]);
+
+  const keywords = useMemo(
+    () => (Array.isArray(report?.keywords) ? report.keywords : []),
+    [report?.keywords],
+  );
+  const checkDates = useMemo(() => {
+    if (Array.isArray(report?.checkDates) && report.checkDates.length) {
+      return report.checkDates;
+    }
+    return uniqueSortedCheckDates(keywords);
+  }, [report?.checkDates, keywords]);
+
+  const comparedKeywords = useMemo(() => {
+    const rows =
+      !baselineDate || !compareDate
+        ? keywords
+        : keywords.map((row) =>
+            applyKeywordDateCompare(row, baselineDate, compareDate),
+          );
+    return [...rows].sort((a, b) => {
+      const ap = a.position > 0 ? a.position : 9999;
+      const bp = b.position > 0 ? b.position : 9999;
+      return ap - bp;
+    });
+  }, [keywords, baselineDate, compareDate]);
+
+  const compareSummary = useMemo(
+    () => summarizeCompareMoves(comparedKeywords),
+    [comparedKeywords],
+  );
+
+  const applyComparePreset = (presetId) => {
+    setComparePreset(presetId);
+    const next = resolveComparePreset(presetId, {
+      checkDates,
+      checkpoints: report?.checkpoints || {},
+      rangeFrom: report?.dateFrom || range.from,
+    });
+    if (next.baselineDate) setBaselineDate(next.baselineDate);
+    if (next.compareDate) setCompareDate(next.compareDate);
+  };
 
   const tabBar = (
     <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1 -mx-1 px-1">
@@ -369,7 +440,6 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
   const p = report?.project || {};
   const visTrend = report?.visibilityTrend || [];
   const posTrend = report?.avgPositionTrend || [];
-  const keywords = report?.keywords || [];
   const wow = report?.weekOverWeek || {};
   const traffic = report?.traffic || {};
   const analytics = report?.analytics || {};
@@ -691,82 +761,192 @@ export default function ClientPortalSeoPanel({ client, dateFromMs, dateToMs }) {
       ) : null}
 
       {seoTab === 'keywords' ? (
-        <div className="bg-white border border-slate-200 rounded-[28px] shadow-sm overflow-hidden">
-          <div className="px-6 py-5 border-b border-slate-100">
-            <h3 className="font-black text-slate-900">Keyword rankings</h3>
-            <p className="text-xs text-slate-500 font-medium mt-0.5">
-              Best position across tracked engines · volume, landing page, content score · top{' '}
-              {keywords.length}
-            </p>
-          </div>
-          {keywords.length === 0 ? (
-            <p className="p-8 text-sm font-bold text-slate-400">
-              No keyword data for this range.
-            </p>
-          ) : (
-            <div className="overflow-x-auto no-scrollbar">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">
-                    <th className="px-6 py-3">Keyword</th>
-                    <th className="px-4 py-3">Pos</th>
-                    <th className="px-4 py-3">WoW</th>
-                    <th className="px-4 py-3">Volume</th>
-                    <th className="px-4 py-3">Score</th>
-                    <th className="px-4 py-3">Landing page</th>
-                    <th className="px-6 py-3">SERP</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {keywords.map((row) => (
-                    <tr
-                      key={row.id}
-                      className="border-b border-slate-50 last:border-0 hover:bg-slate-50/80"
-                    >
-                      <td className="px-6 py-3 font-bold text-slate-800 max-w-[220px]">
-                        <div className="truncate">{row.name}</div>
-                        {row.serpFeatures?.length ? (
-                          <div className="text-[10px] font-bold text-slate-400 mt-0.5 truncate">
-                            {row.serpFeatures.join(' · ')}
-                          </div>
-                        ) : null}
-                      </td>
-                      <td className="px-4 py-3 font-black tabular-nums text-slate-900">
-                        {row.position > 0 ? row.position : '—'}
-                      </td>
-                      <td className="px-4 py-3">
-                        <PositionDelta delta={row.wowDelta} />
-                      </td>
-                      <td className="px-4 py-3 tabular-nums text-slate-600 font-medium">
-                        {row.volume ? row.volume.toLocaleString() : '—'}
-                      </td>
-                      <td className="px-4 py-3 tabular-nums font-medium text-slate-700">
-                        {row.contentScore != null ? row.contentScore : '—'}
-                      </td>
-                      <td className="px-4 py-3 max-w-[200px]">
-                        {row.landingUrl ? (
-                          <a
-                            href={row.landingUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="block truncate font-bold text-[#fd7414] hover:underline"
-                            title={row.landingUrl}
-                          >
-                            {row.landingUrl.replace(/^https?:\/\//, '')}
-                          </a>
-                        ) : (
-                          <span className="text-slate-400 font-medium">—</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-3 tabular-nums text-slate-500 font-medium">
-                        {row.serpFeatureCount ? row.serpFeatureCount : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        <div className="space-y-4">
+          <div className="bg-white border border-slate-200 rounded-[28px] p-5 sm:p-6 shadow-sm space-y-4">
+            <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  <CalendarRange className="w-3.5 h-3.5 text-[#fd7414]" />
+                  Compare by dates
+                </div>
+                <h3 className="font-black text-slate-900 mt-1">Keyword rankings</h3>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">
+                  Pick two SE Ranking check dates to compare positions · top{' '}
+                  {comparedKeywords.length}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {COMPARE_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => applyComparePreset(preset.id)}
+                    className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                      comparePreset === preset.id
+                        ? 'bg-[#fd7414] text-white'
+                        : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
             </div>
-          )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                Baseline date
+                <select
+                  value={baselineDate}
+                  onChange={(e) => {
+                    setComparePreset('custom');
+                    setBaselineDate(e.target.value);
+                  }}
+                  disabled={!checkDates.length}
+                  className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-[#fd7414] disabled:opacity-50"
+                >
+                  {!checkDates.length ? (
+                    <option value="">No check dates</option>
+                  ) : null}
+                  {checkDates.map((d) => (
+                    <option key={`b-${d}`} value={d}>
+                      {formatDay(d)} ({d})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                Compare date
+                <select
+                  value={compareDate}
+                  onChange={(e) => {
+                    setComparePreset('custom');
+                    setCompareDate(e.target.value);
+                  }}
+                  disabled={!checkDates.length}
+                  className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-[#fd7414] disabled:opacity-50"
+                >
+                  {!checkDates.length ? (
+                    <option value="">No check dates</option>
+                  ) : null}
+                  {checkDates.map((d) => (
+                    <option key={`c-${d}`} value={d}>
+                      {formatDay(d)} ({d})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <StatCard
+                label="Improved"
+                value={
+                  <span className="text-emerald-600">{compareSummary.improved}</span>
+                }
+              />
+              <StatCard
+                label="Declined"
+                value={
+                  <span className="text-rose-500">{compareSummary.declined}</span>
+                }
+              />
+              <StatCard label="Unchanged" value={compareSummary.flat} />
+              <StatCard
+                label="No data"
+                value={compareSummary.missing}
+                hint={
+                  baselineDate && compareDate
+                    ? `${formatDay(baselineDate)} → ${formatDay(compareDate)}`
+                    : undefined
+                }
+              />
+            </div>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-[28px] shadow-sm overflow-hidden">
+            <div className="px-6 py-5 border-b border-slate-100">
+              <p className="text-xs text-slate-500 font-medium">
+                Best position across tracked engines · volume, landing page, content score
+              </p>
+            </div>
+            {comparedKeywords.length === 0 ? (
+              <p className="p-8 text-sm font-bold text-slate-400">
+                No keyword data for this range.
+              </p>
+            ) : (
+              <div className="overflow-x-auto no-scrollbar">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">
+                      <th className="px-6 py-3">Keyword</th>
+                      <th className="px-4 py-3">
+                        {baselineDate ? formatDay(baselineDate) : 'Earlier'}
+                      </th>
+                      <th className="px-4 py-3">
+                        {compareDate ? formatDay(compareDate) : 'Later'}
+                      </th>
+                      <th className="px-4 py-3">Change</th>
+                      <th className="px-4 py-3">Volume</th>
+                      <th className="px-4 py-3">Score</th>
+                      <th className="px-4 py-3">Landing page</th>
+                      <th className="px-6 py-3">SERP</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {comparedKeywords.map((row) => (
+                      <tr
+                        key={row.id}
+                        className="border-b border-slate-50 last:border-0 hover:bg-slate-50/80"
+                      >
+                        <td className="px-6 py-3 font-bold text-slate-800 max-w-[220px]">
+                          <div className="truncate">{row.name}</div>
+                          {row.serpFeatures?.length ? (
+                            <div className="text-[10px] font-bold text-slate-400 mt-0.5 truncate">
+                              {row.serpFeatures.join(' · ')}
+                            </div>
+                          ) : null}
+                        </td>
+                        <td className="px-4 py-3 tabular-nums font-medium text-slate-600">
+                          {row.baselinePosition > 0 ? row.baselinePosition : '—'}
+                        </td>
+                        <td className="px-4 py-3 font-black tabular-nums text-slate-900">
+                          {row.position > 0 ? row.position : '—'}
+                        </td>
+                        <td className="px-4 py-3">
+                          <PositionDelta delta={row.compareDelta} />
+                        </td>
+                        <td className="px-4 py-3 tabular-nums text-slate-600 font-medium">
+                          {row.volume ? row.volume.toLocaleString() : '—'}
+                        </td>
+                        <td className="px-4 py-3 tabular-nums font-medium text-slate-700">
+                          {row.contentScore != null ? row.contentScore : '—'}
+                        </td>
+                        <td className="px-4 py-3 max-w-[200px]">
+                          {row.landingUrl ? (
+                            <a
+                              href={row.landingUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block truncate font-bold text-[#fd7414] hover:underline"
+                              title={row.landingUrl}
+                            >
+                              {row.landingUrl.replace(/^https?:\/\//, '')}
+                            </a>
+                          ) : (
+                            <span className="text-slate-400 font-medium">—</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-3 tabular-nums text-slate-500 font-medium">
+                          {row.serpFeatureCount ? row.serpFeatureCount : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       ) : null}
     </div>
