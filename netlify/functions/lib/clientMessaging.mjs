@@ -119,6 +119,44 @@ export async function notifyPortalNewMessage({ client, messageBody, authorName }
   return { sent: to.length };
 }
 
+/** Monthly Strategy & Review booking reminder (portal CTA + direct booking URL in body). */
+export async function notifyStrategySessionReminder({
+  client,
+  monthLabel,
+  bookingUrl,
+  portalHref,
+  messageBody,
+}) {
+  const to = portalEmails(client);
+  if (!to.length) return { sent: 0, skipped: 'no_portal_emails' };
+  const month = String(monthLabel || '').trim() || 'this month';
+  const href =
+    String(portalHref || '').trim() || `${appBaseUrl()}?tab=dashboard`;
+  const direct = String(bookingUrl || '').trim();
+  const body =
+    String(messageBody || '').trim() ||
+    [
+      `Please book your ${month} Strategy & Review session.`,
+      direct ? `Direct booking link: ${direct}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+  const { text, html } = emailShell({
+    eyebrow: 'Ignite PM · Strategy & Review',
+    title: `Book your ${month} Strategy & Review session`,
+    bodyText: body,
+    ctaLabel: 'Open portal to book',
+    ctaHref: href,
+  });
+  await sendDigestEmail({
+    to,
+    subject: `Book your ${month} Strategy & Review session — ${client.name || 'Ignite'}`,
+    text,
+    html,
+  });
+  return { sent: to.length };
+}
+
 export async function notifyStaffClientMessage({ client, messageBody, authorEmail }) {
   const to = await staffNotifyEmails(client);
   if (!to.length) return { sent: 0, skipped: 'no_staff_emails' };

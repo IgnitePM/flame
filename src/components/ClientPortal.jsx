@@ -36,6 +36,7 @@ import PortalMyProfileModal from './PortalMyProfileModal.jsx';
 import ClientPortalAnnouncements from './ClientPortalAnnouncements.jsx';
 import PortalQuickBooksPanel from './PortalQuickBooksPanel.jsx';
 import MobileNavDrawer, { MobileNavItem } from './mobile/MobileNavDrawer.jsx';
+import { DEFAULT_STRATEGY_BOOKING_URL } from '../utils/strategySessionBooking.js';
 import {
   ChevronLeft,
   ChevronRight,
@@ -58,7 +59,7 @@ import {
   MoreHorizontal,
 } from 'lucide-react';
 
-const STRATEGY_BOOKING_URL = 'https://calendar.app.google/nsL6wM7189fAM1Vd7';
+const STRATEGY_BOOKING_URL = DEFAULT_STRATEGY_BOOKING_URL;
 
 /** Portal sections reachable via `?tab=` (email CTAs + shareable links). */
 const PORTAL_TAB_IDS = new Set([
