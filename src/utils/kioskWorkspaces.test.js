@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   billingTargetMatchesActiveTask,
   createWorkspace,
+  findActiveTaskForSelection,
   isTimingWorkspace,
   loadWorkspacesFromStorage,
   removeWorkspace,
@@ -79,6 +80,37 @@ describe('kioskWorkspaces', () => {
         billingTarget: 'retainer_Web Development',
       }),
       false,
+    );
+  });
+
+  it('supports multiple concurrent timers across tabs', () => {
+    const tasks = [
+      {
+        id: '1',
+        clientName: 'Elite',
+        projectName: 'Web Development',
+        projectId: null,
+      },
+      {
+        id: '2',
+        clientName: 'Twin Peaks',
+        projectName: 'SEO',
+        projectId: null,
+      },
+    ];
+    assert.equal(
+      isTimingWorkspace(tasks, {
+        clientName: 'Twin Peaks',
+        billingTarget: 'retainer_SEO',
+      }),
+      true,
+    );
+    assert.equal(
+      findActiveTaskForSelection(tasks, {
+        clientName: 'Elite',
+        billingTarget: 'retainer_Web Development',
+      })?.id,
+      '1',
     );
   });
 

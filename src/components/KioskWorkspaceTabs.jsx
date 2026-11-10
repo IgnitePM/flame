@@ -12,18 +12,20 @@ export default function KioskWorkspaceTabs({
   workspaces = [],
   activeId = null,
   activeTask = null,
+  activeTasks = null,
   generalLabel = 'General / Unclassified',
   onSelect,
   onClose,
   onAdd,
 }) {
+  const timingTasks = activeTasks?.length ? activeTasks : activeTask;
   return (
     <div className="flex items-center gap-1.5 min-w-0">
       <div className="flex-1 min-w-0 overflow-x-auto no-scrollbar">
         <div className="flex items-stretch gap-1 min-w-min pr-1">
           {(workspaces || []).map((ws) => {
             const active = ws.id === activeId;
-            const timing = isTimingWorkspace(activeTask, ws, { generalLabel });
+            const timing = isTimingWorkspace(timingTasks, ws, { generalLabel });
             const label = shortWorkspaceLabel(ws, {
               generalLabel:
                 generalLabel === 'General / Unclassified' ? 'General' : generalLabel,

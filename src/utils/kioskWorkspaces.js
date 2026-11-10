@@ -114,30 +114,75 @@ export function billingTargetMatchesActiveTask(activeTask, billingTarget) {
   return false;
 }
 
-export function isTimingWorkspace(activeTask, ws, { generalLabel = 'General / Unclassified' } = {}) {
-  if (!activeTask || !ws?.clientName) return false;
-  if (activeTask.clientName !== ws.clientName) return false;
-  if (!ws.billingTarget) {
-    // Tab only pinned the client — still count as timing that client.
-    return true;
+export function taskMatchesClientAndTarget(
+  task,
+  { clientName, billingTarget, generalLabel = 'General / Unclassified' } = {},
+) {
+  if (!task || !clientName) return false;
+  if (task.clientName !== clientName) return false;
+  if (!billingTarget) return true;
+  if (billingTarget.startsWith('project_')) {
+    return task.projectId === billingTarget.slice('project_'.length);
   }
-  if (ws.billingTarget.startsWith('project_')) {
-    return activeTask.projectId === ws.billingTarget.slice('project_'.length);
-  }
-  if (ws.billingTarget === 'retainer_GENERAL_UNCLASSIFIED') {
+  if (billingTarget === 'retainer_GENERAL_UNCLASSIFIED') {
     return (
-      !activeTask.projectId &&
-      (activeTask.projectName === generalLabel ||
-        activeTask.projectName === 'General / Unclassified')
+      !task.projectId &&
+      (task.projectName === generalLabel ||
+        task.projectName === 'General / Unclassified')
     );
   }
-  if (ws.billingTarget.startsWith('retainer_')) {
+  if (billingTarget.startsWith('retainer_')) {
     return (
-      !activeTask.projectId &&
-      activeTask.projectName === ws.billingTarget.slice('retainer_'.length)
+      !task.projectId &&
+      task.projectName === billingTarget.slice('retainer_'.length)
     );
   }
   return false;
+}
+
+function asTaskList(activeTaskOrTasks) {
+  if (!activeTaskOrTasks) return [];
+  return Array.isArray(activeTaskOrTasks)
+    ? activeTaskOrTasks.filter(Boolean)
+    : [activeTaskOrTasks];
+}
+
+export function isTimingWorkspace(
+  activeTaskOrTasks,
+  ws,
+  { generalLabel = 'General / Unclassified' } = {},
+) {
+  if (!ws?.clientName) return false;
+  return asTaskList(activeTaskOrTasks).some((task) =>
+    taskMatchesClientAndTarget(task, {
+      clientName: ws.clientName,
+      billingTarget: ws.billingTarget,
+      generalLabel,
+    }),
+  );
+}
+
+export function findActiveTaskForSelection(
+  activeTasks,
+  { clientName, billingTarget, generalLabel = 'General / Unclassified' } = {},
+) {
+  return (
+    asTaskList(activeTasks).find((task) =>
+      taskMatchesClientAndTarget(task, {
+        clientName,
+        billingTarget,
+        generalLabel,
+      }),
+    ) || null
+  );
+}
+
+export function liveDurationForTask(task, now = Date.now()) {
+  if (!task) return 0;
+  return (
+    Number(task.totalSavedDuration || 0) +
+    Math.max(0, now - (task.lastResumeTime || task.clockInTime || now))
+  );
 }
 
 export function loadWorkspacesFromStorage(storage, userKey) {

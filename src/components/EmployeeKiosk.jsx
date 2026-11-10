@@ -84,6 +84,7 @@ import {
   billingTargetMatchesActiveTask,
   createWorkspace,
   findWorkspaceIndex,
+  liveDurationForTask,
   loadWorkspacesFromStorage,
   removeWorkspace,
   saveWorkspacesToStorage,
@@ -145,8 +146,10 @@ const EmployeeKiosk = ({
   user,
   activeShift,
   activeTask,
+  activeTasks = [],
   liveDuration,
   liveTaskDuration,
+  liveTaskDurationsById = {},
   clients,
   selectableRetainers,
   GENERAL_LABEL,
@@ -1072,12 +1075,24 @@ const EmployeeKiosk = ({
     [GENERAL_LABEL],
   );
 
+  const runningTasks = React.useMemo(
+    () =>
+      Array.isArray(activeTasks)
+        ? activeTasks
+        : activeTask
+          ? [activeTask]
+          : [],
+    [activeTasks, activeTask],
+  );
   const viewingActiveTask = Boolean(
     activeTask &&
       selectedClient &&
       activeTask.clientName === selectedClient &&
       (!selectedBillingTarget ||
         billingTargetMatchesActiveTask(activeTask, selectedBillingTarget)),
+  );
+  const otherRunningTasks = runningTasks.filter(
+    (t) => !activeTask || t.id !== activeTask.id,
   );
 
   const applyWorkspace = React.useCallback(
@@ -1095,17 +1110,27 @@ const EmployeeKiosk = ({
     [setSelectedClient, setSelectedBillingTarget],
   );
 
-  const focusTimingWorkspace = React.useCallback(() => {
-    if (!activeTask?.clientName) return;
-    const billingTarget = billingTargetForActiveTask(activeTask);
-    const { workspaces: next, activeId } = upsertWorkspace(workspaces, {
-      clientName: activeTask.clientName,
-      billingTarget,
-    });
-    setWorkspaces(next);
-    const ws = next.find((w) => w.id === activeId);
-    if (ws) applyWorkspace(ws);
-  }, [activeTask, applyWorkspace, billingTargetForActiveTask, workspaces]);
+  const focusTimingWorkspace = React.useCallback(
+    (task = null) => {
+      const target = task || otherRunningTasks[0] || activeTask;
+      if (!target?.clientName) return;
+      const billingTarget = billingTargetForActiveTask(target);
+      const { workspaces: next, activeId } = upsertWorkspace(workspaces, {
+        clientName: target.clientName,
+        billingTarget,
+      });
+      setWorkspaces(next);
+      const ws = next.find((w) => w.id === activeId);
+      if (ws) applyWorkspace(ws);
+    },
+    [
+      activeTask,
+      applyWorkspace,
+      billingTargetForActiveTask,
+      otherRunningTasks,
+      workspaces,
+    ],
+  );
 
   const restoredWorkspaceKeyRef = React.useRef('');
   React.useEffect(() => {
@@ -1200,27 +1225,34 @@ const EmployeeKiosk = ({
     });
   }, [selectedClient, selectedBillingTarget, activeWorkspaceId]);
 
-  // Pin a tab for the running timer without forcing navigation away from
+  // Pin a tab for every running timer without forcing navigation away from
   // whatever client the user is currently browsing.
   React.useEffect(() => {
-    if (!activeTask?.clientName) return;
-    const billingTarget = billingTargetForActiveTask(activeTask);
-    if (!billingTarget) return;
+    if (!runningTasks.length) return;
     setWorkspaces((prev) => {
-      if (
-        findWorkspaceIndex(prev, {
-          clientName: activeTask.clientName,
+      let next = prev;
+      let changed = false;
+      for (const task of runningTasks) {
+        if (!task?.clientName) continue;
+        const billingTarget = billingTargetForActiveTask(task);
+        if (!billingTarget) continue;
+        if (
+          findWorkspaceIndex(next, {
+            clientName: task.clientName,
+            billingTarget,
+          }) >= 0
+        ) {
+          continue;
+        }
+        next = upsertWorkspace(next, {
+          clientName: task.clientName,
           billingTarget,
-        }) >= 0
-      ) {
-        return prev;
+        }).workspaces;
+        changed = true;
       }
-      return upsertWorkspace(prev, {
-        clientName: activeTask.clientName,
-        billingTarget,
-      }).workspaces;
+      return changed ? next : prev;
     });
-  }, [activeTask, billingTargetForActiveTask]);
+  }, [runningTasks, billingTargetForActiveTask]);
 
   React.useEffect(() => {
     if (!selectedClientObj?.id) setClientMessagesOpen(false);
@@ -1970,6 +2002,7 @@ const EmployeeKiosk = ({
                     workspaces={workspaces}
                     activeId={activeWorkspaceId}
                     activeTask={activeTask}
+                    activeTasks={runningTasks}
                     generalLabel={GENERAL_LABEL}
                     onSelect={(id) => {
                       const ws = workspaces.find((w) => w.id === id);
@@ -2011,38 +2044,48 @@ const EmployeeKiosk = ({
                 </div>
               ) : (
                 <>
-                  {activeTask && !viewingActiveTask ? (
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-3 bg-orange-50 border border-orange-200 rounded-2xl px-4 py-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="text-[10px] font-black uppercase tracking-widest text-[#fd7414]">
-                          Still timing
-                        </div>
-                        <div className="text-sm font-black text-slate-900 truncate">
-                          {activeTask.clientName}
-                          {activeTask.projectName
-                            ? ` · ${activeTask.projectName}`
-                            : ''}
-                        </div>
-                        <div className="font-mono text-lg font-black text-slate-800">
-                          {formatTime(liveTaskDuration)}
-                        </div>
+                  {otherRunningTasks.length > 0 ? (
+                    <div className="space-y-2">
+                      <div className="text-[10px] font-black uppercase tracking-widest text-[#fd7414]">
+                        {otherRunningTasks.length === 1
+                          ? 'Also timing'
+                          : `Also timing (${otherRunningTasks.length})`}
                       </div>
-                      <div className="flex flex-wrap gap-2 shrink-0">
-                        <button
-                          type="button"
-                          onClick={focusTimingWorkspace}
-                          className="px-3 py-2 rounded-xl bg-white border border-orange-200 text-[10px] font-black uppercase tracking-widest text-slate-700 hover:border-[#fd7414] hover:text-[#fd7414]"
+                      {otherRunningTasks.map((task) => (
+                        <div
+                          key={task.id}
+                          className="flex flex-col sm:flex-row sm:items-center gap-3 bg-orange-50 border border-orange-200 rounded-2xl px-4 py-3"
                         >
-                          Open timed tab
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleStopTask}
-                          className="px-3 py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest hover:bg-slate-800"
-                        >
-                          Pause timer
-                        </button>
-                      </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-black text-slate-900 truncate">
+                              {task.clientName}
+                              {task.projectName ? ` · ${task.projectName}` : ''}
+                            </div>
+                            <div className="font-mono text-lg font-black text-slate-800">
+                              {formatTime(
+                                liveTaskDurationsById[task.id] ??
+                                  liveDurationForTask(task),
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => focusTimingWorkspace(task)}
+                              className="px-3 py-2 rounded-xl bg-white border border-orange-200 text-[10px] font-black uppercase tracking-widest text-slate-700 hover:border-[#fd7414] hover:text-[#fd7414]"
+                            >
+                              Open tab
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleStopTask(task)}
+                              className="px-3 py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest hover:bg-slate-800"
+                            >
+                              Pause
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   ) : null}
                   {!viewingActiveTask ? (
@@ -2050,7 +2093,9 @@ const EmployeeKiosk = ({
                       <div className="flex items-center gap-2 mb-2 text-[#fd7414]">
                         <Activity className="w-5 h-5" />
                         <h3 className="font-black text-sm uppercase tracking-wider">
-                          {activeTask ? 'Work another client' : 'Start a Task'}
+                          {runningTasks.length
+                            ? 'Start another timer'
+                            : 'Start a Task'}
                         </h3>
                       </div>
                       <div className="space-y-4">
@@ -2143,17 +2188,13 @@ const EmployeeKiosk = ({
                         disabled={!selectedClient || !selectedBillingTarget}
                         className="w-full bg-black text-white p-5 rounded-2xl font-black text-lg disabled:opacity-30 hover:bg-slate-800 transition-all shadow-lg mt-2"
                       >
-                        {activeTask
-                          ? 'Switch timer here'
+                        {runningTasks.length
+                          ? 'Start timer here too'
                           : 'Begin Work Block'}
                       </button>
-                      {activeTask ? (
+                      {runningTasks.length ? (
                         <p className="text-[11px] text-slate-500 font-medium text-center">
-                          Pauses the current timer on {activeTask.clientName}
-                          {activeTask.projectName
-                            ? ` · ${activeTask.projectName}`
-                            : ''}
-                          .
+                          Other client timers keep running in parallel.
                         </p>
                       ) : null}
 
