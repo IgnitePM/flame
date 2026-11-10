@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   applyKeywordDateCompare,
+  clampYmd,
   defaultCompareDates,
   pickCheckNearDate,
   resolveComparePreset,
@@ -82,5 +83,11 @@ describe('uniqueSortedCheckDates / summarize / presets', () => {
     });
     assert.equal(r.compareDate, '2025-10-15');
     assert.equal(r.baselineDate, '2025-09-15');
+  });
+
+  it('clamps calendar dates into available history', () => {
+    assert.equal(clampYmd('2025-01-01', '2025-09-02', '2025-11-10'), '2025-09-02');
+    assert.equal(clampYmd('2025-12-01', '2025-09-02', '2025-11-10'), '2025-11-10');
+    assert.equal(clampYmd('2025-10-05', '2025-09-02', '2025-11-10'), '2025-10-05');
   });
 });

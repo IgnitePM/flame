@@ -315,9 +315,9 @@ export default async (req) => {
       dateTo,
       forceRefresh,
       build: async () => {
-    // Pull enough history for week-over-week + keyword date compare (up to ~90d).
+    // Pull enough history for week-over-week + keyword calendar compare (up to ~1y).
     const historyFrom = addDaysYmd(dateFrom, -14);
-    const positionsFromCandidate = addDaysYmd(dateTo, -90);
+    const positionsFromCandidate = addDaysYmd(dateTo, -365);
     const positionsFrom =
       positionsFromCandidate < historyFrom ? positionsFromCandidate : historyFrom;
 
