@@ -65,6 +65,7 @@ export default function ClientMessagesPanel({
   userName = '',
   staffEmails = [],
   adminUsers = [],
+  focusMessageId = null,
 }) {
   const clientId = client?.id;
   const [messages, setMessages] = useState([]);
@@ -79,6 +80,15 @@ export default function ClientMessagesPanel({
   const [driveFiles, setDriveFiles] = useState([]);
   const [portalStaffEmails, setPortalStaffEmails] = useState([]);
   const bottomRef = useRef(null);
+  const focusRef = useRef(null);
+
+  useEffect(() => {
+    if (!focusMessageId || !focusRef.current) return undefined;
+    const t = window.setTimeout(() => {
+      focusRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 120);
+    return () => window.clearTimeout(t);
+  }, [focusMessageId, messages.length]);
 
   const mentionEmails = useMemo(() => {
     if (mode === 'staff' && staffEmails?.length) return staffEmails;
@@ -288,13 +298,18 @@ export default function ClientMessagesPanel({
             const mine =
               (mode === 'staff' && m.authorType === 'staff') ||
               (mode === 'portal' && m.authorType === 'client');
+            const focused = focusMessageId && m.id === focusMessageId;
             return (
               <div
                 key={m.id}
+                ref={focused ? focusRef : null}
+                data-message-id={m.id}
                 className={`flex ${mine ? 'justify-end' : 'justify-start'}`}
               >
                 <div
                   className={`max-w-[85%] rounded-2xl px-3 py-2 ${
+                    focused ? 'ring-2 ring-offset-2 ring-[#fd7414] ' : ''
+                  }${
                     mine
                       ? 'bg-[#fd7414] text-white'
                       : 'bg-slate-100 text-slate-800'

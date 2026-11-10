@@ -121,7 +121,8 @@ export default function KioskNotificationsPanel({
               <div className="flex items-start justify-between gap-2">
                 <button
                   type="button"
-                  className="min-w-0 flex-1 text-left"
+                  className="min-w-0 flex-1 text-left rounded-lg hover:bg-orange-50/70 transition-colors cursor-pointer"
+                  title="Open related client / task / message"
                   onClick={() => onOpenRelated?.(n)}
                 >
                   <div className="text-[9px] font-black uppercase tracking-widest text-[#fd7414]">
