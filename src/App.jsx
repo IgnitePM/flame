@@ -74,6 +74,7 @@ import {
   getDoc,
   deleteDoc,
   deleteField,
+  runTransaction,
 } from './firebase';
 import {
   computeGlobalRetainerStats,
@@ -141,17 +142,24 @@ import {
 } from './utils/teamClientAccess.js';
 import {
   ensureRecurringSkipOnCategory,
+  maintainCurrentCycleTodos,
   markPrimaryTodoDoneAcrossCycles,
+  subtasksVisibleForCompletion,
   materializeCycleTodoFromPrev,
   mergeOpenItemsFromPrevCycle,
+  propagateSubtasksAcrossCycles,
   reconcileRecurringTodoInstances,
   recurringAnchorKey,
   removeRecurringSeriesFromAllCycles,
+  removeSubtaskFromCycles,
   removeTodoItemFromAllCycles,
   upsertRecurringSeriesTemplate,
 } from './utils/recurringTodoMaterialize.js';
 import { syncTaskCommentsAcrossCycles } from './utils/taskComments.js';
-import { canMarkParentTodoDone } from './utils/todoSubtasks.js';
+import {
+  getSubtasks,
+  parentTodoDoneBlockReason,
+} from './utils/todoSubtasks.js';
 import {
   addAttachmentToItem,
   buildDriveDocumentRecord,
@@ -170,10 +178,10 @@ import {
   normalizeRetainerCategoryEnabled,
   carryoverCategoryKey,
   buildRetainerCategoryStartDates,
+  allotmentForCycle,
+  scheduleRetainerAllotmentChanges,
 } from './utils/retainerCategories.js';
-import {
-  removeSubtaskFromItems,
-} from './utils/todoSubtasks.js';
+
 import {
   Routes,
   Route,
@@ -2911,6 +2919,89 @@ export default function App() {
     );
   }, []);
 
+  const assertNewlyCompletedParentsHaveNoOpenSubtasks = (
+    cycles,
+    categoryKey,
+    prevItems,
+    nextItems,
+  ) => {
+    const prevById = new Map(
+      (prevItems || []).filter((row) => row?.id).map((row) => [row.id, row]),
+    );
+    const siblings = [];
+    const templates = [];
+    for (const cycle of Object.values(cycles || {})) {
+      const cat = cycle?.[categoryKey];
+      if (!cat) continue;
+      siblings.push(...(cat.items || []));
+      if (Array.isArray(cat.recurringSeriesTemplates)) {
+        templates.push(...cat.recurringSeriesTemplates);
+      }
+    }
+    for (const next of nextItems || []) {
+      if (!next?.id || !next.done) continue;
+      if (prevById.get(next.id)?.done) continue;
+      const visible = subtasksVisibleForCompletion(next, siblings, templates);
+      const reason = parentTodoDoneBlockReason({ subtasks: visible });
+      if (!reason) continue;
+      const err = new Error(reason);
+      err.code = 'subtasks_open';
+      throw err;
+    }
+  };
+
+  const logTodoDoneTransitions = (freshClient, categoryKey, cycleStart, prevItems, nextItems) => {
+    const prevById = new Map(
+      (prevItems || []).filter((row) => row?.id).map((row) => [row.id, row]),
+    );
+    const events = [];
+    for (const next of nextItems || []) {
+      if (!next?.id) continue;
+      const prev = prevById.get(next.id);
+      if (!prev) continue;
+      const text = String(next.text || next.title || 'Task').trim() || 'Task';
+      if (!prev.done && next.done) {
+        events.push({ type: 'task_completed', title: text, subtaskId: null, todoId: next.id });
+      } else if (prev.done && !next.done) {
+        events.push({
+          type: 'task_reopened',
+          title: `Reopened: ${text}`,
+          subtaskId: null,
+          todoId: next.id,
+        });
+      }
+      const prevSubs = new Map(getSubtasks(prev).map((sub) => [sub?.id, sub]));
+      for (const sub of getSubtasks(next)) {
+        const before = prevSubs.get(sub?.id);
+        if (!before || !sub?.id || !!before.done === !!sub.done) continue;
+        const subText = String(sub.text || 'Sub-task').trim() || 'Sub-task';
+        events.push({
+          type: sub.done ? 'task_completed' : 'task_reopened',
+          title: sub.done ? `Completed sub-task: ${subText}` : `Reopened sub-task: ${subText}`,
+          subtaskId: sub.id,
+          todoId: next.id,
+        });
+      }
+    }
+    for (const event of events) {
+      logClientActivity?.({
+        clientId: freshClient?.id,
+        clientName: freshClient?.name || '',
+        type: event.type,
+        title: event.title,
+        body: categoryKey ? `Category: ${categoryKey}` : '',
+        source: 'manual',
+        meta: {
+          todoId: event.todoId,
+          subtaskId: event.subtaskId,
+          categoryKey,
+          cycleStart: Number(cycleStart) || null,
+          actorEmail: user?.email || '',
+        },
+      });
+    }
+  };
+
   const updateClientTodo = async (
     client,
     cycleStart,
@@ -2987,6 +3078,13 @@ export default function App() {
         }
       }
     }
+    cycles = propagateSubtasksAcrossCycles(cycles).cycles;
+    assertNewlyCompletedParentsHaveNoOpenSubtasks(
+      cycles,
+      categoryKey,
+      prevCategory.items || [],
+      cycles[String(cycleStart)]?.[categoryKey]?.items || [],
+    );
     // Task notes @-tagged to portal contacts must show on the current-cycle
     // copy too — staff often leave the note on a prior billing cycle.
     const commentSync = syncTaskCommentsAcrossCycles(
@@ -2997,6 +3095,13 @@ export default function App() {
     cycles = commentSync.cycles;
     const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(freshClient, cycles);
     await updateDoc(doc(db, 'clients', freshClient.id), { todoCycles: cycles, ...teamAccessPatch });
+    logTodoDoneTransitions(
+      freshClient,
+      categoryKey,
+      cycleStart,
+      prevCategory.items || [],
+      cycles[String(cycleStart)]?.[categoryKey]?.items || nextCategoryData?.items || [],
+    );
     const staffSet = new Set(staffEmails || []);
     const notifyDocs = collectTodoChangeNotifications({
       prevItems: prevCategory.items || [],
@@ -3016,97 +3121,213 @@ export default function App() {
     createInboxNotifications(notifyDocs).catch(() => {});
   };
 
+  const findSavedTodoItem = (cycles, categoryKey, item, preferredCycle) => {
+    const wantedId = String(item?.id || '');
+    const preferred = cycles?.[String(preferredCycle)]?.[categoryKey]?.items?.find(
+      (row) => wantedId && row?.id === wantedId,
+    );
+    if (preferred) return preferred;
+    const anchorKey = item?.recurring
+      ? recurringAnchorKey(item.recurringId || item.id, item.dueDate)
+      : '';
+    let fallback = null;
+    for (const cycle of Object.values(cycles || {})) {
+      const cat = cycle?.[categoryKey];
+      for (const row of cat?.items || []) {
+        if (!row) continue;
+        if (wantedId && row.id === wantedId) return row;
+        if (
+          !fallback &&
+          anchorKey &&
+          row.recurring &&
+          recurringAnchorKey(row.recurringId || row.id, row.dueDate) === anchorKey
+        ) {
+          fallback = row;
+        }
+      }
+    }
+    return fallback;
+  };
+
+  const openCopyOfTodo = (cycles, categoryKey, item) => {
+    const wantedId = String(item?.id || '');
+    const anchorKey = item?.recurring
+      ? recurringAnchorKey(item.recurringId || item.id, item.dueDate)
+      : '';
+    for (const cycle of Object.values(cycles || {})) {
+      const cat = cycle?.[categoryKey];
+      for (const row of cat?.items || []) {
+        if (!row || row.done) continue;
+        if (wantedId && row.id === wantedId) return row;
+        if (
+          anchorKey &&
+          row.recurring &&
+          recurringAnchorKey(row.recurringId || row.id, row.dueDate) === anchorKey
+        ) {
+          return row;
+        }
+      }
+    }
+    return null;
+  };
+
   /** Mark a primary client task complete across every stored billing cycle copy. */
   const setClientTodoItemDone = useCallback(
     async (client, cycleStart, categoryKey, item, done = true) => {
       const freshClient = resolveClient(client) || client;
       if (!freshClient?.id || !item?.id) return false;
 
-      if (done && !canMarkParentTodoDone(item)) return false;
+      const ref = doc(db, 'clients', freshClient.id);
+      let blockReason = '';
+      let missing = false;
 
-      const period = getBillingPeriod(freshClient.billingDay || 1, 0);
-      let cycles = { ...(freshClient.todoCycles || {}) };
-      if (String(cycleStart) === String(period.start)) {
-        cycles = ensureCurrentCycleTodoData(freshClient, cycleStart);
-      }
-
-      const todoState = getTodoStateForCycle(freshClient, cycleStart);
-      const catTodo = todoState[categoryKey] || { closed: false, items: [] };
-      const items = catTodo.items || [];
-      if (!items.some((row) => row?.id === item.id)) return false;
-
-      if (done) {
-        const nextItems = items.map((row) =>
-          row.id === item.id
-            ? { ...row, done: true, doneAt: Date.now() }
-            : row,
-        );
-        cycles[String(cycleStart)] = {
-          ...(cycles[String(cycleStart)] || {}),
-          [categoryKey]: { ...catTodo, items: nextItems },
-        };
-
-        let recurringSkipKey = '';
-        if (item.recurring) {
-          recurringSkipKey = recurringAnchorKey(
-            item.recurringId || item.id,
-            item.dueDate,
-          );
+      await runTransaction(db, async (tx) => {
+        blockReason = '';
+        missing = false;
+        const snap = await tx.get(ref);
+        if (!snap.exists()) {
+          missing = true;
+          return;
         }
-
-        const { cycles: markedCycles, touched } = markPrimaryTodoDoneAcrossCycles(
-          cycles,
-          categoryKey,
-          item.id,
-          true,
-          { recurringSkipKey },
-        );
-        if (!touched) return false;
-        cycles = markedCycles;
-
+        const data = snap.data() || {};
+        const live = { ...freshClient, ...data, id: freshClient.id };
+        const period = getBillingPeriod(live.billingDay || 1, 0);
+        let cycles = { ...(live.todoCycles || {}) };
         if (String(cycleStart) === String(period.start)) {
-          const slice = cycles[String(period.start)];
-          const { cycleDataByCategory, changed } = reconcileRecurringTodoInstances(
-            slice,
-            period.start,
-            period.end,
-            newRecurringTodoRowId,
-          );
-          if (changed) cycles[String(period.start)] = cycleDataByCategory;
+          cycles = ensureCurrentCycleTodoData(live, cycleStart);
         }
-      } else {
-        const nextItems = items.map((row) =>
-          row.id === item.id ? { ...row, done: false, doneAt: null } : row,
-        );
-        cycles[String(cycleStart)] = {
-          ...(cycles[String(cycleStart)] || {}),
-          [categoryKey]: { ...catTodo, items: nextItems },
-        };
+        cycles = propagateSubtasksAcrossCycles(cycles).cycles;
+
+        const cycleKey = String(cycleStart);
+        const catTodo = cycles[cycleKey]?.[categoryKey] || { closed: false, items: [] };
+        const items = catTodo.items || [];
+        const stored =
+          items.find((row) => row?.id === item.id) ||
+          findSavedTodoItem(cycles, categoryKey, item);
+        if (!stored?.id || !items.some((row) => row?.id === stored.id)) {
+          missing = true;
+          return;
+        }
+
+        if (done) {
+          const siblings = [];
+          const templates = [];
+          for (const cycle of Object.values(cycles)) {
+            const cat = cycle?.[categoryKey];
+            if (!cat) continue;
+            siblings.push(...(cat.items || []));
+            if (Array.isArray(cat.recurringSeriesTemplates)) {
+              templates.push(...cat.recurringSeriesTemplates);
+            }
+          }
+          const reason = parentTodoDoneBlockReason({
+            subtasks: subtasksVisibleForCompletion(stored, siblings, templates),
+          });
+          if (reason) {
+            blockReason = reason;
+            const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(live, cycles);
+            tx.update(ref, { todoCycles: cycles, ...teamAccessPatch });
+            return;
+          }
+
+          const doneAt = Date.now();
+          const nextItems = items.map((row) =>
+            row.id === stored.id ? { ...row, done: true, doneAt } : row,
+          );
+          cycles[cycleKey] = {
+            ...(cycles[cycleKey] || {}),
+            [categoryKey]: { ...catTodo, items: nextItems },
+          };
+
+          let recurringSkipKey = '';
+          if (stored.recurring || item.recurring) {
+            recurringSkipKey = recurringAnchorKey(
+              stored.recurringId || item.recurringId || stored.id,
+              stored.dueDate || item.dueDate,
+            );
+          }
+          const { cycles: markedCycles, touched } = markPrimaryTodoDoneAcrossCycles(
+            cycles,
+            categoryKey,
+            stored.id,
+            true,
+            { recurringSkipKey },
+          );
+          if (!touched) {
+            missing = true;
+            return;
+          }
+          cycles = markedCycles;
+          if (String(cycleStart) === String(period.start)) {
+            const slice = cycles[String(period.start)];
+            const { cycleDataByCategory, changed } = reconcileRecurringTodoInstances(
+              slice,
+              period.start,
+              period.end,
+              newRecurringTodoRowId,
+            );
+            if (changed) cycles[String(period.start)] = cycleDataByCategory;
+          }
+        } else {
+          const nextItems = items.map((row) =>
+            row.id === stored.id ? { ...row, done: false, doneAt: null } : row,
+          );
+          cycles[cycleKey] = {
+            ...(cycles[cycleKey] || {}),
+            [categoryKey]: { ...catTodo, items: nextItems },
+          };
+        }
+
+        const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(live, cycles);
+        tx.update(ref, { todoCycles: cycles, ...teamAccessPatch });
+      });
+
+      if (missing) return false;
+      if (blockReason) {
+        const err = new Error(blockReason);
+        err.code = 'subtasks_open';
+        throw err;
       }
 
-      const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(freshClient, cycles);
-      await updateDoc(doc(db, 'clients', freshClient.id), {
-        todoCycles: cycles,
-        ...teamAccessPatch,
-      });
-      if (done) {
-        logClientActivity?.({
-          clientId: freshClient.id,
-          clientName: freshClient.name || '',
-          type: 'task_completed',
-          title: String(item.text || item.title || 'Task completed').trim() || 'Task completed',
-          body: categoryKey ? `Category: ${categoryKey}` : '',
-          source: 'system',
-          meta: {
-            todoId: item.id,
-            categoryKey,
-            cycleStart: Number(cycleStart) || null,
-          },
-        });
+      const savedSnap = await getDoc(ref);
+      const savedCycles = savedSnap.data()?.todoCycles || {};
+      const saved = findSavedTodoItem(savedCycles, categoryKey, item, cycleStart);
+      const savedDone = !!saved?.done;
+      if (done && (!savedDone || openCopyOfTodo(savedCycles, categoryKey, item))) {
+        throw new Error('Task did not stay complete');
       }
-      return true;
+      if (!done && saved && savedDone) {
+        throw new Error('Task did not stay open');
+      }
+
+      const title =
+        String(item.text || item.title || (done ? 'Task completed' : 'Task reopened')).trim() ||
+        (done ? 'Task completed' : 'Task reopened');
+      logClientActivity?.({
+        clientId: freshClient.id,
+        clientName: freshClient.name || '',
+        type: done ? 'task_completed' : 'task_reopened',
+        title: done ? title : `Reopened: ${title}`,
+        body: categoryKey ? `Category: ${categoryKey}` : '',
+        source: 'manual',
+        meta: {
+          todoId: item.id,
+          categoryKey,
+          cycleStart: Number(cycleStart) || null,
+          done: savedDone,
+          actorEmail: user?.email || '',
+        },
+      });
+
+      return {
+        ok: true,
+        done: savedDone,
+        scope: 'primary',
+        cycleStart: Number(cycleStart) || null,
+        categoryKey,
+      };
     },
-    [resolveClient, newRecurringTodoRowId, logClientActivity],
+    [resolveClient, newRecurringTodoRowId, logClientActivity, user?.email],
   );
 
   // Batch update multiple to-do categories in a single Firestore write.
@@ -3114,7 +3335,7 @@ export default function App() {
   // would otherwise overwrite earlier category updates based on stale client state.
   const updateClientTodosBatch = async (client, cycleStart, categoryKeyToData) => {
     const freshClient = resolveClient(client) || client;
-    const cycles = ensureCurrentCycleTodoData(freshClient, cycleStart);
+    let cycles = ensureCurrentCycleTodoData(freshClient, cycleStart);
     const cycleData = cycles[String(cycleStart)] || {};
     const prevByKey = { ...cycleData };
     cycles[String(cycleStart)] = {
@@ -3132,8 +3353,18 @@ export default function App() {
       );
       if (changed) cycles[String(cycleStart)] = cycleDataByCategory;
     }
+    cycles = propagateSubtasksAcrossCycles(cycles).cycles;
     const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(freshClient, cycles);
     await updateDoc(doc(db, 'clients', freshClient.id), { todoCycles: cycles, ...teamAccessPatch });
+    for (const [categoryKey, nextCategoryData] of Object.entries(categoryKeyToData || {})) {
+      logTodoDoneTransitions(
+        freshClient,
+        categoryKey,
+        cycleStart,
+        prevByKey[categoryKey]?.items || [],
+        cycles[String(cycleStart)]?.[categoryKey]?.items || nextCategoryData?.items || [],
+      );
+    }
     const actorName = staffDisplayName({
       email: user?.email,
       displayName: user?.displayName,
@@ -3169,17 +3400,29 @@ export default function App() {
       if (!client?.id) return false;
 
       if (subtaskId) {
-        const cycles = ensureCurrentCycleTodoData(client, cycleStart);
-        const cat =
-          cycles[String(cycleStart)]?.[categoryKey] || { closed: false, items: [] };
-        const list = cat.items || [];
-        if (!list.some((i) => i?.id === itemId)) return false;
-        const nextList = removeSubtaskFromItems(list, itemId, subtaskId);
-        await updateClientTodo(client, cycleStart, categoryKey, {
-          ...cat,
-          items: nextList,
+        const ref = doc(db, 'clients', client.id);
+        let removed = false;
+        await runTransaction(db, async (tx) => {
+          removed = false;
+          const snap = await tx.get(ref);
+          if (!snap.exists()) return;
+          const live = { ...client, ...(snap.data() || {}), id: client.id };
+          let cycles = ensureCurrentCycleTodoData(live, cycleStart);
+          cycles = propagateSubtasksAcrossCycles(cycles).cycles;
+          const result = removeSubtaskFromCycles(cycles, {
+            categoryKey,
+            todoId: itemId,
+            subtaskId,
+          });
+          if (!result.removed) return;
+          removed = true;
+          const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(
+            live,
+            result.cycles,
+          );
+          tx.update(ref, { todoCycles: result.cycles, ...teamAccessPatch });
         });
-        return true;
+        return removed;
       }
 
       const todoState = getTodoStateForCycle(client, cycleStart);
@@ -3523,40 +3766,35 @@ export default function App() {
       recurringTodoReconcileInFlightRef.current = true;
       try {
         for (const client of clients) {
-          const bd = client.billingDay || 1;
-          const period = getBillingPeriod(bd, 0);
-          const key = String(period.start);
-          const prevStart = getBillingPeriod(bd, -1).start;
-          const prevData = (client.todoCycles || {})[String(prevStart)] || {};
-          const categoryKeys = [
-            ...getEnabledRetainerCategoryNames(client).map((cat) => todoCategoryKey(cat)),
-            ...Object.keys(prevData),
-            ...Object.keys((client.todoCycles || {})[key] || {}),
-          ];
-
-          const existing = (client.todoCycles || {})[key] || {};
-          const { cycleData, changed: materializeChanged } = materializeCycleTodoFromPrev(
-            existing,
-            prevData,
-            period.start,
-            newRecurringTodoRowId,
-            categoryKeys,
-          );
-          const { cycleDataByCategory, changed: reconcileChanged } =
-            reconcileRecurringTodoInstances(
-              cycleData,
-              period.start,
-              period.end,
-              newRecurringTodoRowId,
-            );
-          if (!materializeChanged && !reconcileChanged) continue;
-
-          const cycles = { ...(client.todoCycles || {}), [key]: cycleDataByCategory };
-          const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(client, cycles);
+          if (!client?.id) continue;
           try {
-            await updateDoc(doc(db, 'clients', client.id), {
-              todoCycles: cycles,
-              ...teamAccessPatch,
+            await runTransaction(db, async (tx) => {
+              const ref = doc(db, 'clients', client.id);
+              const snap = await tx.get(ref);
+              if (!snap.exists()) return;
+              const data = snap.data() || {};
+              const live = { ...client, ...data, id: client.id };
+              const bd = live.billingDay || 1;
+              const period = getBillingPeriod(bd, 0);
+              const key = String(period.start);
+              const prevStart = getBillingPeriod(bd, -1).start;
+              const prevData = (data.todoCycles || {})[String(prevStart)] || {};
+              const categoryKeys = [
+                ...getEnabledRetainerCategoryNames(live).map((cat) => todoCategoryKey(cat)),
+                ...Object.keys(prevData),
+                ...Object.keys((data.todoCycles || {})[key] || {}),
+              ];
+              const { cycles, changed } = maintainCurrentCycleTodos({
+                todoCycles: data.todoCycles || {},
+                prevCycleData: prevData,
+                cycleStartMs: period.start,
+                cycleEndMs: period.end,
+                newTodoId: newRecurringTodoRowId,
+                categoryKeys,
+              });
+              if (!changed) return;
+              const teamAccessPatch = buildTeamAccessMergeForTodoAssignees(live, cycles);
+              tx.update(ref, { todoCycles: cycles, ...teamAccessPatch });
             });
           } catch {
             // Offline / permission — skip
@@ -6547,7 +6785,7 @@ export default function App() {
                     Reset Carryover (All)
                   </button>
                 </div>
-                <p className="text-xs text-slate-400">
+                  <p className="text-xs text-slate-400">
                   Tip: each hourly retainer row has its own
                   <span className="mx-1 font-black text-amber-700">
                     Reset Carryover
@@ -6556,6 +6794,14 @@ export default function App() {
                   <span className="mx-1 font-black text-slate-600">Active</span>
                   off for services this client does not receive — disabled
                   categories are hidden everywhere in the app.
+                </p>
+                <p className="text-xs text-slate-500 mt-2">
+                  A new amount starts on the next billing cycle (
+                  {new Date(
+                    getBillingPeriod(editingClient.billingDay || 1, 1).start,
+                  ).toLocaleDateString()}
+                  ). This cycle and earlier cycles keep the hours or dollars they
+                  already have. Time already logged does not change.
                 </p>
                 <div className="space-y-3">
                   {retainerConfigCategories.map((type) => {
@@ -6609,6 +6855,31 @@ export default function App() {
                           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                             {units === 'dollar' ? 'Per-cycle budget (dollars)' : 'Allocation in hours'}
                           </span>
+                          {(() => {
+                            const saved =
+                              clients.find((c) => c.id === editingClient.id) ||
+                              editingClient;
+                            const cycleStart = getBillingPeriod(
+                              editingClient.billingDay || 1,
+                              0,
+                            ).start;
+                            const nextStart = getBillingPeriod(
+                              editingClient.billingDay || 1,
+                              1,
+                            ).start;
+                            const inEffect = allotmentForCycle(saved, type, cycleStart);
+                            const draft = Number(editingClient.retainers?.[type] ?? 0);
+                            if (!Number.isFinite(draft) || Math.abs(draft - inEffect) < 0.001) {
+                              return null;
+                            }
+                            const unitWord = units === 'dollar' ? 'dollars' : 'hours';
+                            return (
+                              <p className="text-[10px] font-bold text-amber-700 normal-case tracking-normal">
+                                This cycle stays at {inEffect} {unitWord}. {draft}{' '}
+                                {unitWord} starts {new Date(nextStart).toLocaleDateString()}.
+                              </p>
+                            );
+                          })()}
                           {units !== 'dollar' && (
                             <div className="mt-2">
                               <button
@@ -6755,8 +7026,31 @@ export default function App() {
                     editingClient,
                     prevClient,
                   );
+                  const allotmentSchedule = prevClient
+                    ? scheduleRetainerAllotmentChanges(
+                        prevClient,
+                        editingClient.retainers || {},
+                        {
+                          currentCycleStart: getBillingPeriod(
+                            editingClient.billingDay || 1,
+                            0,
+                          ).start,
+                          nextCycleStart: getBillingPeriod(
+                            editingClient.billingDay || 1,
+                            1,
+                          ).start,
+                        },
+                      )
+                    : {
+                        retainerAllotmentBaseline:
+                          editingClient.retainerAllotmentBaseline || {},
+                        retainerAllotmentSchedule:
+                          editingClient.retainerAllotmentSchedule || {},
+                      };
                   await updateDoc(doc(db, 'clients', editingClient.id), {
                     retainers: editingClient.retainers,
+                    retainerAllotmentBaseline: allotmentSchedule.retainerAllotmentBaseline,
+                    retainerAllotmentSchedule: allotmentSchedule.retainerAllotmentSchedule,
                     retainerUnits: editingClient.retainerUnits || {},
                     hourlyRate: editingClient.hourlyRate || 0,
                     clientEmails: nextEmails,

@@ -21,6 +21,13 @@ export function canMarkParentTodoDone(item) {
   return !hasSubtasks(item) || openSubtaskCount(item) === 0;
 }
 
+/** Empty when the parent may be completed. Otherwise a reason safe to show callers. */
+export function parentTodoDoneBlockReason(item) {
+  const n = openSubtaskCount(item);
+  if (!n) return '';
+  return n === 1 ? '1 subtask still open' : `${n} subtasks still open`;
+}
+
 export function parentDueCapMs(item) {
   const d = Number(item?.dueDate || 0);
   return Number.isFinite(d) && d > 0 ? d : null;

@@ -13,6 +13,7 @@ export const CLIENT_ACTIVITY_TYPES = {
   client_note_saved: { label: 'Internal note', group: 'notes' },
   file_upload: { label: 'File', group: 'files' },
   task_completed: { label: 'Task completed', group: 'tasks' },
+  task_reopened: { label: 'Task reopened', group: 'tasks' },
   tag: { label: 'Tag', group: 'notes' },
   message_sent: { label: 'Message', group: 'portal' },
   review_sent: { label: 'Approval sent', group: 'portal' },

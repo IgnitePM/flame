@@ -8,6 +8,7 @@ export default function MentionTextarea({
   adminUsers = [],
   clientEmails = [],
   clientName = '',
+  clientContacts = [],
   placeholder = 'Write a note. Use @name to tag someone…',
   disabled = false,
   onSubmit,
@@ -27,8 +28,9 @@ export default function MentionTextarea({
         adminUsers,
         clientEmails,
         clientName,
+        clientContacts,
       }),
-    [adminUsers, clientEmails, clientName, staffEmails],
+    [adminUsers, clientContacts, clientEmails, clientName, staffEmails],
   );
 
   const matches = React.useMemo(() => {
@@ -42,7 +44,7 @@ export default function MentionTextarea({
           row.name.toLowerCase().includes(q) ||
           row.email.includes(q),
       )
-      .slice(0, 8);
+      .slice(0, 12);
   }, [directory, open, query]);
 
   const insertMention = (handle) => {

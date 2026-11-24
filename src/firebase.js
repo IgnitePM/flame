@@ -27,6 +27,7 @@ import {
   deleteDoc,
   deleteField,
   writeBatch,
+  runTransaction,
 } from 'firebase/firestore';
 import {
   getStorage,
@@ -88,5 +89,6 @@ export {
   deleteDoc,
   deleteField,
   writeBatch,
+  runTransaction,
 };
 

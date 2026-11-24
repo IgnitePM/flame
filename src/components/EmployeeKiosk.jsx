@@ -48,6 +48,7 @@ import { isClientActiveForWork } from '../utils/clientActiveForWork.js';
 import { computePerplexityExpenseAmounts } from '../utils/perplexityCredits.js';
 import { FALLBACK_FX_TO_CAD } from '../utils/fxToCad.js';
 import {
+  allotmentForCycle,
   clientHasEnabledRetainers,
   getEnabledRetainerCategoryNames,
   getRetainerCategoryNameFromKey,
@@ -1819,7 +1820,9 @@ const EmployeeKiosk = ({
           eps,
           billingTarget: `retainer_${cat}`,
           carryover: Number(pc.carryover ?? 0),
-          basePerCycle: Number(pc.baseActive ?? client.retainers?.[cat] ?? 0),
+          basePerCycle: Number(
+            pc.baseActive ?? allotmentForCycle(client, cat, period.start) ?? 0,
+          ),
         });
       }
     }
@@ -2499,8 +2502,10 @@ const EmployeeKiosk = ({
                             client={selectedClientObj}
                             categoryName={selectedRetainerCategory}
                             catStats={retainerStats?.perCategory?.[selectedRetainerCategory]}
-                            baseFallback={Number(
-                              selectedClientObj?.retainers?.[selectedRetainerCategory] || 0,
+                            baseFallback={allotmentForCycle(
+                              selectedClientObj,
+                              selectedRetainerCategory,
+                              cycleStartMs,
                             )}
                             cycleStart={cycleStartMs}
                             cycleEnd={cycleEndMs}
@@ -2652,8 +2657,10 @@ const EmployeeKiosk = ({
                             client={selectedClientObj}
                             categoryName={selectedRetainerCategory}
                             catStats={retainerStats?.perCategory?.[selectedRetainerCategory]}
-                            baseFallback={Number(
-                              selectedClientObj?.retainers?.[selectedRetainerCategory] || 0,
+                            baseFallback={allotmentForCycle(
+                              selectedClientObj,
+                              selectedRetainerCategory,
+                              cycleStartMs,
                             )}
                             cycleStart={cycleStartMs}
                             cycleEnd={cycleEndMs}

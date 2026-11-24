@@ -596,6 +596,8 @@ export default function KioskClientTodoItem({
                   ...catTodo,
                   items: next,
                 });
+              } catch (err) {
+                window.alert(err?.message || 'Could not update this task.');
               } finally {
                 setTodoSaving(false);
               }

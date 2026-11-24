@@ -99,9 +99,31 @@ function emailShell({ eyebrow, title, bodyText, ctaLabel, ctaHref }) {
   };
 }
 
-export async function notifyPortalNewMessage({ client, messageBody, authorName }) {
-  const to = portalEmails(client);
-  if (!to.length) return { sent: 0, skipped: 'no_portal_emails' };
+/**
+ * Email portal contacts about a new staff message.
+ * @param {string[]|null} recipientEmails — when set, only these (intersected with
+ *   authorized portal emails). When null, email every portal contact.
+ *   An empty array does not fall back to everyone.
+ */
+export async function notifyPortalNewMessage({
+  client,
+  messageBody,
+  authorName,
+  recipientEmails = null,
+}) {
+  const allowed = portalEmails(client);
+  if (!allowed.length) return { sent: 0, skipped: 'no_portal_emails' };
+  let to = allowed;
+  if (Array.isArray(recipientEmails)) {
+    to = [
+      ...new Set(
+        recipientEmails
+          .map((e) => String(e || '').trim().toLowerCase())
+          .filter((e) => allowed.includes(e)),
+      ),
+    ];
+    if (!to.length) return { sent: 0, skipped: 'no_matching_portal_emails' };
+  }
   const href = `${appBaseUrl()}?tab=messages`;
   const { text, html } = emailShell({
     eyebrow: 'Ignite PM · Messages',
@@ -163,9 +185,36 @@ export async function notifyStrategySessionReminder({
   return { sent: to.length };
 }
 
-export async function notifyStaffClientMessage({ client, messageBody, authorEmail }) {
-  const to = await staffNotifyEmails(client);
-  if (!to.length) return { sent: 0, skipped: 'no_staff_emails' };
+/**
+ * Email staff about a new portal message.
+ * Pass recipientEmails to notify only tagged active staff.
+ * When recipientEmails is null, falls back to the client alert staff list.
+ */
+export async function notifyStaffClientMessage({
+  client,
+  messageBody,
+  authorEmail,
+  recipientEmails = null,
+}) {
+  const mentioned = Array.isArray(recipientEmails)
+    ? [
+        ...new Set(
+          recipientEmails
+            .map((e) => String(e || '').trim().toLowerCase())
+            .filter((e) => e.includes('@')),
+        ),
+      ]
+    : null;
+  const resolved = await staffNotifyEmails(client, mentioned || []);
+  const to = mentioned
+    ? resolved.filter((email) => mentioned.includes(email))
+    : resolved;
+  if (!to.length) {
+    return {
+      sent: 0,
+      skipped: mentioned ? 'no_staff_mentions' : 'no_staff_emails',
+    };
+  }
   const href = `${appBaseUrl()}/clients/${client.id}?tab=messages`;
   const { text, html } = emailShell({
     eyebrow: 'Ignite PM · Messages',

@@ -21,6 +21,25 @@ function clientEmailsFromClient(client) {
   ];
 }
 
+function clientContactsFromClient(client) {
+  const rows = [];
+  const pc = client?.primaryContact;
+  if (pc?.email) {
+    rows.push({
+      email: String(pc.email || '').trim(),
+      name: String(pc.name || '').trim(),
+    });
+  }
+  for (const c of Array.isArray(client?.contacts) ? client.contacts : []) {
+    if (!c?.email) continue;
+    rows.push({
+      email: String(c.email || '').trim(),
+      name: String(c.name || '').trim(),
+    });
+  }
+  return rows.filter((r) => r.email.includes('@'));
+}
+
 export default function TaskNotesSection({
   item,
   allItems,
@@ -49,6 +68,7 @@ export default function TaskNotesSection({
           ),
         ]
       : clientEmailsFromClient(client);
+  const clientContacts = clientContactsFromClient(client);
   const clientName = String(client?.name || '').trim();
 
   const save = async () => {
@@ -58,6 +78,7 @@ export default function TaskNotesSection({
       adminUsers,
       clientEmails,
       clientName,
+      clientContacts,
     });
     const comment = buildTaskComment({
       text: draft,
@@ -166,6 +187,7 @@ export default function TaskNotesSection({
             adminUsers={adminUsers}
             clientEmails={clientEmails}
             clientName={clientName}
+            clientContacts={clientContacts}
             disabled={disabled || saving}
             onSubmit={save}
             placeholder={

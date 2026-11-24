@@ -20,6 +20,37 @@ import MentionTextarea from './MentionTextarea.jsx';
 import { staffHandle } from '../utils/staffDirectory.js';
 import { taskReplyContextFromMessage } from '../utils/portalTaskMessageReply.js';
 
+/** Portal-authorized emails eligible for @mentions / email notify. */
+function portalEmailsFromClient(client) {
+  return [
+    ...new Set(
+      (Array.isArray(client?.clientEmails) ? client.clientEmails : [])
+        .map((e) => String(e || '').trim().toLowerCase())
+        .filter((e) => e.includes('@')),
+    ),
+  ];
+}
+
+/** CRM contact names keyed for mention labels (must still be on clientEmails). */
+function clientContactsForMentions(client) {
+  const rows = [];
+  const pc = client?.primaryContact;
+  if (pc?.email) {
+    rows.push({
+      email: String(pc.email || '').trim(),
+      name: String(pc.name || '').trim(),
+    });
+  }
+  for (const c of Array.isArray(client?.contacts) ? client.contacts : []) {
+    if (!c?.email) continue;
+    rows.push({
+      email: String(c.email || '').trim(),
+      name: String(c.name || '').trim(),
+    });
+  }
+  return rows.filter((r) => r.email.includes('@'));
+}
+
 function formatWhen(ms) {
   const n = Number(ms || 0);
   if (!n) return '';
@@ -101,6 +132,16 @@ export default function ClientMessagesPanel({
       : [];
     return [...new Set(team.map((e) => String(e || '').trim().toLowerCase()).filter(Boolean))];
   }, [mode, staffEmails, portalStaffEmails, client?.teamMemberAccessEmails]);
+
+  const clientMentionEmails = useMemo(
+    () => (mode === 'staff' ? portalEmailsFromClient(client) : []),
+    [mode, client],
+  );
+
+  const clientMentionContacts = useMemo(
+    () => (mode === 'staff' ? clientContactsForMentions(client) : []),
+    [mode, client],
+  );
 
   useEffect(() => {
     if (mode !== 'portal' || !clientId) return undefined;
@@ -276,14 +317,31 @@ export default function ClientMessagesPanel({
       if (!resp.ok) throw new Error(data.error || 'Send failed');
       setBody('');
       setAttachments([]);
+      const staffMentionCount = Array.isArray(data.mentions)
+        ? data.mentions.length
+        : 0;
+      const clientMentionCount = Array.isArray(data.clientMentions)
+        ? data.clientMentions.length
+        : 0;
       if (data.email?.sent > 0) {
         setBanner(
           mode === 'staff'
-            ? `Sent — emailed ${data.email.sent} portal contact(s).`
-            : 'Sent — Ignite was notified.',
+            ? `Sent — emailed ${data.email.sent} contact(s)${
+                staffMentionCount
+                  ? ` · notified ${staffMentionCount} teammate(s)`
+                  : ''
+              }.`
+            : `Sent — notified ${data.email.sent} teammate(s).`,
         );
-      } else if (data.mentions?.length) {
-        setBanner(`Sent — mentioned ${data.mentions.length} teammate(s).`);
+      } else if (staffMentionCount || clientMentionCount) {
+        const bits = [];
+        if (staffMentionCount) bits.push(`${staffMentionCount} teammate(s)`);
+        if (clientMentionCount) bits.push(`${clientMentionCount} client contact(s)`);
+        setBanner(`Sent — tagged ${bits.join(' · ')}.`);
+      } else if (data.email?.skipped === 'no_staff_mentions') {
+        setBanner(
+          'Sent. Tag @teammates to email/notify them — untagged messages stay in the inbox only.',
+        );
       } else if (data.email?.skipped) {
         setBanner(
           mode === 'staff'
@@ -309,7 +367,8 @@ export default function ClientMessagesPanel({
           Messages
         </h5>
         <span className="text-[10px] font-bold text-slate-400">
-          Shared inbox with {mode === 'staff' ? 'the client portal' : 'Ignite'} · @mention staff
+          Shared inbox with {mode === 'staff' ? 'the client portal' : 'Ignite'} · @
+          {mode === 'staff' ? 'tag staff or client contacts' : 'tag staff to notify them'}
         </span>
       </div>
 
@@ -468,13 +527,16 @@ export default function ClientMessagesPanel({
         onChange={setBody}
         staffEmails={mentionEmails}
         adminUsers={adminUsers}
+        clientEmails={clientMentionEmails}
+        clientName={client?.name || ''}
+        clientContacts={clientMentionContacts}
         rows={3}
         placeholder={
           mode === 'staff'
-            ? 'Message the client… Use @name to tag a teammate'
+            ? 'Message… @tag staff or client contacts to notify them'
             : replyTask
               ? `Reply on “${replyTask.taskTitle}”…`
-              : 'Message the Ignite team… Use @name to tag someone'
+              : 'Message the Ignite team… @tag someone to notify them'
         }
         textareaClassName="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-[#fd7414]"
       />
@@ -543,9 +605,11 @@ export default function ClientMessagesPanel({
       </div>
 
       {banner ? <p className="text-xs font-bold text-slate-600">{banner}</p> : null}
-      {mentionEmails.length > 0 ? (
+      {mentionEmails.length > 0 || clientMentionEmails.length > 0 ? (
         <p className="text-[10px] text-slate-400 font-bold">
-          Tag with @{staffHandle(mentionEmails[0]) || 'name'}…
+          {mode === 'staff'
+            ? 'Email goes to @tagged client contacts (or all Authorized Emails if you tag nobody). @tagged staff get inbox + email. Clients must be on Authorized Emails to appear.'
+            : `Tag with @${staffHandle(mentionEmails[0]) || 'name'}… Only tagged staff get email/inbox alerts.`}
         </p>
       ) : null}
 

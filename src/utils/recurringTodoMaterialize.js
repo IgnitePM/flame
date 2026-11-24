@@ -47,6 +47,12 @@ export function deterministicRecurringTodoId(seriesId, dueDateMs) {
   return `todo_r_${rid}_${y}${m}${day}`;
 }
 
+/** Series id embedded in a `todo_r_<series>_<YYYYMMDD>` occurrence id. */
+export function seriesIdFromDeterministicTodoId(todoId) {
+  const match = /^todo_r_(.+)_(\d{8})$/.exec(String(todoId || '').trim());
+  return match ? match[1] : '';
+}
+
 function resolveRecurringInstanceId(seriesId, dueDateMs, newTodoId) {
   return (
     deterministicRecurringTodoId(seriesId, dueDateMs) ||
@@ -201,6 +207,263 @@ export function computeRecurringDueDate(recurrence, cycleStart) {
 
 function shouldSubtaskPersistIntoNextCycle(sub) {
   return !!sub?.recurring || !sub?.done;
+}
+
+function subtaskDedupeKey(sub) {
+  const rid = String(sub?.recurringId || '').trim();
+  if (rid) return `rid:${rid}`;
+  const id = String(sub?.id || '').trim();
+  if (id) return `id:${id}`;
+  const text = String(sub?.text || '').trim().toLowerCase();
+  return text ? `text:${text}` : '';
+}
+
+function sameSubtaskSnapshot(a, b) {
+  const left = a || [];
+  const right = b || [];
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    if (String(left[i]?.id || '') !== String(right[i]?.id || '')) return false;
+    if (!!left[i]?.done !== !!right[i]?.done) return false;
+    if (String(left[i]?.text || '') !== String(right[i]?.text || '')) return false;
+  }
+  return true;
+}
+
+/**
+ * Add donor sub-tasks the target does not already represent.
+ * A done sub-task on the target stays done even if a donor copy is still open.
+ * A done donor marks the target copy done so completion survives across cycles.
+ */
+function mergeDonorSubtasks(targetSubs, donorSubs) {
+  const result = (targetSubs || []).map((sub) => ({ ...sub }));
+  const indexByKey = new Map();
+  result.forEach((sub, index) => {
+    const key = subtaskDedupeKey(sub);
+    if (key && !indexByKey.has(key)) indexByKey.set(key, index);
+  });
+  for (const donor of donorSubs || []) {
+    if (!donor) continue;
+    const key = subtaskDedupeKey(donor);
+    if (!key) continue;
+    const idx = indexByKey.get(key);
+    if (idx == null) {
+      if (!shouldSubtaskPersistIntoNextCycle(donor)) continue;
+      result.push({ ...donor });
+      indexByKey.set(key, result.length - 1);
+      continue;
+    }
+    if (donor.done && !result[idx].done) {
+      result[idx] = {
+        ...result[idx],
+        done: true,
+        doneAt: donor.doneAt || result[idx].doneAt || Date.now(),
+      };
+    }
+  }
+  return result;
+}
+
+function itemMatchesTodoRef(item, todoId, seriesFromDeterministicId) {
+  if (!item) return false;
+  const raw = String(todoId || '').trim();
+  if (!raw) return false;
+  if (item.id === raw) return true;
+  const rid = stableRecurringSeriesId(item);
+  if (rid && rid === raw) return true;
+  if (seriesFromDeterministicId && rid === seriesFromDeterministicId) return true;
+  return false;
+}
+
+/**
+ * Sub-tasks a caller would see on this row, including ones inherited from the
+ * series template or another cycle. Done rows are included so a completion
+ * check cannot ignore steps that only live on the template.
+ */
+export function subtasksVisibleForCompletion(item, siblingItems = [], templates = []) {
+  if (!item) return [];
+  const opened = { ...item, done: false };
+  const others = (siblingItems || []).filter((row) => row && row !== item && row.id !== item.id);
+  const { items } = inheritSubtasksOntoOpenItems([opened, ...others], templates);
+  const found = items.find((row) => row?.id === item.id) || opened;
+  return getSubtasks(found);
+}
+
+/**
+ * Copy sub-tasks that were stored on the series template or a sibling
+ * occurrence onto each open row, keeping the donor's id when the row
+ * does not already have that step.
+ */
+export function inheritSubtasksOntoOpenItems(items, templates = []) {
+  const list = Array.isArray(items) ? items : [];
+  let changed = false;
+  const next = list.map((item) => {
+    if (!item || item.done) return item;
+    const seriesId = stableRecurringSeriesId(item);
+    const related = list
+      .filter((other) => {
+        if (!other || other === item) return false;
+        if (item.id && other.id === item.id) return true;
+        return !!(
+          seriesId &&
+          other.recurring &&
+          stableRecurringSeriesId(other) === seriesId
+        );
+      })
+      .sort((a, b) => Number(b?.dueDate || 0) - Number(a?.dueDate || 0));
+    let merged = getSubtasks(item);
+    for (const other of related) {
+      merged = mergeDonorSubtasks(merged, getSubtasks(other));
+    }
+    for (const template of templates || []) {
+      const tid =
+        stableRecurringSeriesId(template) ||
+        String(template?.recurringId || template?.id || '');
+      if (!seriesId || tid !== seriesId) continue;
+      merged = mergeDonorSubtasks(merged, getSubtasks(template));
+    }
+    if (sameSubtaskSnapshot(getSubtasks(item), merged)) return item;
+    changed = true;
+    return { ...item, subtasks: merged };
+  });
+  return { items: changed ? next : list, changed };
+}
+
+/** Make every open copy of a task show the same sub-task ids and done flags. */
+export function propagateSubtasksAcrossCycles(cycles) {
+  const source = cycles && typeof cycles === 'object' ? cycles : {};
+  const next = { ...source };
+  let changed = false;
+  const categoryKeys = new Set();
+  for (const cycle of Object.values(source)) {
+    if (!cycle || typeof cycle !== 'object') continue;
+    for (const key of Object.keys(cycle)) categoryKeys.add(key);
+  }
+
+  for (const catKey of categoryKeys) {
+    const donors = [];
+    const templates = [];
+    for (const cycle of Object.values(source)) {
+      const cat = cycle?.[catKey];
+      if (!cat) continue;
+      if (Array.isArray(cat.items)) donors.push(...cat.items);
+      templates.push(...templatesFromCategory(cat));
+    }
+    for (const [cycleKey, cycle] of Object.entries(next)) {
+      const cat = cycle?.[catKey];
+      if (!cat || !Array.isArray(cat.items)) continue;
+      const { items, changed: itemsChanged } = inheritSubtasksOntoOpenItems(
+        cat.items,
+        templates,
+      );
+      // Also pull sub-tasks from same-id / same-series rows in other cycles.
+      // inheritSubtasksOntoOpenItems only sees this cycle's items, so merge
+      // the cross-cycle donors in a second pass.
+      let mergedItems = items;
+      let crossChanged = false;
+      mergedItems = items.map((item) => {
+        if (!item || item.done) return item;
+        const seriesId = stableRecurringSeriesId(item);
+        const related = donors
+          .filter((other) => {
+            if (!other || other === item) return false;
+            if (item.id && other.id === item.id) return true;
+            return !!(
+              seriesId &&
+              other.recurring &&
+              stableRecurringSeriesId(other) === seriesId
+            );
+          })
+          .sort((a, b) => Number(b?.dueDate || 0) - Number(a?.dueDate || 0));
+        const inheritedRow = items.find((row) => row?.id === item.id) || item;
+        let merged = getSubtasks(inheritedRow);
+        for (const other of related) {
+          merged = mergeDonorSubtasks(merged, getSubtasks(other));
+        }
+        if (sameSubtaskSnapshot(getSubtasks(item), merged)) return inheritedRow;
+        crossChanged = true;
+        return { ...inheritedRow, subtasks: merged };
+      });
+      if (!itemsChanged && !crossChanged) continue;
+      changed = true;
+      next[cycleKey] = {
+        ...cycle,
+        [catKey]: { ...cat, items: crossChanged ? mergedItems : items },
+      };
+    }
+  }
+
+  return { cycles: changed ? next : source, changed };
+}
+
+/**
+ * Drop a sub-task id from the occurrence, its series copies, and the series
+ * template. Template removal stops the next read from attaching it again.
+ */
+export function removeSubtaskFromCycles(
+  cycles,
+  { categoryKey, todoId, subtaskId } = {},
+) {
+  const subId = String(subtaskId || '').trim();
+  const rawTodo = String(todoId || '').trim();
+  if (!subId || !rawTodo) return { cycles: cycles || {}, removed: false };
+  const seriesFromId = seriesIdFromDeterministicTodoId(rawTodo);
+  const source = cycles && typeof cycles === 'object' ? cycles : {};
+  const next = { ...source };
+  let removed = false;
+
+  for (const [cycleKey, cycleData] of Object.entries(source)) {
+    if (!cycleData || typeof cycleData !== 'object') continue;
+    const catKeys = categoryKey ? [categoryKey] : Object.keys(cycleData);
+    let cycleChanged = false;
+    const cycleNext = { ...cycleData };
+    for (const catKey of catKeys) {
+      const cat = cycleData[catKey];
+      if (!cat || typeof cat !== 'object') continue;
+      let catChanged = false;
+      const items = (cat.items || []).map((item) => {
+        if (!itemMatchesTodoRef(item, rawTodo, seriesFromId)) return item;
+        const subs = getSubtasks(item);
+        if (!subs.some((sub) => sub?.id === subId)) return item;
+        catChanged = true;
+        removed = true;
+        return { ...item, subtasks: subs.filter((sub) => sub?.id !== subId) };
+      });
+      let templates = Array.isArray(cat.recurringSeriesTemplates)
+        ? cat.recurringSeriesTemplates
+        : null;
+      if (templates) {
+        templates = templates.map((template) => {
+          const tid =
+            stableRecurringSeriesId(template) ||
+            String(template?.recurringId || template?.id || '');
+          const matches =
+            template?.id === rawTodo ||
+            tid === rawTodo ||
+            (seriesFromId && tid === seriesFromId);
+          if (!matches) return template;
+          const subs = getSubtasks(template);
+          if (!subs.some((sub) => sub?.id === subId)) return template;
+          catChanged = true;
+          removed = true;
+          return {
+            ...template,
+            subtasks: subs.filter((sub) => sub?.id !== subId),
+          };
+        });
+      }
+      if (!catChanged) continue;
+      cycleChanged = true;
+      cycleNext[catKey] = {
+        ...cat,
+        items,
+        ...(templates ? { recurringSeriesTemplates: templates } : {}),
+      };
+    }
+    if (cycleChanged) next[cycleKey] = cycleNext;
+  }
+
+  return { cycles: removed ? next : source, removed };
 }
 
 /** Best recurring template per series — prefer open instances, then latest due date. */
@@ -363,13 +626,20 @@ export function materializeCategoryTodoFromPrev(
       changed = true;
       continue;
     }
-    // Don't re-carry a recurring occurrence that was deleted for this anchor.
+    // Don't re-carry a recurring occurrence that was deleted or already completed
+    // for this anchor. A completed row must not come back as a second open copy.
     if (item.recurring) {
-      const skipKey = recurringAnchorKey(
-        item.recurringId || item.id,
-        item.dueDate,
-      );
+      const seriesId = stableRecurringSeriesId(item);
+      const skipKey = recurringAnchorKey(seriesId, item.dueDate);
       if (skipKey && skipped.has(skipKey)) continue;
+      const alreadyClosed = items.some(
+        (row) =>
+          row?.recurring &&
+          row.done &&
+          stableRecurringSeriesId(row) === seriesId &&
+          sameCalendarDay(row.dueDate, item.dueDate),
+      );
+      if (alreadyClosed) continue;
     }
     items.push(carryPrimaryTodoItemFromPrevCycle(item));
     existingIds.add(item.id);
@@ -416,6 +686,12 @@ export function materializeCategoryTodoFromPrev(
   const pruned = pruneDuplicateOpenRecurringInstances(items);
   if (pruned.changed) {
     items = pruned.items;
+    changed = true;
+  }
+
+  const inherited = inheritSubtasksOntoOpenItems(items, [...byRid.values()]);
+  if (inherited.changed) {
+    items = inherited.items;
     changed = true;
   }
 
@@ -715,9 +991,20 @@ export function reconcileRecurringTodoInstances(
         );
         if (exists) continue;
         const fresh = cloneRecurringInstanceFromTemplate(template, anchorMs, newTodoId);
+        // Never append a second row that reuses a completed occurrence's id.
+        if (fresh?.id && itemsMut.some((row) => row?.id === fresh.id)) continue;
         itemsMut = [...itemsMut, fresh];
         catChanged = true;
       }
+    }
+
+    const inherited = inheritSubtasksOntoOpenItems(itemsMut, [
+      ...templatesByRid.values(),
+      ...templatesFromCategory(cat),
+    ]);
+    if (inherited.changed) {
+      itemsMut = inherited.items;
+      catChanged = true;
     }
 
     if (catChanged) {
@@ -727,6 +1014,43 @@ export function reconcileRecurringTodoInstances(
   }
 
   return { cycleDataByCategory: next, changed };
+}
+
+/**
+ * Materialize the current billing cycle from a fresh `todoCycles` snapshot,
+ * then copy inherited sub-tasks onto every open copy. Callers must pass the
+ * latest stored cycles — this never reopens a row that is already done.
+ */
+export function maintainCurrentCycleTodos({
+  todoCycles,
+  prevCycleData,
+  cycleStartMs,
+  cycleEndMs,
+  newTodoId,
+  categoryKeys = [],
+} = {}) {
+  const existing = todoCycles || {};
+  const key = String(cycleStartMs || '');
+  const { cycleData, changed: materializeChanged } = materializeCycleTodoFromPrev(
+    existing[key] || {},
+    prevCycleData || {},
+    cycleStartMs,
+    newTodoId,
+    categoryKeys,
+  );
+  const { cycleDataByCategory, changed: reconcileChanged } =
+    reconcileRecurringTodoInstances(
+      cycleData,
+      cycleStartMs,
+      cycleEndMs,
+      newTodoId,
+    );
+  const withCurrent = { ...existing, [key]: cycleDataByCategory };
+  const { cycles, changed: propagated } = propagateSubtasksAcrossCycles(withCurrent);
+  return {
+    cycles,
+    changed: !!(materializeChanged || reconcileChanged || propagated),
+  };
 }
 
 /**
@@ -803,11 +1127,17 @@ export function mergeOpenItemsFromPrevCycle(existingCycleData, prevCycleData) {
       .filter((item) => {
         if (!item?.id || existingIds.has(item.id)) return false;
         if (item.recurring) {
-          const skipKey = recurringAnchorKey(
-            item.recurringId || item.id,
-            item.dueDate,
-          );
+          const seriesId = stableRecurringSeriesId(item);
+          const skipKey = recurringAnchorKey(seriesId, item.dueDate);
           if (skipKey && skipped.has(skipKey)) return false;
+          const alreadyClosed = (existingCat.items || []).some(
+            (row) =>
+              row?.recurring &&
+              row.done &&
+              stableRecurringSeriesId(row) === seriesId &&
+              sameCalendarDay(row.dueDate, item.dueDate),
+          );
+          if (alreadyClosed) return false;
         }
         return true;
       })
@@ -844,12 +1174,30 @@ export function markPrimaryTodoDoneAcrossCycles(
     if (!cycleData || typeof cycleData !== 'object') continue;
     const cat = cycleData[categoryKey];
     if (!cat || !Array.isArray(cat.items)) continue;
-    const idx = cat.items.findIndex((item) => item?.id === itemId);
-    if (idx < 0) continue;
+    const matchIndexes = [];
+    cat.items.forEach((row, idx) => {
+      if (!row) return;
+      if (row.id === itemId) {
+        matchIndexes.push(idx);
+        return;
+      }
+      // Close every open copy of this occurrence, even when an older row
+      // still uses the series id instead of the deterministic occurrence id.
+      if (done && recurringSkipKey && row.recurring && !row.done) {
+        const key = recurringAnchorKey(
+          stableRecurringSeriesId(row),
+          row.dueDate,
+        );
+        if (key && key === recurringSkipKey) matchIndexes.push(idx);
+      }
+    });
+    if (!matchIndexes.length) continue;
 
     touched = true;
     const items = [...cat.items];
-    items[idx] = { ...items[idx], done: !!done, doneAt: done ? doneAt : null };
+    for (const idx of matchIndexes) {
+      items[idx] = { ...items[idx], done: !!done, doneAt: done ? doneAt : null };
+    }
 
     let skipped = Array.isArray(cat.skippedRecurringAnchors)
       ? [...cat.skippedRecurringAnchors]

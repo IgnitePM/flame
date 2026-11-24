@@ -5,7 +5,10 @@ import {
   collectCycleNotesForCycle,
   collectHourMovesForCycle,
 } from '../utils/cycleActivity.js';
-import { getEnabledRetainerCategoryNames } from '../utils/retainerCategories.js';
+import {
+  allotmentForCycle,
+  getEnabledRetainerCategoryNames,
+} from '../utils/retainerCategories.js';
 import { safeDisplayForReact } from '../utils/safeReactText.js';
 import RetainerCategoryStats from './RetainerCategoryStats.jsx';
 import TaskLogTimesheetRow from './TaskLogTimesheetRow.jsx';
@@ -80,7 +83,9 @@ export default function ClientCycleActivityPanel({
     .map((cat) => {
       const catStats = stats?.perCategory?.[cat];
       const used = Number(stats?.categoryBreakdown?.[cat] || 0);
-      const allotted = Number(catStats?.adjustedAllotted || client.retainers?.[cat] || 0);
+      const allotted = Number(
+        catStats?.adjustedAllotted || allotmentForCycle(client, cat, cycleStart) || 0,
+      );
       return { cat, used, allotted, catStats };
     })
     .filter((row) => row.allotted > 0 || row.used > 0);
@@ -138,7 +143,7 @@ export default function ClientCycleActivityPanel({
                   client={client}
                   categoryName={cat}
                   catStats={catStats}
-                  baseFallback={Number(client.retainers?.[cat] || 0)}
+                  baseFallback={allotmentForCycle(client, cat, cycleStart)}
                   cycleStart={cycleStart}
                   cycleEnd={cycleEnd}
                   variant="compact"

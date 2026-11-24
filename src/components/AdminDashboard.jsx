@@ -812,6 +812,8 @@ function ClientCustomProjectsPanelInner({
                                                   ...prev,
                                                   items: nextItems,
                                                 });
+                                              } catch (err) {
+                                                window.alert(err?.message || 'Could not update this task.');
                                               } finally {
                                                 setProjectTodoSaving(false);
                                               }

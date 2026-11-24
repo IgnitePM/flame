@@ -4,6 +4,7 @@ import {
   isRetainerCategoryDollar,
   carryoverCategoryKey,
   getRetainerCategoryConfiguredMs,
+  allotmentForCycle,
 } from './retainerCategories.js';
 
 /**
@@ -394,7 +395,7 @@ export const computeGlobalRetainerStats = (client, mStart, mEnd, deps) => {
   // Compute carryover per category (hours and dollars) so each category can show
   // base + carryover like the combined pool.
   retainerCategories.forEach((cat) => {
-    const base = Number(client.retainers?.[cat] || 0);
+    const base = allotmentForCycle(client, cat, mStart);
     const catResetMs = Number(perCategoryReset[carryoverCategoryKey(cat)] || 0);
     const catConfiguredMs = getRetainerCategoryConfiguredMs(client, cat);
     const effectiveResetMs = Math.max(globalResetMs, catResetMs, catConfiguredMs);
@@ -490,10 +491,11 @@ export const computeGlobalRetainerStats = (client, mStart, mEnd, deps) => {
       }
 
       const periodLen = pEnd - pStart;
+      const periodBase = allotmentForCycle(client, cat, pStart);
       const allotted =
         effectiveStartMs <= pStart
-          ? base
-          : base * ((pEnd - Math.max(effectiveStartMs, pStart)) / periodLen);
+          ? periodBase
+          : periodBase * ((pEnd - Math.max(effectiveStartMs, pStart)) / periodLen);
 
       const periodTasks = !catIsDollar
         ? pastTasksCat.filter(

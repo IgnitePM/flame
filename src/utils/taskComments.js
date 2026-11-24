@@ -78,6 +78,8 @@ export function buildMentionDirectory({
   adminUsers = [],
   clientEmails = [],
   clientName = '',
+  /** Optional CRM contacts `{ email, name }` to label portal emails (e.g. Brian Janes). */
+  clientContacts = [],
 } = {}) {
   const usedHandles = new Set();
   const byEmail = new Map();
@@ -106,15 +108,24 @@ export function buildMentionDirectory({
     handle: claimUniqueHandle(staffHandle(row.email), usedHandles),
   }));
 
+  const contactNameByEmail = new Map();
+  for (const row of clientContacts || []) {
+    const email = normalizeStaffEmail(row?.email);
+    const name = String(row?.name || '').trim();
+    if (!email || !name) continue;
+    if (!contactNameByEmail.has(email)) contactNameByEmail.set(email, name);
+  }
+
   const clientLabel = String(clientName || 'Client').trim() || 'Client';
   const clientRows = [];
   for (const email of clientEmails || []) {
     const key = normalizeStaffEmail(email);
     if (!key || byEmail.has(key)) continue;
     const handle = claimUniqueHandle(staffHandle(key), usedHandles);
+    const contactName = contactNameByEmail.get(key);
     clientRows.push({
       email: key,
-      name: `${clientLabel} · ${staffHandle(key) || key}`,
+      name: contactName || `${clientLabel} · ${staffHandle(key) || key}`,
       handle,
       kind: 'client',
     });

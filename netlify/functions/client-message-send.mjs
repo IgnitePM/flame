@@ -13,7 +13,39 @@ import {
   writeClientActivity,
 } from './lib/clientMessaging.mjs';
 import { fetchCollection, getDigestDb, mergeDoc } from './lib/firebaseDigestClient.mjs';
-import { parseMentionEmails } from '../../src/utils/taskComments.js';
+import {
+  buildMentionDirectory,
+  parseMentionsFromDirectory,
+} from '../../src/utils/taskComments.js';
+
+function portalEmailsFromClient(client) {
+  return [
+    ...new Set(
+      (Array.isArray(client?.clientEmails) ? client.clientEmails : [])
+        .map((e) => String(e || '').trim().toLowerCase())
+        .filter((e) => e.includes('@')),
+    ),
+  ];
+}
+
+function clientContactsFromClient(client) {
+  const rows = [];
+  const pc = client?.primaryContact;
+  if (pc?.email) {
+    rows.push({
+      email: String(pc.email || '').trim(),
+      name: String(pc.name || '').trim(),
+    });
+  }
+  for (const c of Array.isArray(client?.contacts) ? client.contacts : []) {
+    if (!c?.email) continue;
+    rows.push({
+      email: String(c.email || '').trim(),
+      name: String(c.name || '').trim(),
+    });
+  }
+  return rows;
+}
 
 /**
  * Staff or portal: post a message to the client inbox + email the other party.
@@ -64,8 +96,10 @@ export default async (req) => {
 
     const db = await getDigestDb();
     let staffEmails = [];
+    let adminUsers = [];
     try {
       const admins = await fetchCollection(db, 'admins');
+      adminUsers = admins || [];
       staffEmails = admins
         .filter((a) => a && a.disabled !== true && a.active !== false)
         .map((a) => String(a.email || a.id || '').trim().toLowerCase())
@@ -74,7 +108,18 @@ export default async (req) => {
       console.warn('[client-message-send] staff directory:', err?.message || err);
     }
 
-    const mentionedEmails = parseMentionEmails(text, staffEmails).filter(
+    const directory = buildMentionDirectory({
+      staffEmails,
+      adminUsers,
+      clientEmails: portalEmailsFromClient(client),
+      clientName: client.name || '',
+      clientContacts: clientContactsFromClient(client),
+    });
+    const parsedMentions = parseMentionsFromDirectory(text, directory);
+    const mentionedEmails = (parsedMentions.staffEmails || []).filter(
+      (email) => email !== caller.email,
+    );
+    const mentionedClientEmails = (parsedMentions.clientEmails || []).filter(
       (email) => email !== caller.email,
     );
 
@@ -86,22 +131,36 @@ export default async (req) => {
       authorName,
       attachments,
       mentionedEmails,
+      mentionedClientEmails,
       createdAt: now,
     });
 
     let emailResult = { sent: 0 };
     try {
       if (caller.authorType === 'staff') {
+        // Portal email recipients:
+        // - @tagged client contacts → only those
+        // - only @staff tags → skip portal email blast
+        // - no tags → email all authorized portal contacts
+        let portalRecipients = null;
+        if (mentionedClientEmails.length) {
+          portalRecipients = mentionedClientEmails;
+        } else if (mentionedEmails.length) {
+          portalRecipients = [];
+        }
         emailResult = await notifyPortalNewMessage({
           client,
           messageBody: text,
           authorName,
+          recipientEmails: portalRecipients,
         });
       } else {
+        // Client → staff: only notify @tagged staff (no team-wide blast).
         emailResult = await notifyStaffClientMessage({
           client,
           messageBody: text,
           authorEmail: caller.email,
+          recipientEmails: mentionedEmails,
         });
       }
       if (emailResult.sent > 0) {
@@ -115,7 +174,9 @@ export default async (req) => {
     }
 
     let mentionEmail = { sent: 0 };
-    if (mentionedEmails.length) {
+    // Staff→staff @mentions still get inbox + email even when author is staff
+    // (client→staff mentions are covered by notifyStaffClientMessage above).
+    if (mentionedEmails.length && caller.authorType === 'staff') {
       try {
         for (const email of mentionedEmails) {
           const notifId = `msg_mention_${message.id}_${email.replace(/[^a-z0-9]/gi, '_')}`;
@@ -145,6 +206,31 @@ export default async (req) => {
       } catch (err) {
         console.warn('[client-message-send] mentions failed:', err?.message || err);
       }
+    } else if (mentionedEmails.length && caller.authorType === 'client') {
+      // Inbox rows for tagged staff (email already sent via notifyStaffClientMessage).
+      try {
+        for (const email of mentionedEmails) {
+          const notifId = `msg_mention_${message.id}_${email.replace(/[^a-z0-9]/gi, '_')}`;
+          await mergeDoc(db, `notifications/${notifId}`, {
+            recipientEmail: email,
+            type: 'mention',
+            title: `Mentioned in Messages — ${client.name || 'Client'}`,
+            body: `${authorName}: ${text.slice(0, 280)}`,
+            createdAt: Date.now(),
+            dismissed: false,
+            dismissedAt: null,
+            actorEmail: caller.email,
+            actorName: authorName,
+            clientId,
+            clientName: client.name || '',
+            categoryKey: null,
+            itemId: message.id,
+            commentId: null,
+          });
+        }
+      } catch (err) {
+        console.warn('[client-message-send] client mention inbox failed:', err?.message || err);
+      }
     }
 
     try {
@@ -171,6 +257,7 @@ export default async (req) => {
         message,
         email: emailResult,
         mentions: mentionedEmails,
+        clientMentions: mentionedClientEmails,
         mentionEmail,
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
